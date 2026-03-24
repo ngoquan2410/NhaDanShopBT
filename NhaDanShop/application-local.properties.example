@@ -1,0 +1,11 @@
+# Google Drive Configuration Example
+# Copy file này thành: application-local.properties (KHÔNG commit)
+# Hoặc set environment variables
+
+# Đường dẫn tới file JSON credentials của Service Account
+# Download từ Google Cloud Console → IAM → Service Accounts → Keys
+google.drive.credentials-path=./google-drive-credentials.json
+
+# ID của Google Drive folder để lưu ảnh sản phẩm
+# Lấy từ URL: https://drive.google.com/drive/folders/[FOLDER_ID_HERE]
+google.drive.folder-id=PASTE_YOUR_FOLDER_ID_HERE

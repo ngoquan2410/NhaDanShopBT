@@ -1,0 +1,3451 @@
+{
+  "info": {
+    "_postman_id": "nhadanshop-v10",
+    "name": "NhaDanShop API v10 - Auto-Generate Product Code",
+    "description": "v10: Tu dong generate product code theo category\nBASE: http://localhost:8080 | ADMIN:admin/admin123 | USER:user/user123\n\n=== AUTO-GENERATE PRODUCT CODE (v10 MOI) ===\nKhi tao SP (single/batch/import-excel), neu de code=null hoac bo trong:\n  -> He thong TU DONG generate: PREFIX + 3 so\n  -> PREFIX = chu cai dau moi tu trong ten category (bo dau)\n  -> VD: 'Banh Trang' -> BT, so lon nhat BT038 -> generate BT039\n  -> VD: 'Muoi Ot' -> MO, chua co SP -> generate MO001\n  -> Neu code duoc cung cap -> dung luon (upcase)\n\n=== QUY TAC GIA ===\nATOMIC (bich/hop/chai): costPrice/sellPrice = gia 1 don vi\nGOP (kg/xau): costPrice/sellPrice = gia 1 BICH (da chia)\n\n=== THU TU ===\n0.Health -> 1.Categories -> 2.Products/batch -> 3.Receipts -> 4.Invoices -> 5.Reports",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "adminUser",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "adminPass",
+      "value": "admin123",
+      "type": "string"
+    },
+    {
+      "key": "userUser",
+      "value": "user",
+      "type": "string"
+    },
+    {
+      "key": "userPass",
+      "value": "user123",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Health & Debug",
+      "item": [
+        {
+          "name": "GET /debug/users",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/debug/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "debug",
+                "users"
+              ]
+            },
+            "header": [],
+            "description": "Kiem tra DB users. Khong can auth."
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Categories",
+      "item": [
+        {
+          "name": "GET /api/categories",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/categories/1 - Banh Trang",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/categories/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories",
+                "1"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/categories/2 - Muoi",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/categories/2",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories",
+                "2"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/categories/3 - Com Chay",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/categories/3",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories",
+                "3"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "POST /api/categories (ADMIN)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Com Kho\",\n  \"description\": \"Cac loai com kho\",\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "PUT /api/categories/1 (ADMIN)",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/categories/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories",
+                "1"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Banh Trang\",\n  \"description\": \"Tong hop cac loai Banh Trang Tay Ninh\",\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /api/categories/99 (ADMIN)",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/categories/99",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories",
+                "99"
+              ]
+            },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Products - CRUD + Import Excel",
+      "item": [
+        {
+          "name": "POST /api/products/batch [CHAY TRUOC]",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/batch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "batch"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "=== TAO 57 SP (CHAY DAUTIEN) ===\n\nQUY TAC GIA (v9 - DA SUA):\nATOMIC (bich/hop/chai):\n  costPrice = gia nhap / 1 don vi do\n  sellPrice = gia ban / 1 don vi do\n\nGOP (kg/xau):\n  costPrice trong request = gia von / 1 bich (da chia)\n  sellPrice = gia ban / 1 bich le\n  VD: BT006 kg=65000, pieces=10 -> cost/bich=6500, sell/bich=8500\n\nExcel Import Service cung tu dong chia: cost/bich = cost_excel/pieces",
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"code\": \"BT001\",\n    \"name\": \"BT Rong bien cha bong\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 9000,\n    \"sellPrice\": 12000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"BT002\",\n    \"name\": \"BT Sieu cay toi phi\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 8000,\n    \"sellPrice\": 10000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"BT003\",\n    \"name\": \"BT Sieu cay cha bong\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 9000,\n    \"sellPrice\": 12000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"BT004\",\n    \"name\": \"BT Bo soi sieu cay\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 9000,\n    \"sellPrice\": 12000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"BT005\",\n    \"name\": \"BT Deo cuon tom chay toi\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 10000,\n    \"sellPrice\": 13000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"xau\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 7,\n    \"conversionNote\": \"1 xau=7 bich; cost/bich=10000\"\n  },\n  {\n    \"code\": \"BT006\",\n    \"name\": \"BT Rong bien\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 6500,\n    \"sellPrice\": 8500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=6500\"\n  },\n  {\n    \"code\": \"BT007\",\n    \"name\": \"BT Sa te toi bo\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 6500,\n    \"sellPrice\": 8500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=6500\"\n  },\n  {\n    \"code\": \"BT008\",\n    \"name\": \"BT Toi cay\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 6000,\n    \"sellPrice\": 8000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=6000\"\n  },\n  {\n    \"code\": \"BT009\",\n    \"name\": \"BT Pho mai tom hanh\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 6500,\n    \"sellPrice\": 8500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=6500\"\n  },\n  {\n    \"code\": \"BT010\",\n    \"name\": \"BT Sieu hanh phi\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 6800,\n    \"sellPrice\": 9000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=6800\"\n  },\n  {\n    \"code\": \"BT011\",\n    \"name\": \"BT Cuon Sa te tom bo\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 6500,\n    \"sellPrice\": 8500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=6500\"\n  },\n  {\n    \"code\": \"BT012\",\n    \"name\": \"BT Sa te mo hanh\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 6500,\n    \"sellPrice\": 8500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=6500\"\n  },\n  {\n    \"code\": \"BT013\",\n    \"name\": \"BT Cuon Sa te bo\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 9500,\n    \"sellPrice\": 12500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=9500\"\n  },\n  {\n    \"code\": \"BT014\",\n    \"name\": \"BT Cuon tom pho mai\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 11000,\n    \"sellPrice\": 14000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=11000\"\n  },\n  {\n    \"code\": \"BT015\",\n    \"name\": \"BT Cuon ngu sac\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 11000,\n    \"sellPrice\": 14000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=11000\"\n  },\n  {\n    \"code\": \"BT016\",\n    \"name\": \"BT Xi ke toi\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 6000,\n    \"sellPrice\": 8000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=6000\"\n  },\n  {\n    \"code\": \"BT017\",\n    \"name\": \"BT Soi mo hanh\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 5500,\n    \"sellPrice\": 7500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=5500\"\n  },\n  {\n    \"code\": \"BT018\",\n    \"name\": \"BT Cuon TC Cham bo beo\",\n    \"categoryId\": 1,\n    \"unit\": \"hop\",\n    \"costPrice\": 38000,\n    \"sellPrice\": 50000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"hop\",\n    \"sellUnit\": \"hop\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"hop=ATOMIC; sell=50000/hop\"\n  },\n  {\n    \"code\": \"BT019\",\n    \"name\": \"BT Cuon tep rong bien\",\n    \"categoryId\": 1,\n    \"unit\": \"hop\",\n    \"costPrice\": 38000,\n    \"sellPrice\": 50000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"hop\",\n    \"sellUnit\": \"hop\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"hop=ATOMIC\"\n  },\n  {\n    \"code\": \"BT020\",\n    \"name\": \"BT Cuon tom kho chay toi\",\n    \"categoryId\": 1,\n    \"unit\": \"hop\",\n    \"costPrice\": 46000,\n    \"sellPrice\": 60000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"hop\",\n    \"sellUnit\": \"hop\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"hop=ATOMIC\"\n  },\n  {\n    \"code\": \"BT021\",\n    \"name\": \"BT Sieu cay tep mo\",\n    \"categoryId\": 1,\n    \"unit\": \"hop\",\n    \"costPrice\": 28000,\n    \"sellPrice\": 37000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"hop\",\n    \"sellUnit\": \"hop\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"hop=ATOMIC\"\n  },\n  {\n    \"code\": \"BT022\",\n    \"name\": \"BT Tep gion hanh phi\",\n    \"categoryId\": 1,\n    \"unit\": \"hop\",\n    \"costPrice\": 24000,\n    \"sellPrice\": 32000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"hop\",\n    \"sellUnit\": \"hop\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"hop=ATOMIC\"\n  },\n  {\n    \"code\": \"BT023\",\n    \"name\": \"BT Sieu hanh phi hop\",\n    \"categoryId\": 1,\n    \"unit\": \"hop\",\n    \"costPrice\": 22000,\n    \"sellPrice\": 29000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"hop\",\n    \"sellUnit\": \"hop\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"hop=ATOMIC\"\n  },\n  {\n    \"code\": \"BT024\",\n    \"name\": \"BT Muc xe xanh rim\",\n    \"categoryId\": 1,\n    \"unit\": \"hop\",\n    \"costPrice\": 30000,\n    \"sellPrice\": 40000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"hop\",\n    \"sellUnit\": \"hop\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"hop=ATOMIC\"\n  },\n  {\n    \"code\": \"BT025\",\n    \"name\": \"BT Rong bien cha bong hop\",\n    \"categoryId\": 1,\n    \"unit\": \"hop\",\n    \"costPrice\": 28000,\n    \"sellPrice\": 37000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"hop\",\n    \"sellUnit\": \"hop\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"hop=ATOMIC\"\n  },\n  {\n    \"code\": \"BT026\",\n    \"name\": \"BT Cham toi tac\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 4286,\n    \"sellPrice\": 6000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"xau\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 7,\n    \"conversionNote\": \"1 xau=7 bich; cost/bich=4286\"\n  },\n  {\n    \"code\": \"BT027\",\n    \"name\": \"BT Cham ot rim\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 4286,\n    \"sellPrice\": 6000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"xau\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 7,\n    \"conversionNote\": \"1 xau=7 bich\"\n  },\n  {\n    \"code\": \"BT028\",\n    \"name\": \"BT Cham sot me\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 4286,\n    \"sellPrice\": 6000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"xau\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 7,\n    \"conversionNote\": \"1 xau=7 bich\"\n  },\n  {\n    \"code\": \"BT029\",\n    \"name\": \"BT Cham muoi beo\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 4286,\n    \"sellPrice\": 6000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"xau\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 7,\n    \"conversionNote\": \"1 xau=7 bich\"\n  },\n  {\n    \"code\": \"BT030\",\n    \"name\": \"PS Sa te mu sac\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 5571,\n    \"sellPrice\": 7000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"xau\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 7,\n    \"conversionNote\": \"1 xau=7 bich\"\n  },\n  {\n    \"code\": \"BT031\",\n    \"name\": \"BT Sa te dau toi\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 7143,\n    \"sellPrice\": 9000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"xau\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 7,\n    \"conversionNote\": \"1 xau=7 bich\"\n  },\n  {\n    \"code\": \"BT032\",\n    \"name\": \"BT Xi ke la lon\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 4286,\n    \"sellPrice\": 6000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"xau\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 7,\n    \"conversionNote\": \"1 xau=7 bich\"\n  },\n  {\n    \"code\": \"BT033\",\n    \"name\": \"BT Deo tac muoi sac\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 4286,\n    \"sellPrice\": 6000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"xau\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 7,\n    \"conversionNote\": \"1 xau=7 bich\"\n  },\n  {\n    \"code\": \"BT034\",\n    \"name\": \"BT PS bo beo\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 8300,\n    \"sellPrice\": 11000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"BT035\",\n    \"name\": \"BT PS thap cam me bo\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 11000,\n    \"sellPrice\": 14500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"BT036\",\n    \"name\": \"BT PS Sa te tac muoi tom\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 6500,\n    \"sellPrice\": 8500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"BT037\",\n    \"name\": \"BT Vo min sac\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 4000,\n    \"sellPrice\": 5500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"BT038\",\n    \"name\": \"BT Mo hanh cha bong\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 9000,\n    \"sellPrice\": 12000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"M001\",\n    \"name\": \"Muoi Ot nhuyen dong goi\",\n    \"categoryId\": 2,\n    \"unit\": \"bich\",\n    \"costPrice\": 8500,\n    \"sellPrice\": 11000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 365,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=8500\"\n  },\n  {\n    \"code\": \"M002\",\n    \"name\": \"Muoi Ot nhuyen chua goi\",\n    \"categoryId\": 2,\n    \"unit\": \"bich\",\n    \"costPrice\": 7500,\n    \"sellPrice\": 10000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 365,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=7500\"\n  },\n  {\n    \"code\": \"M003\",\n    \"name\": \"Muoi tom hat dong goi\",\n    \"categoryId\": 2,\n    \"unit\": \"bich\",\n    \"costPrice\": 10500,\n    \"sellPrice\": 13500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 365,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=10500\"\n  },\n  {\n    \"code\": \"M004\",\n    \"name\": \"Muoi tom hat chua goi\",\n    \"categoryId\": 2,\n    \"unit\": \"bich\",\n    \"costPrice\": 9500,\n    \"sellPrice\": 12500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 365,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=9500\"\n  },\n  {\n    \"code\": \"M005\",\n    \"name\": \"Muoi tom dac dong goi\",\n    \"categoryId\": 2,\n    \"unit\": \"bich\",\n    \"costPrice\": 13500,\n    \"sellPrice\": 17500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 365,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=13500\"\n  },\n  {\n    \"code\": \"M006\",\n    \"name\": \"Muoi tom dac chua goi\",\n    \"categoryId\": 2,\n    \"unit\": \"bich\",\n    \"costPrice\": 12500,\n    \"sellPrice\": 16000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 365,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=12500\"\n  },\n  {\n    \"code\": \"M007\",\n    \"name\": \"Muoi vo tri\",\n    \"categoryId\": 2,\n    \"unit\": \"bich\",\n    \"costPrice\": 17000,\n    \"sellPrice\": 22000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 365,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=17000\"\n  },\n  {\n    \"code\": \"M008\",\n    \"name\": \"Muoi ot tieu ngon\",\n    \"categoryId\": 2,\n    \"unit\": \"bich\",\n    \"costPrice\": 13000,\n    \"sellPrice\": 17000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 365,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=13000\"\n  },\n  {\n    \"code\": \"M009\",\n    \"name\": \"Muoi toi kho ga\",\n    \"categoryId\": 2,\n    \"unit\": \"chai\",\n    \"costPrice\": 13000,\n    \"sellPrice\": 17000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 365,\n    \"importUnit\": \"chai\",\n    \"sellUnit\": \"chai\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"chai=ATOMIC; 1 chai=1 DV ban\"\n  },\n  {\n    \"code\": \"CC001\",\n    \"name\": \"Com Chay vien kho ga\",\n    \"categoryId\": 3,\n    \"unit\": \"hop\",\n    \"costPrice\": 21000,\n    \"sellPrice\": 28000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"hop\",\n    \"sellUnit\": \"hop\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"hop=ATOMIC\"\n  },\n  {\n    \"code\": \"CC002\",\n    \"name\": \"Com Chay vien ga quay\",\n    \"categoryId\": 3,\n    \"unit\": \"hop\",\n    \"costPrice\": 31000,\n    \"sellPrice\": 41000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"hop\",\n    \"sellUnit\": \"hop\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"hop=ATOMIC\"\n  },\n  {\n    \"code\": \"CC003\",\n    \"name\": \"Com Chay mac vi\",\n    \"categoryId\": 3,\n    \"unit\": \"bich\",\n    \"costPrice\": 16000,\n    \"sellPrice\": 21000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"CC004\",\n    \"name\": \"Com Chay vien song vi\",\n    \"categoryId\": 3,\n    \"unit\": \"bich\",\n    \"costPrice\": 17000,\n    \"sellPrice\": 22000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"CC005\",\n    \"name\": \"Com Chay mix ngu vi\",\n    \"categoryId\": 3,\n    \"unit\": \"bich\",\n    \"costPrice\": 9200,\n    \"sellPrice\": 12000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"xau\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 5,\n    \"conversionNote\": \"1 xau=5 bich; cost/bich=9200\"\n  },\n  {\n    \"code\": \"CC006\",\n    \"name\": \"Com Chay sam manh hanh\",\n    \"categoryId\": 3,\n    \"unit\": \"bich\",\n    \"costPrice\": 5500,\n    \"sellPrice\": 7500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"CC007\",\n    \"name\": \"Com Chay mini cha bong\",\n    \"categoryId\": 3,\n    \"unit\": \"bich\",\n    \"costPrice\": 14500,\n    \"sellPrice\": 19000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"1 kg=10 bich; cost/bich=14500\"\n  },\n  {\n    \"code\": \"CC008\",\n    \"name\": \"Com Chay sam mo ot\",\n    \"categoryId\": 3,\n    \"unit\": \"bich\",\n    \"costPrice\": 18400,\n    \"sellPrice\": 24000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"xau\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 5,\n    \"conversionNote\": \"1 xau=5 bich; cost/bich=18400\"\n  },\n  {\n    \"code\": \"CC009\",\n    \"name\": \"Com Chay tron lon\",\n    \"categoryId\": 3,\n    \"unit\": \"bich\",\n    \"costPrice\": 7700,\n    \"sellPrice\": 10000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Ban le tung bich\"\n  },\n  {\n    \"code\": \"CC010\",\n    \"name\": \"Com Chay cha bong\",\n    \"categoryId\": 3,\n    \"unit\": \"bich\",\n    \"costPrice\": 25000,\n    \"sellPrice\": 33000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"xau\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 5,\n    \"conversionNote\": \"1 xau=5 bich; cost/bich=25000\"\n  }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /api/products",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/products/category/1",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/category/1?page=0&size=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "category",
+                "1"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "50"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/products/category/2",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/category/2?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "category",
+                "2"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/products/category/3",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/category/3?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "category",
+                "3"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/products/1 - BT001 bich(cost=9000,sell=12000)",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "1"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/products/6 - BT006 kg(cost/bich=6500,sell/bich=8500)",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/6",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "6"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/products/18 - BT018 hop(cost=38000,sell=50000)",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/18",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "18"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/products/47 - M009 chai(cost=13000,sell=17000)",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/47",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "47"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/products/55 - CC008 xau(cost/bich=18400,sell/bich=24000)",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/55",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "55"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "POST /api/products - single (manual code)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Tao SP voi code thu cong (code = TEST001). Neu trung thi bao loi.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"TEST001\",\n  \"name\": \"Test SP (code thu cong)\",\n  \"categoryId\": 1,\n  \"unit\": \"bich\",\n  \"costPrice\": 10000,\n  \"sellPrice\": 13000,\n  \"stockQty\": 0,\n  \"active\": true,\n  \"expiryDays\": 90,\n  \"importUnit\": \"bich\",\n  \"sellUnit\": \"bich\",\n  \"piecesPerImportUnit\": 1,\n  \"conversionNote\": \"Test thu cong code\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /api/products - AUTO-GENERATE code (code=null)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Tao SP KHONG co code -> he thong TU DONG generate.\nCategory 'Banh Trang' (id=1) -> prefix 'BT', SP lon nhat BT038 -> generate BT039.\nCategory 'Muoi Ot' (id=2) -> prefix 'MO' -> generate MO001 (neu prefix khac M).\n\nBoolean tinh nang:\n- code=null hoac bo trong (khong co truong code) -> TU DONG\n- code='BT099' -> DUNG LUON code do (sau khi uppercase)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"BT Moi Auto Code - Banh Trang\",\n  \"categoryId\": 1,\n  \"unit\": \"bich\",\n  \"costPrice\": 8000,\n  \"sellPrice\": 11000,\n  \"stockQty\": 0,\n  \"active\": true,\n  \"expiryDays\": 180,\n  \"importUnit\": \"bich\",\n  \"sellUnit\": \"bich\",\n  \"piecesPerImportUnit\": 1,\n  \"conversionNote\": \"Auto-generate code BT039+\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /api/products/batch - AUTO-GENERATE codes",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/batch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "batch"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Batch create KHONG co code -> he thong TU DONG generate cho tung SP.\nSP 1: categoryId=1 (Banh Trang) -> BT039 (hoac so tiep theo)\nSP 2: categoryId=2 (Muoi Ot) -> M010 (hoac so tiep theo)\nSP 3: co code 'BT-CUSTOM' -> dung luon (upcase: BT-CUSTOM)\n\nCo the mix: mot so co code, mot so de trong.",
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"name\": \"BT Moi Auto 1\",\n    \"categoryId\": 1,\n    \"unit\": \"bich\",\n    \"costPrice\": 7000,\n    \"sellPrice\": 9500,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"bich\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Auto code BT\"\n  },\n  {\n    \"name\": \"Muoi Moi Auto 1\",\n    \"categoryId\": 2,\n    \"unit\": \"bich\",\n    \"costPrice\": 9000,\n    \"sellPrice\": 12000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 365,\n    \"importUnit\": \"kg\",\n    \"sellUnit\": \"bich\",\n    \"piecesPerImportUnit\": 10,\n    \"conversionNote\": \"Auto code M, 1kg=10bich\"\n  },\n  {\n    \"code\": \"CUSTOM001\",\n    \"name\": \"SP Code Thu Cong\",\n    \"categoryId\": 3,\n    \"unit\": \"hop\",\n    \"costPrice\": 25000,\n    \"sellPrice\": 33000,\n    \"stockQty\": 0,\n    \"active\": true,\n    \"expiryDays\": 180,\n    \"importUnit\": \"hop\",\n    \"sellUnit\": \"hop\",\n    \"piecesPerImportUnit\": 1,\n    \"conversionNote\": \"Code thu cong CUSTOM001\"\n  }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "PUT /api/products/1",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "1"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"BT001\",\n  \"name\": \"BT Rong bien cha bong\",\n  \"categoryId\": 1,\n  \"unit\": \"bich\",\n  \"costPrice\": 9000,\n  \"sellPrice\": 12000,\n  \"stockQty\": 0,\n  \"active\": true,\n  \"expiryDays\": 180,\n  \"importUnit\": \"bich\",\n  \"sellUnit\": \"bich\",\n  \"piecesPerImportUnit\": 1,\n  \"conversionNote\": \"Ban le tung bich\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /api/products/1",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "1"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/products/expiry-warnings?threshold=30",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/expiry-warnings?threshold=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "expiry-warnings"
+              ],
+              "query": [
+                {
+                  "key": "threshold",
+                  "value": "30"
+                }
+              ]
+            },
+            "header": [],
+            "description": "Canh bao HH theo LO HANG (batch.expiryDate-today)\nResponse: ExpiryWarningResponse[]{batchId,batchCode,productId,productCode,productName,categoryName,sellUnit,remainingQty,expiryDate,daysRemaining,warningMessage}"
+          }
+        },
+        {
+          "name": "GET /api/products/expired",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/expired",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "expired"
+              ]
+            },
+            "header": [],
+            "description": "Lo hang da HET HAN con ton kho (daysRemaining<=0, remainingQty>0)"
+          }
+        },
+        {
+          "name": "POST /api/products/import-excel (multipart, ADMIN)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/import-excel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "import-excel"
+              ]
+            },
+            "header": [],
+            "description": "Upload file Excel de tao san pham hang loat.\n\nCols (header row 1, data row 2+):\n  A:code | B:name | C:categoryName | D:unit | E:costPrice | F:sellPrice\n  G:stockQty | H:expiryDays | I:active | J:importUnit | K:sellUnit\n  L:piecesPerImportUnit | M:conversionNote\n\nTU DONG GENERATE CODE (v10):\n  - Cot A (code) DE TRONG -> he thong tu dong generate code theo category\n    VD: category='Banh Trang' -> BT039, BT040...\n  - Cot A co gia tri -> dung luon (upcase)\n\nQUY TAC GIA TRONG EXCEL:\n  - ATOMIC (bich/hop/chai): nhap costPrice & sellPrice theo gia 1 don vi do\n  - GOP (kg/xau): nhap costPrice & sellPrice theo gia 1 don vi NHAP (kg/xau)\n    -> He thong TU DONG CHIA: costPerBich = costPrice/pieces\n\nResponse: {totalRows, successCount, skipCount, errorCount, errors[]}",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "/path/to/products.xlsx",
+                  "description": "File .xlsx chua danh sach san pham"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Receipts - Nhap Kho (ADMIN)",
+      "item": [
+        {
+          "name": "GET /api/receipts",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "receipts"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/receipts?from=2026-03-01&to=2026-03-31",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts?from=2026-03-01&to=2026-03-31&page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "receipts"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-03-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-03-31"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/receipts/1",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "receipts",
+                "1"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "POST R1 - BT001-004 bich ATOMIC",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "receipts"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "unitCost=gia/bich (ATOMIC: gia nhap=gia/don vi ban)\nBatch: expiryDate=20/03/2026+180d=16/09/2026",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierName\": \"Cong ty TNHH Banh Trang Tay Ninh\",\n  \"note\": \"[R1] BT001-004 bich=ATOMIC\",\n  \"items\": [\n    {\n      \"productId\": 1,\n      \"quantity\": 10,\n      \"unitCost\": 9000\n    },\n    {\n      \"productId\": 2,\n      \"quantity\": 5,\n      \"unitCost\": 8000\n    },\n    {\n      \"productId\": 3,\n      \"quantity\": 10,\n      \"unitCost\": 9000\n    },\n    {\n      \"productId\": 4,\n      \"quantity\": 10,\n      \"unitCost\": 9000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST R2 - BT005 xau + BT006-017 kg",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "receipts"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "unitCost=gia/don vi NHAP (kg=65000/kg, xau=70000/xau)\nHe thong: cost/bich=unitCost/pieces\nton: kg*10, xau*7",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierName\": \"Cong ty TNHH Banh Trang Tay Ninh\",\n  \"note\": \"[R2] BT005(1xau=70000)+BT006-017(1kg each)\",\n  \"items\": [\n    {\n      \"productId\": 5,\n      \"quantity\": 1,\n      \"unitCost\": 70000\n    },\n    {\n      \"productId\": 6,\n      \"quantity\": 1,\n      \"unitCost\": 65000\n    },\n    {\n      \"productId\": 7,\n      \"quantity\": 1,\n      \"unitCost\": 65000\n    },\n    {\n      \"productId\": 8,\n      \"quantity\": 1,\n      \"unitCost\": 60000\n    },\n    {\n      \"productId\": 9,\n      \"quantity\": 1,\n      \"unitCost\": 65000\n    },\n    {\n      \"productId\": 10,\n      \"quantity\": 1,\n      \"unitCost\": 68000\n    },\n    {\n      \"productId\": 11,\n      \"quantity\": 1,\n      \"unitCost\": 65000\n    },\n    {\n      \"productId\": 12,\n      \"quantity\": 1,\n      \"unitCost\": 65000\n    },\n    {\n      \"productId\": 13,\n      \"quantity\": 1,\n      \"unitCost\": 95000\n    },\n    {\n      \"productId\": 14,\n      \"quantity\": 1,\n      \"unitCost\": 110000\n    },\n    {\n      \"productId\": 15,\n      \"quantity\": 1,\n      \"unitCost\": 110000\n    },\n    {\n      \"productId\": 16,\n      \"quantity\": 1,\n      \"unitCost\": 60000\n    },\n    {\n      \"productId\": 17,\n      \"quantity\": 1,\n      \"unitCost\": 55000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST R3 - BT018-025 hop ATOMIC",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "receipts"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "unitCost=38000/hop (ATOMIC)\nton+=2 hop moi SP (khong chia)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierName\": \"Cong ty TNHH Banh Trang Tay Ninh\",\n  \"note\": \"[R3] BT018-025 hop=ATOMIC (2 hop each)\",\n  \"items\": [\n    {\n      \"productId\": 18,\n      \"quantity\": 2,\n      \"unitCost\": 38000\n    },\n    {\n      \"productId\": 19,\n      \"quantity\": 2,\n      \"unitCost\": 38000\n    },\n    {\n      \"productId\": 20,\n      \"quantity\": 2,\n      \"unitCost\": 46000\n    },\n    {\n      \"productId\": 21,\n      \"quantity\": 2,\n      \"unitCost\": 28000\n    },\n    {\n      \"productId\": 22,\n      \"quantity\": 2,\n      \"unitCost\": 24000\n    },\n    {\n      \"productId\": 23,\n      \"quantity\": 2,\n      \"unitCost\": 22000\n    },\n    {\n      \"productId\": 24,\n      \"quantity\": 2,\n      \"unitCost\": 30000\n    },\n    {\n      \"productId\": 25,\n      \"quantity\": 2,\n      \"unitCost\": 28000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST R4 - BT026-033 xau->ban bich",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "receipts"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "unitCost=30000/xau; ton+=1*7=7 bich moi SP",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierName\": \"Cong ty TNHH Banh Trang Tay Ninh\",\n  \"note\": \"[R4] BT026-033 xau (1xau each, ban bich le)\",\n  \"items\": [\n    {\n      \"productId\": 26,\n      \"quantity\": 1,\n      \"unitCost\": 30000\n    },\n    {\n      \"productId\": 27,\n      \"quantity\": 1,\n      \"unitCost\": 30000\n    },\n    {\n      \"productId\": 28,\n      \"quantity\": 1,\n      \"unitCost\": 30000\n    },\n    {\n      \"productId\": 29,\n      \"quantity\": 1,\n      \"unitCost\": 30000\n    },\n    {\n      \"productId\": 30,\n      \"quantity\": 1,\n      \"unitCost\": 39000\n    },\n    {\n      \"productId\": 31,\n      \"quantity\": 1,\n      \"unitCost\": 50000\n    },\n    {\n      \"productId\": 32,\n      \"quantity\": 1,\n      \"unitCost\": 30000\n    },\n    {\n      \"productId\": 33,\n      \"quantity\": 1,\n      \"unitCost\": 30000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST R5 - BT034-038 bich ATOMIC",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "receipts"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierName\": \"Cong ty TNHH Banh Trang Tay Ninh\",\n  \"note\": \"[R5] BT034-038 bich PS\",\n  \"items\": [\n    {\n      \"productId\": 34,\n      \"quantity\": 10,\n      \"unitCost\": 8300\n    },\n    {\n      \"productId\": 35,\n      \"quantity\": 10,\n      \"unitCost\": 11000\n    },\n    {\n      \"productId\": 36,\n      \"quantity\": 10,\n      \"unitCost\": 6500\n    },\n    {\n      \"productId\": 37,\n      \"quantity\": 10,\n      \"unitCost\": 4000\n    },\n    {\n      \"productId\": 38,\n      \"quantity\": 5,\n      \"unitCost\": 9000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST R6 - Muoi kg+chai",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "receipts"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "M001-008: unitCost=gia/kg, ton+=10 bich\nM009: unitCost=13000/chai, ton+=10 chai",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierName\": \"Cong ty Muoi Tay Ninh\",\n  \"note\": \"[R6] M001-M008(1kg each)+M009(10chai)\",\n  \"items\": [\n    {\n      \"productId\": 39,\n      \"quantity\": 1,\n      \"unitCost\": 85000\n    },\n    {\n      \"productId\": 40,\n      \"quantity\": 1,\n      \"unitCost\": 75000\n    },\n    {\n      \"productId\": 41,\n      \"quantity\": 1,\n      \"unitCost\": 105000\n    },\n    {\n      \"productId\": 42,\n      \"quantity\": 1,\n      \"unitCost\": 95000\n    },\n    {\n      \"productId\": 43,\n      \"quantity\": 1,\n      \"unitCost\": 135000\n    },\n    {\n      \"productId\": 44,\n      \"quantity\": 1,\n      \"unitCost\": 125000\n    },\n    {\n      \"productId\": 45,\n      \"quantity\": 1,\n      \"unitCost\": 170000\n    },\n    {\n      \"productId\": 46,\n      \"quantity\": 1,\n      \"unitCost\": 130000\n    },\n    {\n      \"productId\": 47,\n      \"quantity\": 10,\n      \"unitCost\": 13000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST R7 - Com Chay mix",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "receipts"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "CC008(5xau*5=+25bich) | CC010(5xau*5=+25bich)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierName\": \"Cong ty Com Chay Sai Gon\",\n  \"note\": \"[R7] CC001-002(2hop)+CC003-004(5bich)+CC005(1xau)+CC006(10bich)+CC007(1kg)+CC008(5xau)+CC009(10bich)+CC010(5xau)\",\n  \"items\": [\n    {\n      \"productId\": 48,\n      \"quantity\": 2,\n      \"unitCost\": 21000\n    },\n    {\n      \"productId\": 49,\n      \"quantity\": 2,\n      \"unitCost\": 31000\n    },\n    {\n      \"productId\": 50,\n      \"quantity\": 5,\n      \"unitCost\": 16000\n    },\n    {\n      \"productId\": 51,\n      \"quantity\": 5,\n      \"unitCost\": 17000\n    },\n    {\n      \"productId\": 52,\n      \"quantity\": 1,\n      \"unitCost\": 46000\n    },\n    {\n      \"productId\": 53,\n      \"quantity\": 10,\n      \"unitCost\": 5500\n    },\n    {\n      \"productId\": 54,\n      \"quantity\": 1,\n      \"unitCost\": 145000\n    },\n    {\n      \"productId\": 55,\n      \"quantity\": 5,\n      \"unitCost\": 92000\n    },\n    {\n      \"productId\": 56,\n      \"quantity\": 10,\n      \"unitCost\": 7700\n    },\n    {\n      \"productId\": 57,\n      \"quantity\": 5,\n      \"unitCost\": 125000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /api/receipts/import-excel (ADMIN) [MO RONG]",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts/import-excel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "receipts",
+                "import-excel"
+              ]
+            },
+            "header": [],
+            "description": "=== NHAP PHIEU NHAP KHO TU EXCEL ===\n\nForm-data params:\n  file         : file .xlsx (required)\n  supplierName : ten nha cung cap (required)\n  note         : ghi chu phieu nhap (optional)\n\nCau truc Excel (row1=header, row2+=data):\n  A: code    (ma SP - tim trong DB)\n  B: name    (ten SP - fallback neu khong co code)\n  C: quantity (so luong DON VI NHAP: kg/xau/hop/bich/chai)\n  D: unitCost (gia/1 don vi NHAP)\n  E: note    (ghi chu dong, optional)\n\nHe thong tu dong:\n  ATOMIC (bich/hop/chai): retailQty=qty, costPerUnit=unitCost\n  GOP (kg/xau): retailQty=qty*pieces, costPerUnit=unitCost/pieces\n  Tao ProductBatch voi expiryDate=ngayNhap+product.expiryDays\n\nVi du Excel tu hinh:\n  BT006 | BT Rong bien | 1 | 65000  -> +10 bich, cost/bich=6500\n  BT019 | BT Cuon tep  | 2 | 38000  -> +2 hop (ATOMIC)\n  CC010 | Com Chay c.. | 5 | 125000 -> +25 bich, cost/bich=25000\n\nResponse:\n  {receiptNo, supplierName, totalRows, successItems,\n   skippedItems, errorItems, totalAmount, errors[], warnings[]}",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "/path/to/receipts.xlsx",
+                  "description": "Excel: A=code|B=name|C=quantity(don vi nhap)|D=unitCost(gia/don vi nhap)|E=note"
+                },
+                {
+                  "key": "supplierName",
+                  "type": "text",
+                  "value": "Cong ty TNHH Banh Trang Tay Ninh"
+                },
+                {
+                  "key": "note",
+                  "type": "text",
+                  "value": "Nhap hang thang 03/2026 tu Excel"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Invoices - Ban Hang",
+      "item": [
+        {
+          "name": "GET /api/invoices",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "invoices"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/invoices?from=2026-03-01&to=2026-03-31",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices?from=2026-03-01&to=2026-03-31&page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "invoices"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-03-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-03-31"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/invoices/1",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "invoices",
+                "1"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "POST INV1 - Nguyen Van An",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "invoices"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "quantity=so bich/hop/chai ban le thuc te\nFEFO tu dong tru lo cu nhat\nProfit=qty*(sell-costSnapshot)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Nguyen Van An\",\n  \"note\": \"[INV1] BT bich mix\",\n  \"items\": [\n    {\n      \"productId\": 1,\n      \"quantity\": 2\n    },\n    {\n      \"productId\": 3,\n      \"quantity\": 1\n    },\n    {\n      \"productId\": 8,\n      \"quantity\": 3\n    },\n    {\n      \"productId\": 34,\n      \"quantity\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST INV2 - Tran Thi Bich",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "invoices"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "id18(hop:sell=50000/hop)|id26(bich:sell=6000/bich)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Tran Thi Bich\",\n  \"note\": \"[INV2] BT hop+xau(bich le)\",\n  \"items\": [\n    {\n      \"productId\": 18,\n      \"quantity\": 2\n    },\n    {\n      \"productId\": 19,\n      \"quantity\": 1\n    },\n    {\n      \"productId\": 26,\n      \"quantity\": 3\n    },\n    {\n      \"productId\": 27,\n      \"quantity\": 2\n    },\n    {\n      \"productId\": 30,\n      \"quantity\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST INV3 - Le Van Cuong",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "invoices"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "id39(bich tu kg:sell=11000/bich)|id47(chai:sell=17000/chai)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Le Van Cuong\",\n  \"note\": \"[INV3] Muoi bich+chai\",\n  \"items\": [\n    {\n      \"productId\": 39,\n      \"quantity\": 5\n    },\n    {\n      \"productId\": 41,\n      \"quantity\": 3\n    },\n    {\n      \"productId\": 47,\n      \"quantity\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST INV4 - Pham Thi Dung",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "invoices"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Pham Thi Dung\",\n  \"note\": \"[INV4] Com Chay hop+bich\",\n  \"items\": [\n    {\n      \"productId\": 48,\n      \"quantity\": 2\n    },\n    {\n      \"productId\": 49,\n      \"quantity\": 1\n    },\n    {\n      \"productId\": 50,\n      \"quantity\": 3\n    },\n    {\n      \"productId\": 53,\n      \"quantity\": 5\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST INV5 - Vo Van Em",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "invoices"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Vo Van Em\",\n  \"note\": \"[INV5] Mix\",\n  \"items\": [\n    {\n      \"productId\": 6,\n      \"quantity\": 3\n    },\n    {\n      \"productId\": 20,\n      \"quantity\": 2\n    },\n    {\n      \"productId\": 35,\n      \"quantity\": 3\n    },\n    {\n      \"productId\": 45,\n      \"quantity\": 2\n    },\n    {\n      \"productId\": 56,\n      \"quantity\": 5\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST INV6 - Nguyen Thi Phuong",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "invoices"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Nguyen Thi Phuong\",\n  \"note\": \"[INV6] BT kg dac biet\",\n  \"items\": [\n    {\n      \"productId\": 13,\n      \"quantity\": 4\n    },\n    {\n      \"productId\": 14,\n      \"quantity\": 3\n    },\n    {\n      \"productId\": 15,\n      \"quantity\": 3\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST INV7 - Tran Van Giau",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "invoices"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Tran Van Giau\",\n  \"note\": \"[INV7] Mix\",\n  \"items\": [\n    {\n      \"productId\": 36,\n      \"quantity\": 5\n    },\n    {\n      \"productId\": 37,\n      \"quantity\": 5\n    },\n    {\n      \"productId\": 43,\n      \"quantity\": 2\n    },\n    {\n      \"productId\": 54,\n      \"quantity\": 5\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /api/invoices/1 (ADMIN)",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "invoices",
+                "1"
+              ]
+            },
+            "header": [],
+            "description": "Huy HD: hoan ton kho+batch FEFO"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Reports - Loi nhuan + Ton Kho (ADMIN)",
+      "item": [
+        {
+          "name": "GET Profit T3/2026",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/profit?from=2026-03-01&to=2026-03-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "profit"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-03-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-03-31"
+                }
+              ]
+            },
+            "header": [],
+            "description": "profit=sum(qty*(sellPrice-costSnapshot))\ncostSnapshot=weighted avg FEFO\nDon vi: dong VND"
+          }
+        },
+        {
+          "name": "GET Profit Q1/2026",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/profit?from=2026-01-01&to=2026-03-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "profit"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-03-31"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET Profit This Week",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/profit/this-week",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "profit",
+                "this-week"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET Profit This Month",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/profit/this-month",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "profit",
+                "this-month"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET Profit Weekly T3/2026",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/profit/weekly?from=2026-03-01&to=2026-03-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "profit",
+                "weekly"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-03-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-03-31"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET Profit Monthly 2026",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/profit/monthly?from=2026-01-01&to=2026-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "profit",
+                "monthly"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET Inventory JSON T3/2026",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/inventory?from=2026-03-01&to=2026-03-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "inventory"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-03-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-03-31"
+                }
+              ]
+            },
+            "header": [],
+            "description": "opening=currentStock-nhap(from->now)+ban(from->now)\nclosing=opening+nhapKy-banKy\nclosingValue=sum(batch.remainingQty*batch.costPrice)"
+          }
+        },
+        {
+          "name": "GET Inventory This Month",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/inventory/this-month",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "inventory",
+                "this-month"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET Inventory Export Excel T3/2026",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/inventory/export?from=2026-03-01&to=2026-03-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "inventory",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-03-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-03-31"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET Inventory Export Excel Q1/2026",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/inventory/export?from=2026-01-01&to=2026-03-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "inventory",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-03-31"
+                }
+              ]
+            },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Expiry Warning - Canh bao HH Lot",
+      "item": [
+        {
+          "name": "GET /api/products/expiry-warnings?threshold=30",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/expiry-warnings?threshold=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "expiry-warnings"
+              ],
+              "query": [
+                {
+                  "key": "threshold",
+                  "value": "30"
+                }
+              ]
+            },
+            "header": [],
+            "description": "Canh bao HH theo LO HANG.\ndaysRemaining=batch.expiryDate-today\nResponse:ExpiryWarningResponse[]{batchId,batchCode,...,daysRemaining,warningMessage}"
+          }
+        },
+        {
+          "name": "GET /api/products/expiry-warnings?threshold=7",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/expiry-warnings?threshold=7",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "expiry-warnings"
+              ],
+              "query": [
+                {
+                  "key": "threshold",
+                  "value": "7"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/products/expiry-warnings?threshold=3",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/expiry-warnings?threshold=3",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "expiry-warnings"
+              ],
+              "query": [
+                {
+                  "key": "threshold",
+                  "value": "3"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/products/expired",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/expired",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "expired"
+              ]
+            },
+            "header": [],
+            "description": "Lo het han con ton (daysRemaining<=0, remainingQty>0)"
+          }
+        },
+        {
+          "name": "GET /api/batches/expiring?days=30",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/expiring?days=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "expiring"
+              ],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "30"
+                }
+              ]
+            },
+            "header": [],
+            "description": "ProductBatchResponse[] - chi tiet lot (importQty,receiptNo,costPrice...)"
+          }
+        },
+        {
+          "name": "GET /api/batches/expiring?days=7",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/expiring?days=7",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "expiring"
+              ],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "7"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/batches/expired",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/expired",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "expired"
+              ]
+            },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Batch Tracking - FEFO",
+      "item": [
+        {
+          "name": "GET /api/batches/product/1 - BT001",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/product/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "product",
+                "1"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/batches/product/1/active",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/product/1/active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "product",
+                "1",
+                "active"
+              ]
+            },
+            "header": [],
+            "description": "FEFO: sort expiryDate ASC, chi lo con hang"
+          }
+        },
+        {
+          "name": "GET /api/batches/product/6 - BT006 kg (importQty=10)",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/product/6",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "product",
+                "6"
+              ]
+            },
+            "header": [],
+            "description": "CHECK: importQty=10 bich (1kg*10), costPrice=6500/bich"
+          }
+        },
+        {
+          "name": "GET /api/batches/product/18 - BT018 hop (importQty=2)",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/product/18",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "product",
+                "18"
+              ]
+            },
+            "header": [],
+            "description": "CHECK: importQty=2 hop (ATOMIC), costPrice=38000/hop"
+          }
+        },
+        {
+          "name": "GET /api/batches/product/47 - M009 chai (importQty=10)",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/product/47",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "product",
+                "47"
+              ]
+            },
+            "header": [],
+            "description": "CHECK: importQty=10 chai (ATOMIC), costPrice=13000/chai"
+          }
+        },
+        {
+          "name": "GET /api/batches/product/55 - CC008 5xau (importQty=25)",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/product/55",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "product",
+                "55"
+              ]
+            },
+            "header": [],
+            "description": "CHECK: importQty=25 bich (5xau*5), costPrice=18400/bich"
+          }
+        },
+        {
+          "name": "GET /api/batches/receipt/1",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/receipt/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "receipt",
+                "1"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/batches/receipt/3 - R3 hop",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/receipt/3",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "receipt",
+                "3"
+              ]
+            },
+            "header": [],
+            "description": "CHECK: importQty=2 hop moi SP"
+          }
+        },
+        {
+          "name": "GET /api/batches/receipt/6 - R6 muoi",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/receipt/6",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "receipt",
+                "6"
+              ]
+            },
+            "header": [],
+            "description": "M001-008: importQty=10 bich each | M009: importQty=10 chai"
+          }
+        },
+        {
+          "name": "GET /api/batches/receipt/7 - R7 CC",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/receipt/7",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "receipt",
+                "7"
+              ]
+            },
+            "header": [],
+            "description": "CC008(id55):importQty=25 | CC010(id57):importQty=25"
+          }
+        },
+        {
+          "name": "GET /api/batches/1",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/batches/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "batches",
+                "1"
+              ]
+            },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. User Management (ADMIN)",
+      "item": [
+        {
+          "name": "GET /api/admin/users",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/admin/users/1",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "1"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "GET /api/admin/users/2",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/2",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "2"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "POST /api/admin/users - ROLE_USER",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"nhanvien01\",\n  \"password\": \"nv123456\",\n  \"fullName\": \"Nguyen Thi Nhan Vien\",\n  \"roles\": [\n    \"ROLE_USER\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /api/admin/users - ROLE_ADMIN",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"quanly01\",\n  \"password\": \"ql123456\",\n  \"fullName\": \"Tran Van Quan Ly\",\n  \"roles\": [\n    \"ROLE_ADMIN\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "PUT /api/admin/users/2",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/2",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "2"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"User Da Cap Nhat\",\n  \"password\": \"newpass123\",\n  \"isActive\": true,\n  \"roles\": [\n    \"ROLE_USER\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /api/admin/users/3",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{adminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{adminPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/3",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "3"
+              ]
+            },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Auth Tests - 401 & 403",
+      "item": [
+        {
+          "name": "USER POST Category → 403",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Fail\",\n  \"description\": \"403\",\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "USER GET Profit → 403",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/profit/this-month",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "profit",
+                "this-month"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "USER GET Inventory → 403",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/inventory?from=2026-03-01&to=2026-03-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "inventory"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-03-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-03-31"
+                }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "USER DELETE Invoice → 403",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{userUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{userPass}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/invoices/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "invoices",
+                "1"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "No Auth → 401",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "Wrong Password → 401",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "admin"
+                },
+                {
+                  "key": "password",
+                  "value": "wrong"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "header": []
+          }
+        }
+      ]
+    }
+  ]
+}
