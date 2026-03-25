@@ -149,7 +149,9 @@ jobs:
       - name: 🔧 Fix Nginx permissions sau upload
         run: |
           ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "sudo chown -R www-data:www-data /var/www/nhadanshop && sudo chmod -R 755 /var/www/nhadanshop"
+            "sudo chown -R www-data:www-data /var/www/nhadanshop && \
+             sudo chmod -R 755 /var/www/nhadanshop && \
+             sudo systemctl reload nginx"
 
       - name: ⚙️ Cấu hình và restart Spring Boot
         run: |
@@ -188,6 +190,11 @@ jobs:
 
       - name: ✅ Health check
         run: |
+          echo "=== Test Backend (port 8080) ==="
           curl -f http://${{ secrets.EC2_HOST }}:8080/api/categories \
             && echo "✅ Backend OK" \
-            || echo "⚠️ Health check failed - check logs"
+            || echo "⚠️ Backend health check failed"
+          echo "=== Test Frontend (port 80) ==="
+          curl -f http://${{ secrets.EC2_HOST }}/ \
+            && echo "✅ Frontend OK" \
+            || echo "⚠️ Frontend health check failed"
