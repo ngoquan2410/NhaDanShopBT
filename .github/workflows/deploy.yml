@@ -153,9 +153,8 @@ jobs:
 
       - name: ⚙️ Cấu hình và restart Spring Boot
         run: |
-          ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} << 'ENDSSH'
-            # Cập nhật systemd service với RDS credentials
-            sudo tee /etc/systemd/system/nhadanshop.service > /dev/null << 'EOF'
+          ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "sudo tee /etc/systemd/system/nhadanshop.service > /dev/null << 'EOF'
           [Unit]
           Description=NhaDanShop Spring Boot
           After=network.target
@@ -164,11 +163,11 @@ jobs:
           Type=simple
           User=ubuntu
           WorkingDirectory=/app/nhadanshop
-          ExecStart=/usr/bin/java -jar /app/nhadanshop/nhadanshop.jar \
-            --spring.datasource.url=jdbc:postgresql://nhadanshop-db.c5w6eg2au3ph.ap-southeast-1.rds.amazonaws.com:5432/nhadanshop \
-            --spring.datasource.username=postgres \
-            --spring.datasource.password=${{ secrets.RDS_PASSWORD }} \
-            --server.port=8080
+          Environment=\"SPRING_DATASOURCE_URL=jdbc:postgresql://nhadanshop-db.c5w6eg2au3ph.ap-southeast-1.rds.amazonaws.com:5432/nhadanshop\"
+          Environment=\"SPRING_DATASOURCE_USERNAME=postgres\"
+          Environment=\"SPRING_DATASOURCE_PASSWORD=${{ secrets.RDS_PASSWORD }}\"
+          Environment=\"SERVER_PORT=8080\"
+          ExecStart=/usr/bin/java -jar /app/nhadanshop/nhadanshop.jar
           Restart=on-failure
           RestartSec=10
           StandardOutput=journal
@@ -177,14 +176,18 @@ jobs:
           [Install]
           WantedBy=multi-user.target
           EOF
+          sudo systemctl daemon-reload && sudo systemctl restart nhadanshop"
 
-            sudo systemctl daemon-reload
-            sudo systemctl restart nhadanshop
-            sleep 15
-            sudo systemctl status nhadanshop --no-pager
-          ENDSSH
+      - name: ⏳ Chờ Spring Boot khởi động
+        run: sleep 40
+
+      - name: 📋 Kiểm tra logs Spring Boot
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "sudo journalctl -u nhadanshop -n 30 --no-pager"
 
       - name: ✅ Health check
         run: |
-          sleep 20
-          curl -f http://${{ secrets.EC2_HOST }}/api/categories || echo "⚠️ Health check failed - check logs"
+          curl -f http://${{ secrets.EC2_HOST }}:8080/api/categories \
+            && echo "✅ Backend OK" \
+            || echo "⚠️ Health check failed - check logs"
