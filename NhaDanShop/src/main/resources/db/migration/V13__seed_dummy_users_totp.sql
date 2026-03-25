@@ -6,7 +6,7 @@
 -- user_totp  secret: JBSWY3DPEHPK3PXQ
 --
 -- Để tạo TOTP real, hãy scan QR sau khi login và gọi /api/auth/totp/setup
--- Các user dummy dưới đây có TOTP enabled = 0 (tắt) nên login bình thường
+-- Các user dummy dưới đây có TOTP enabled = FALSE (tắt) nên login bình thường
 -- Chỉ admin_totp và user_totp mới bật TOTP để demo flow 2FA
 -- =========================================================
 
@@ -14,50 +14,50 @@
 -- password: user123
 INSERT INTO users (username, password, full_name, is_active, totp_secret, totp_enabled, created_at, updated_at)
 VALUES (
-    N'nguyen_van_a',
-    N'$2a$10$OLzwARbxuyxyJKbcjuErJOzXyjhHmvQNrL6z/K.3vd5Sv4R1bOx3S',
-    N'Nguyễn Văn A',
-    1,
+    'nguyen_van_a',
+    '$2a$10$OLzwARbxuyxyJKbcjuErJOzXyjhHmvQNrL6z/K.3vd5Sv4R1bOx3S',
+    'Nguyễn Văn A',
+    TRUE,
     NULL,
-    0,
-    SYSDATETIME(),
-    SYSDATETIME()
+    FALSE,
+    NOW(),
+    NOW()
 );
 INSERT INTO user_roles (user_id, role_id)
 SELECT u.id, r.id FROM users u CROSS JOIN roles r
-WHERE u.username = N'nguyen_van_a' AND r.name = N'ROLE_USER';
+WHERE u.username = 'nguyen_van_a' AND r.name = 'ROLE_USER';
 
 -- password: user123
 INSERT INTO users (username, password, full_name, is_active, totp_secret, totp_enabled, created_at, updated_at)
 VALUES (
-    N'tran_thi_b',
-    N'$2a$10$OLzwARbxuyxyJKbcjuErJOzXyjhHmvQNrL6z/K.3vd5Sv4R1bOx3S',
-    N'Trần Thị B',
-    1,
+    'tran_thi_b',
+    '$2a$10$OLzwARbxuyxyJKbcjuErJOzXyjhHmvQNrL6z/K.3vd5Sv4R1bOx3S',
+    'Trần Thị B',
+    TRUE,
     NULL,
-    0,
-    SYSDATETIME(),
-    SYSDATETIME()
+    FALSE,
+    NOW(),
+    NOW()
 );
 INSERT INTO user_roles (user_id, role_id)
 SELECT u.id, r.id FROM users u CROSS JOIN roles r
-WHERE u.username = N'tran_thi_b' AND r.name = N'ROLE_USER';
+WHERE u.username = 'tran_thi_b' AND r.name = 'ROLE_USER';
 
 -- password: user123
 INSERT INTO users (username, password, full_name, is_active, totp_secret, totp_enabled, created_at, updated_at)
 VALUES (
-    N'le_van_c',
-    N'$2a$10$OLzwARbxuyxyJKbcjuErJOzXyjhHmvQNrL6z/K.3vd5Sv4R1bOx3S',
-    N'Lê Văn C',
-    1,
+    'le_van_c',
+    '$2a$10$OLzwARbxuyxyJKbcjuErJOzXyjhHmvQNrL6z/K.3vd5Sv4R1bOx3S',
+    'Lê Văn C',
+    TRUE,
     NULL,
-    0,
-    SYSDATETIME(),
-    SYSDATETIME()
+    FALSE,
+    NOW(),
+    NOW()
 );
 INSERT INTO user_roles (user_id, role_id)
 SELECT u.id, r.id FROM users u CROSS JOIN roles r
-WHERE u.username = N'le_van_c' AND r.name = N'ROLE_USER';
+WHERE u.username = 'le_van_c' AND r.name = 'ROLE_USER';
 
 -- ── User có TOTP enabled để demo flow 2FA ────────────────────────────────────
 -- QUAN TRỌNG: Secret bên dưới là REAL Base32 secret.
@@ -68,18 +68,18 @@ WHERE u.username = N'le_van_c' AND r.name = N'ROLE_USER';
 -- password: user123
 INSERT INTO users (username, password, full_name, is_active, totp_secret, totp_enabled, created_at, updated_at)
 VALUES (
-    N'user_totp',
-    N'$2a$10$OLzwARbxuyxyJKbcjuErJOzXyjhHmvQNrL6z/K.3vd5Sv4R1bOx3S',
-    N'User Demo TOTP',
-    1,
-    N'JBSWY3DPEHPK3PXP',
-    1,
-    SYSDATETIME(),
-    SYSDATETIME()
+    'user_totp',
+    '$2a$10$OLzwARbxuyxyJKbcjuErJOzXyjhHmvQNrL6z/K.3vd5Sv4R1bOx3S',
+    'User Demo TOTP',
+    TRUE,
+    'JBSWY3DPEHPK3PXP',
+    TRUE,
+    NOW(),
+    NOW()
 );
 INSERT INTO user_roles (user_id, role_id)
 SELECT u.id, r.id FROM users u CROSS JOIN roles r
-WHERE u.username = N'user_totp' AND r.name = N'ROLE_USER';
+WHERE u.username = 'user_totp' AND r.name = 'ROLE_USER';
 
 -- ── Admin có TOTP enabled để demo flow 2FA ───────────────────────────────────
 -- QUAN TRỌNG: Secret bên dưới là REAL Base32 secret.
@@ -90,15 +90,15 @@ WHERE u.username = N'user_totp' AND r.name = N'ROLE_USER';
 -- password: admin123
 INSERT INTO users (username, password, full_name, is_active, totp_secret, totp_enabled, created_at, updated_at)
 VALUES (
-    N'admin_totp',
-    N'$2a$10$BHRoYv9VYEPCX8rTQKbbUuoLCDSo0YoxXfUSeqPXRGr3PCdo6Oh9a',
-    N'Admin Demo TOTP',
-    1,
-    N'JBSWY3DPEHPK3PXQ',
-    1,
-    SYSDATETIME(),
-    SYSDATETIME()
+    'admin_totp',
+    '$2a$10$BHRoYv9VYEPCX8rTQKbbUuoLCDSo0YoxXfUSeqPXRGr3PCdo6Oh9a',
+    'Admin Demo TOTP',
+    TRUE,
+    'JBSWY3DPEHPK3PXQ',
+    TRUE,
+    NOW(),
+    NOW()
 );
 INSERT INTO user_roles (user_id, role_id)
 SELECT u.id, r.id FROM users u CROSS JOIN roles r
-WHERE u.username = N'admin_totp' AND r.name = N'ROLE_ADMIN';
+WHERE u.username = 'admin_totp' AND r.name = 'ROLE_ADMIN';

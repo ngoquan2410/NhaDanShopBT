@@ -35,12 +35,12 @@ dependencies {
     annotationProcessor 'org.projectlombok:lombok'
 
     implementation 'org.flywaydb:flyway-core'
-    implementation 'org.flywaydb:flyway-sqlserver'
+    implementation 'org.flywaydb:flyway-database-postgresql'
 
     implementation 'org.mapstruct:mapstruct:1.5.5.Final'
     annotationProcessor 'org.mapstruct:mapstruct-processor:1.5.5.Final'
 
-    runtimeOnly 'com.microsoft.sqlserver:mssql-jdbc'
+    runtimeOnly 'org.postgresql:postgresql'
     runtimeOnly 'com.h2database:h2'
 
     // Apache POI - đọc file Excel (.xlsx)

@@ -29,4 +29,25 @@ export const productService = {
   getDriveStatus: () => api.get('/api/images/status').then(r => r.data),
   /** Xóa ảnh khỏi Drive */
   deleteImage: (url) => api.delete(`/api/images?url=${encodeURIComponent(url)}`),
+
+  // ── Import Excel ──────────────────────────────────────────────────────────
+  /** Import sản phẩm hàng loạt từ file .xlsx */
+  importExcel: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post('/api/products/import-excel', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
+  /** Download file Excel template import sản phẩm */
+  downloadTemplate: () =>
+    api.get('/api/products/template', { responseType: 'blob' }).then(r => {
+      const url = URL.createObjectURL(r.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'template_import_san_pham.xlsx'
+      a.click()
+      URL.revokeObjectURL(url)
+    }),
 }

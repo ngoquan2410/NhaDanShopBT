@@ -1,7 +1,12 @@
 import axios from 'axios'
 import toast from 'react-hot-toast'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
+// Khi VITE_API_BASE_URL không set → dùng relative URL (Docker: Nginx proxy /api/ → backend)
+// Khi dev local → fallback về http://localhost:8080
+const _envBase = import.meta.env.VITE_API_BASE_URL
+const API_BASE = (_envBase !== undefined && _envBase !== null && _envBase !== '')
+  ? _envBase
+  : (import.meta.env.PROD ? '' : 'http://localhost:8080')
 
 const api = axios.create({
   baseURL: API_BASE,

@@ -103,6 +103,12 @@ public class ProductService {
         var category = categoryRepository.findById(req.categoryId())
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy category ID: " + req.categoryId()));
 
+        // Check trùng tên + danh mục trước
+        if (productRepository.existsByNameIgnoreCaseAndCategoryId(req.name().trim(), category.getId())) {
+            throw new IllegalStateException(
+                "Sản phẩm '" + req.name().trim() + "' đã tồn tại trong danh mục '" + category.getName() + "'");
+        }
+
         String code = resolveCode(req.code(), category);
 
         if (productRepository.existsByCode(code)) {

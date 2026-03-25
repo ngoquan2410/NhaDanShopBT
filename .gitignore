@@ -1,0 +1,50 @@
+# ── Secrets — KHÔNG bao giờ commit ─────────────────────────────
+.env
+.env.prod
+.env.local
+.env.docker
+*.env
+NhaDanShop/application-local.properties
+NhaDanShop/src/main/resources/application-local.properties
+
+# ── Build artifacts ─────────────────────────────────────────────
+NhaDanShop/build/
+NhaDanShop/.gradle/
+NhaDanShopUi/dist/
+NhaDanShopUi/node_modules/
+
+# ── Docker files (đã xóa, không cần) ────────────────────────────
+NhaDanShop/Dockerfile
+NhaDanShop/.dockerignore
+NhaDanShopUi/Dockerfile
+NhaDanShopUi/.dockerignore
+NhaDanShopUi/nginx.conf
+docker-compose.prod.yml
+init-db/
+nginx/
+create_test_excel.ps1
+docker-run.ps1
+gen_name_test.py
+gen_test_excel.py
+vps-setup.sh
+deploy.sh
+
+# ── IDE ──────────────────────────────────────────────────────────
+.idea/
+*.iml
+.vscode/
+
+# ── OS ───────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Logs ─────────────────────────────────────────────────────────
+*.log
+app.log
+app-err.log
+vite.log
+
+# ── Excel templates / test files ─────────────────────────────────
+*.xlsx
+*.tar.gz
+*.py

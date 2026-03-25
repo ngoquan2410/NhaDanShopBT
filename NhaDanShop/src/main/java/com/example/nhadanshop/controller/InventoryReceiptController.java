@@ -3,6 +3,7 @@ package com.example.nhadanshop.controller;
 import com.example.nhadanshop.dto.InventoryReceiptRequest;
 import com.example.nhadanshop.dto.InventoryReceiptResponse;
 import com.example.nhadanshop.service.ExcelReceiptImportService;
+import com.example.nhadanshop.service.ExcelTemplateService;
 import com.example.nhadanshop.service.InventoryReceiptService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -10,8 +11,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -26,6 +30,20 @@ public class InventoryReceiptController {
 
     private final InventoryReceiptService receiptService;
     private final ExcelReceiptImportService excelReceiptImportService;
+    private final ExcelTemplateService excelTemplateService;
+
+    /** GET /api/receipts/template — Download Excel template import phiếu nhập kho */
+    @GetMapping("/template")
+    public ResponseEntity<byte[]> downloadTemplate() throws IOException {
+        byte[] bytes = excelTemplateService.buildReceiptTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        headers.setContentDisposition(ContentDisposition.attachment()
+                .filename("template_import_phieu_nhap_kho.xlsx").build());
+        headers.setContentLength(bytes.length);
+        return ResponseEntity.ok().headers(headers).body(bytes);
+    }
 
     /** GET /api/receipts?from=&to=&page=&size= */
     @GetMapping
