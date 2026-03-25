@@ -131,6 +131,11 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
+      - name: 🔧 Fix permissions trên EC2
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "sudo chown -R ubuntu:ubuntu /var/www/nhadanshop && sudo chmod -R 755 /var/www/nhadanshop"
+
       - name: 📤 Upload JAR lên EC2
         run: |
           scp ./artifacts/backend/*.jar \
@@ -140,6 +145,11 @@ jobs:
         run: |
           rsync -avz --delete ./artifacts/frontend/ \
             ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ env.WEB_DIR }}/
+
+      - name: 🔧 Fix Nginx permissions sau upload
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "sudo chown -R www-data:www-data /var/www/nhadanshop && sudo chmod -R 755 /var/www/nhadanshop"
 
       - name: ⚙️ Cấu hình và restart Spring Boot
         run: |
