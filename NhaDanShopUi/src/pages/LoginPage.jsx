@@ -1,9 +1,8 @@
-﻿import { useState, useRef } from 'react'
+﻿﻿import { useState, useRef } from 'react'
 import { useNavigate, Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import toast from 'react-hot-toast'
-
-const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
+import { API_BASE as API } from '../lib/axios'
 
 export default function LoginPage() {
   const [username, setUsername] = useState('')
