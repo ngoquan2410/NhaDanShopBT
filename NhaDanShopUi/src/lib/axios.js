@@ -3,10 +3,12 @@ import toast from 'react-hot-toast'
 
 // Khi VITE_API_BASE_URL không set → dùng relative URL (Docker: Nginx proxy /api/ → backend)
 // Khi dev local → fallback về http://localhost:8080
+// Strip trailing /api nếu secret được set kèm /api (vd: http://host/api → http://host)
 const _envBase = import.meta.env.VITE_API_BASE_URL
-const API_BASE = (_envBase !== undefined && _envBase !== null && _envBase !== '')
+const _rawBase = (_envBase !== undefined && _envBase !== null && _envBase !== '')
   ? _envBase
   : (import.meta.env.PROD ? '' : 'http://localhost:8080')
+export const API_BASE = _rawBase.replace(/\/api\/?$/, '')
 
 const api = axios.create({
   baseURL: API_BASE,

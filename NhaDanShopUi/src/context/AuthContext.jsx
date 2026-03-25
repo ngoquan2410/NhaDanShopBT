@@ -1,4 +1,5 @@
-﻿import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
+﻿﻿import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
+import { API_BASE } from '../lib/axios'
 
 const AuthContext = createContext(null)
 
@@ -35,11 +36,10 @@ export function AuthProvider({ children }) {
     // Refresh sớm 60 giây trước khi hết hạn
     const delayMs = Math.max(0, (expiresInSeconds - 60) * 1000)
     refreshTimerRef.current = setTimeout(async () => {
-      const raw = localStorage.getItem(STORAGE.REFRESH_TOKEN)
-      if (!raw) return
-      try {
-        const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
-        const res = await fetch(`${API}/api/auth/refresh`, {
+        const raw = localStorage.getItem(STORAGE.REFRESH_TOKEN)
+        if (!raw) return
+        try {
+          const res = await fetch(`${API_BASE}/api/auth/refresh`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ refreshToken: raw }),
@@ -106,8 +106,7 @@ export function AuthProvider({ children }) {
     const at  = localStorage.getItem(STORAGE.ACCESS_TOKEN)
     // Gọi BE revoke (best-effort)
     if (raw) {
-      const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
-      fetch(`${API}/api/auth/logout`, {
+      fetch(`${API_BASE}/api/auth/logout`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
