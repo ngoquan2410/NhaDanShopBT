@@ -52,7 +52,9 @@ jobs:
 
       - name: 🔨 Build JAR
         working-directory: NhaDanShop
-        run: ./gradlew bootJar -x test
+        run: |
+          chmod +x gradlew
+          ./gradlew bootJar -x test
         env:
           SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/nhadanshop_test
           SPRING_DATASOURCE_USERNAME: postgres
