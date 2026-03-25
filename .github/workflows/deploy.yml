@@ -91,9 +91,12 @@ jobs:
 
       - name: 🏗️ Build React app
         working-directory: NhaDanShopUi
-        run: npm run build
-        env:
-          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+        run: |
+          # Strip trailing /api from base URL to avoid double /api/api/ paths
+          RAW_URL="${{ secrets.VITE_API_BASE_URL }}"
+          CLEAN_URL="${RAW_URL%/api}"
+          echo "Building with VITE_API_BASE_URL=$CLEAN_URL"
+          VITE_API_BASE_URL="$CLEAN_URL" npm run build
 
       - name: 📦 Upload dist artifact
         uses: actions/upload-artifact@v4
