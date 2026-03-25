@@ -9,10 +9,16 @@ on:
 env:
   JAVA_VERSION: '21'
   NODE_VERSION: '20'
+  EC2_USER: ubuntu
+  APP_DIR: /app/nhadanshop
+  WEB_DIR: /var/www/nhadanshop
+  RDS_HOST: nhadanshop-db.c5w6eg2au3ph.ap-southeast-1.rds.amazonaws.com
+  RDS_PORT: 5432
+  RDS_DB: nhadanshop
 
 jobs:
   # ─────────────────────────────────────────────
-  # JOB 1: Build & Test Backend
+  # JOB 1: Build Backend
   # ─────────────────────────────────────────────
   build-backend:
     name: 🔨 Build Backend (Spring Boot)
@@ -44,7 +50,7 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: 🔨 Build JAR (skip tests on PR)
+      - name: 🔨 Build JAR
         working-directory: NhaDanShop
         run: ./gradlew bootJar -x test
         env:
@@ -95,7 +101,7 @@ jobs:
           retention-days: 1
 
   # ─────────────────────────────────────────────
-  # JOB 3: Deploy lên AWS EC2 (chỉ khi push main)
+  # JOB 3: Deploy lên AWS EC2
   # ─────────────────────────────────────────────
   deploy:
     name: 🚀 Deploy to AWS EC2
@@ -123,22 +129,50 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      - name: 📤 Upload JAR to EC2
+      - name: 📤 Upload JAR lên EC2
         run: |
           scp ./artifacts/backend/*.jar \
-            ubuntu@${{ secrets.EC2_HOST }}:/app/nhadanshop/nhadanshop.jar
+            ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ env.APP_DIR }}/nhadanshop.jar
 
-      - name: 📤 Upload Frontend to EC2
+      - name: 📤 Upload Frontend lên EC2
         run: |
           rsync -avz --delete ./artifacts/frontend/ \
-            ubuntu@${{ secrets.EC2_HOST }}:/var/www/nhadanshop/
+            ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ env.WEB_DIR }}/
 
-      - name: 🔄 Restart Spring Boot service
+      - name: ⚙️ Cấu hình và restart Spring Boot
         run: |
-          ssh ubuntu@${{ secrets.EC2_HOST }} "sudo systemctl restart nhadanshop"
+          ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} << 'ENDSSH'
+            # Cập nhật systemd service với RDS credentials
+            sudo tee /etc/systemd/system/nhadanshop.service > /dev/null << 'EOF'
+          [Unit]
+          Description=NhaDanShop Spring Boot
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          WorkingDirectory=/app/nhadanshop
+          ExecStart=/usr/bin/java -jar /app/nhadanshop/nhadanshop.jar \
+            --spring.datasource.url=jdbc:postgresql://nhadanshop-db.c5w6eg2au3ph.ap-southeast-1.rds.amazonaws.com:5432/nhadanshop \
+            --spring.datasource.username=postgres \
+            --spring.datasource.password=${{ secrets.RDS_PASSWORD }} \
+            --server.port=8080
+          Restart=on-failure
+          RestartSec=10
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+            sudo systemctl daemon-reload
+            sudo systemctl restart nhadanshop
+            sleep 15
+            sudo systemctl status nhadanshop --no-pager
+          ENDSSH
 
       - name: ✅ Health check
         run: |
-          sleep 15
-          ssh ubuntu@${{ secrets.EC2_HOST }} \
-            "curl -f http://localhost:8080/actuator/health || echo 'Health check failed'"
+          sleep 20
+          curl -f http://${{ secrets.EC2_HOST }}/api/categories || echo "⚠️ Health check failed - check logs"
