@@ -30,15 +30,15 @@ CREATE INDEX ix_user_roles_role_id ON user_roles(role_id);
 -- Bước 5: Seed user ROLE_USER mẫu (password: user123)
 INSERT INTO users(username, password, full_name, is_active, created_at, updated_at)
 VALUES (
-    N'user',
-    N'$2a$10$N.YYHSMQyGu4D8YNS1B0HOdN4lgSN/8B0TJaKH5jbVPvYJuM5X5kC',
-    N'Normal User',
-    1,
-    SYSDATETIME(),
-    SYSDATETIME()
+    'user',
+    '$2a$10$N.YYHSMQyGu4D8YNS1B0HOdN4lgSN/8B0TJaKH5jbVPvYJuM5X5kC',
+    'Normal User',
+    TRUE,
+    NOW(),
+    NOW()
 );
 
 INSERT INTO user_roles (user_id, role_id)
 SELECT u.id, r.id
 FROM users u, roles r
-WHERE u.username = N'user' AND r.name = N'ROLE_USER';
+WHERE u.username = 'user' AND r.name = 'ROLE_USER';

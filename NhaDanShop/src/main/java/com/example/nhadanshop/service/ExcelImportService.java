@@ -74,13 +74,14 @@ public class ExcelImportService {
         try (Workbook workbook = new XSSFWorkbook(file.getInputStream())) {
             Sheet sheet = workbook.getSheetAt(0);
 
-            // AUTO-DETECT: bỏ qua TẤT CẢ header rows, tìm row đầu tiên có mã SP hợp lệ
-            int startRow = findDataStartRow(sheet);
+            // Template sản phẩm CỐ ĐỊNH: dòng 1=Title, 2=Subtitle, 3=Header → data từ dòng 4 (index 3)
+            // Nếu file tự tạo (không phải template) → fallback detect
+            int startRow = detectStartRow(sheet);
             log.info("Products import: data từ row index {} (Excel row {})", startRow, startRow + 1);
 
             for (int rowIdx = startRow; rowIdx <= sheet.getLastRowNum(); rowIdx++) {
                 Row row = sheet.getRow(rowIdx);
-                if (row == null || isRowEmpty(row)) continue;
+                if (row == null || isRowEmpty(row) || isLegendRow(row)) continue;
                 totalRows++;
                 try {
                     String code = getCellString(row, COL_CODE);
@@ -91,7 +92,7 @@ public class ExcelImportService {
                     }
                     String categoryName = getCellString(row, COL_CATEGORY);
                     if (categoryName == null || categoryName.isBlank()) {
-                        errors.add("Dòng " + (rowIdx + 1) + ": Category không được trống");
+                        errors.add("Dòng " + (rowIdx + 1) + ": Danh mục không được trống");
                         errorCount++; continue;
                     }
                     Category category = categoryRepository.findByNameIgnoreCase(categoryName.trim())
@@ -104,18 +105,28 @@ public class ExcelImportService {
                                 return categoryRepository.save(c2);
                             });
 
-                    // Auto-generate code nếu trống
-                    if (code == null || code.isBlank()) {
-                        code = productService.generateProductCode(category);
-                        log.info("Dòng {}: Auto-generate code '{}' cho '{}'", rowIdx + 1, code, name);
-                    } else {
-                        code = code.trim().toUpperCase();
-                    }
-
-                    if (productRepository.existsByCode(code)) {
-                        log.info("Dòng {}: Skip - mã '{}' đã tồn tại", rowIdx + 1, code);
+                    // ── CHECK TRÙNG: name + categoryId (giống logic API tạo mới) ──
+                    if (productRepository.existsByNameIgnoreCaseAndCategoryId(name.trim(), category.getId())) {
+                        log.info("Dòng {}: Skip - '{}' đã tồn tại trong danh mục '{}'", rowIdx + 1, name.trim(), categoryName.trim());
+                        errors.add("Dòng " + (rowIdx + 1) + ": SP '" + name.trim() + "' đã tồn tại trong danh mục '" + categoryName.trim() + "' → bỏ qua");
                         skipCount++; continue;
                     }
+
+                    // ── GENERATE CODE: luôn auto-generate, bỏ qua code trong Excel ──
+                    // (giống logic API tạo mới: code tự sinh theo category)
+                    if (code != null && !code.isBlank()) {
+                        code = code.trim().toUpperCase();
+                        // Nếu code được nhập tay bị trùng → báo lỗi
+                        if (productRepository.existsByCode(code)) {
+                            errors.add("Dòng " + (rowIdx + 1) + ": Mã '" + code + "' đã tồn tại → bỏ qua");
+                            skipCount++; continue;
+                        }
+                    } else {
+                        // Không nhập mã → tự generate theo category (giống API)
+                        code = productService.generateProductCode(category);
+                        log.info("Dòng {}: Auto-generate code '{}' cho '{}'", rowIdx + 1, code, name);
+                    }
+
                     String unit       = getCellString(row, COL_UNIT);
                     BigDecimal costPrice = getCellDecimal(row, COL_COST_PRICE);
                     BigDecimal sellPrice = getCellDecimal(row, COL_SELL_PRICE);
@@ -135,7 +146,6 @@ public class ExcelImportService {
                     int effectivePieces = isAtomic ? 1
                             : (piecesPerImport != null && piecesPerImport > 0 ? piecesPerImport : 1);
 
-                    // GOP: tự chia giá theo số bịch/đơn vị nhập
                     BigDecimal costPerUnit = isAtomic ? costPrice
                             : costPrice.divide(BigDecimal.valueOf(effectivePieces), 2, java.math.RoundingMode.HALF_UP);
                     BigDecimal sellPerUnit = isAtomic ? sellPrice
@@ -162,7 +172,7 @@ public class ExcelImportService {
                     product.setUpdatedAt(LocalDateTime.now());
                     productRepository.save(product);
                     successCount++;
-                    log.info("Dòng {}: OK '{}'", rowIdx + 1, code);
+                    log.info("Dòng {}: OK '{}' - '{}'", rowIdx + 1, code, name);
                 } catch (Exception e) {
                     errors.add("Dòng " + (rowIdx + 1) + ": Lỗi - " + e.getMessage());
                     errorCount++;
@@ -175,26 +185,54 @@ public class ExcelImportService {
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    /** Tìm row data thực: row đầu tiên có cột A là mã SP hợp lệ (không phải header text) */
-    private int findDataStartRow(Sheet sheet) {
+    /**
+     * Detect dòng data đầu tiên.
+     * Template cố định: Row 0=Title, Row 1=Subtitle, Row 2=Header → data từ Row 3 (index).
+     * Nếu dòng 3 (index) có data số hợp lệ (giá/số lượng) → dùng luôn.
+     * Fallback: tìm dòng đầu tiên có cột B (tên) không phải header text.
+     */
+    private int detectStartRow(Sheet sheet) {
+        // Thử row index 3 trước (template cố định: 3 dòng header)
+        Row row3 = sheet.getRow(3);
+        if (row3 != null) {
+            String colB = getCellString(row3, COL_NAME);
+            String colE = getCellString(row3, COL_COST_PRICE);
+            // Nếu cột B không trống và cột E là số → đây là data
+            if (colB != null && !colB.isBlank() && colE != null) {
+                try { Double.parseDouble(colE.replace(",", "")); return 3; } catch (NumberFormatException ignored) {}
+            }
+        }
+        // Fallback: tìm dòng đầu tiên có cột E hoặc F là số dương (giá)
         for (int i = 0; i <= Math.min(sheet.getLastRowNum(), 10); i++) {
             Row row = sheet.getRow(i);
             if (row == null) continue;
-            if (isValidProductCode(getCellString(row, COL_CODE))) return i;
+            String colE = getCellString(row, COL_COST_PRICE);
+            if (colE != null && !colE.isBlank()) {
+                try {
+                    double val = Double.parseDouble(colE.replace(",", ""));
+                    if (val > 0) return i;
+                } catch (NumberFormatException ignored) {}
+            }
         }
-        return 1;
+        return 3; // default: skip 3 dòng header
     }
 
-    /** Mã SP hợp lệ: không chứa ký tự đặc biệt của header (*¶\n/) và không phải từ khóa header */
-    private boolean isValidProductCode(String val) {
-        if (val == null || val.isBlank() || val.length() > 50) return false;
-        if (val.contains("*") || val.contains("¶") || val.contains("\n")
-                || val.contains("(") || val.contains("/") || val.contains("\\")) return false;
-        String lower = val.trim().toLowerCase();
-        return !lower.equals("code") && !lower.equals("ma") && !lower.equals("stt")
-                && !lower.equals("ten") && !lower.equals("name")
-                && !lower.startsWith("nhà dân") && !lower.startsWith("nha dan")
-                && !lower.startsWith("import") && !lower.startsWith("api:");
+    /** @deprecated dùng detectStartRow thay thế */
+    private int findDataStartRow(Sheet sheet) { return detectStartRow(sheet); }
+
+    /** Bỏ qua dòng legend / chú thích màu trong template */
+    private boolean isLegendRow(Row row) {
+        for (int c = COL_CODE; c <= COL_NAME; c++) {
+            String val = getCellString(row, c);
+            if (val == null) continue;
+            String l = val.trim().toLowerCase();
+            if (l.startsWith("mau xanh") || l.startsWith("màu xanh")
+                    || l.startsWith("mau vang") || l.startsWith("màu vàng")
+                    || l.startsWith("legend") || l.startsWith("chu thich")
+                    || l.startsWith("chú thích") || l.startsWith("ghi chu mau")
+                    || l.startsWith("(*) =") || l.startsWith("luu y")) return true;
+        }
+        return false;
     }
 
     private boolean isExcelFile(MultipartFile file) {

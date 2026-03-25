@@ -1,0 +1,144 @@
+name: 🚀 Build & Deploy NhaDanShop
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  JAVA_VERSION: '21'
+  NODE_VERSION: '20'
+
+jobs:
+  # ─────────────────────────────────────────────
+  # JOB 1: Build & Test Backend
+  # ─────────────────────────────────────────────
+  build-backend:
+    name: 🔨 Build Backend (Spring Boot)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: nhadanshop_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: 🔨 Build JAR (skip tests on PR)
+        working-directory: NhaDanShop
+        run: ./gradlew bootJar -x test
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/nhadanshop_test
+          SPRING_DATASOURCE_USERNAME: postgres
+          SPRING_DATASOURCE_PASSWORD: test_password
+
+      - name: 📦 Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: NhaDanShop/build/libs/*.jar
+          retention-days: 1
+
+  # ─────────────────────────────────────────────
+  # JOB 2: Build Frontend
+  # ─────────────────────────────────────────────
+  build-frontend:
+    name: 🎨 Build Frontend (React + Vite)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: NhaDanShopUi/package-lock.json
+
+      - name: 📦 Install dependencies
+        working-directory: NhaDanShopUi
+        run: npm ci
+
+      - name: 🏗️ Build React app
+        working-directory: NhaDanShopUi
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+
+      - name: 📦 Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: NhaDanShopUi/dist/
+          retention-days: 1
+
+  # ─────────────────────────────────────────────
+  # JOB 3: Deploy lên AWS EC2 (chỉ khi push main)
+  # ─────────────────────────────────────────────
+  deploy:
+    name: 🚀 Deploy to AWS EC2
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: 📥 Download Backend JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: ./artifacts/backend
+
+      - name: 📥 Download Frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: ./artifacts/frontend
+
+      - name: 🔑 Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: 📤 Upload JAR to EC2
+        run: |
+          scp ./artifacts/backend/*.jar \
+            ubuntu@${{ secrets.EC2_HOST }}:/app/nhadanshop/nhadanshop.jar
+
+      - name: 📤 Upload Frontend to EC2
+        run: |
+          rsync -avz --delete ./artifacts/frontend/ \
+            ubuntu@${{ secrets.EC2_HOST }}:/var/www/nhadanshop/
+
+      - name: 🔄 Restart Spring Boot service
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} "sudo systemctl restart nhadanshop"
+
+      - name: ✅ Health check
+        run: |
+          sleep 15
+          ssh ubuntu@${{ secrets.EC2_HOST }} \
+            "curl -f http://localhost:8080/actuator/health || echo 'Health check failed'"

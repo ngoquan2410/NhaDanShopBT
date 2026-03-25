@@ -17,6 +17,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Service nhập phiếu nhập kho từ file Excel.
@@ -53,6 +54,8 @@ public class ExcelReceiptImportService {
     private final ProductBatchRepository batchRepository;
     private final UserRepository userRepository;
     private final InvoiceNumberGenerator numberGenerator;
+    private final CategoryRepository categoryRepository;   // ← thêm để auto-create product
+    private final ProductService productService;           // ← thêm để generate code
 
     // Column indices
     private static final int COL_CODE     = 0; // Mã SP (lookup key)
@@ -60,6 +63,9 @@ public class ExcelReceiptImportService {
     private static final int COL_QUANTITY = 2; // Số lượng đơn vị NHẬP
     private static final int COL_COST     = 3; // Giá / 1 đơn vị NHẬP
     private static final int COL_NOTE     = 4; // Ghi chú (optional)
+    // Cột mở rộng cho auto-create product (optional)
+    private static final int COL_CATEGORY = 5; // Tên danh mục (optional — dùng khi tạo SP mới)
+    private static final int COL_UNIT     = 6; // Đơn vị bán lẻ (optional — dùng khi tạo SP mới)
 
     /**
      * Kết quả import phiếu nhập từ Excel.
@@ -71,6 +77,7 @@ public class ExcelReceiptImportService {
             int successItems,
             int skippedItems,
             int errorItems,
+            int newProducts,        // ← SP mới được tạo tự động
             BigDecimal totalAmount,
             List<String> errors,
             List<String> warnings
@@ -110,8 +117,10 @@ public class ExcelReceiptImportService {
         int successItems = 0;
         int skippedItems = 0;
         int errorItems   = 0;
+        int newProducts  = 0;
         BigDecimal totalAmount = BigDecimal.ZERO;
-        List<InventoryReceiptItem> items = new ArrayList<>();
+        // Dùng Map để gom dòng trùng product trong 1 phiếu (tránh unique constraint violation)
+        Map<Long, InventoryReceiptItem> itemMap = new LinkedHashMap<>();
 
         try (Workbook workbook = new XSSFWorkbook(file.getInputStream())) {
             Sheet sheet = workbook.getSheetAt(0);
@@ -122,7 +131,7 @@ public class ExcelReceiptImportService {
 
             for (int rowIdx = startRow; rowIdx <= sheet.getLastRowNum(); rowIdx++) {
                 Row row = sheet.getRow(rowIdx);
-                if (row == null || isRowEmpty(row)) continue;
+                if (row == null || isRowEmpty(row) || isLegendRow(row)) continue;
                 totalRows++;
                 int lineNum = rowIdx + 1;
                 try {
@@ -145,22 +154,61 @@ public class ExcelReceiptImportService {
                         errorItems++; continue;
                     }
 
-                    // ── Tìm sản phẩm ──────────────────────────────────────────
-                    Optional<Product> productOpt = Optional.empty();
-                    if (code != null && !code.isBlank()) {
-                        productOpt = productRepository.findByCode(code.trim());
-                    }
-                    if (productOpt.isEmpty() && name != null && !name.isBlank()) {
-                        productOpt = productRepository.findByNameContainingIgnoreCase(name.trim())
-                                .stream().findFirst();
-                        if (productOpt.isPresent()) {
-                            warnings.add("Dòng " + lineNum + ": Tìm theo tên '" + name + "' → '"
-                                    + productOpt.get().getCode() + "'");
-                        }
-                    }
+                    // ── Tìm sản phẩm theo 3 tầng ưu tiên ────────────────────
+                    FindResult findResult = findProduct(code, name, lineNum, errors, warnings);
+                    if (findResult.isAmbiguous()) { errorItems++; continue; }
+                    Optional<Product> productOpt = findResult.product();
                     if (productOpt.isEmpty()) {
-                        errors.add("Dòng " + lineNum + ": Không tìm thấy SP code='" + code + "' name='" + name + "'");
-                        errorItems++; continue;
+                        // ── AUTO-CREATE: SP chưa tồn tại → tạo mới ──────────
+                        if (name == null || name.isBlank()) {
+                            errors.add("Dòng " + lineNum + ": Không tìm thấy SP code='" + code
+                                    + "' và tên SP (cột B) trống — không thể tạo mới");
+                            errorItems++; continue;
+                        }
+                        // Lấy/tạo category từ cột F (nếu có), mặc định "Chưa phân loại"
+                        String categoryName = getCellString(row, COL_CATEGORY);
+                        if (categoryName == null || categoryName.isBlank()) categoryName = "Chưa phân loại";
+                        final String catName = categoryName.trim();
+                        Category category = categoryRepository.findByNameIgnoreCase(catName)
+                                .orElseGet(() -> {
+                                    Category c = new Category();
+                                    c.setName(catName);
+                                    c.setActive(true);
+                                    c.setCreatedAt(LocalDateTime.now());
+                                    c.setUpdatedAt(LocalDateTime.now());
+                                    return categoryRepository.save(c);
+                                });
+
+                        // Đơn vị từ cột G, mặc định "cái"
+                        String unit = getCellString(row, COL_UNIT);
+                        if (unit == null || unit.isBlank()) unit = "cái";
+
+                        // Tạo SP mới
+                        Product newProduct = new Product();
+                        newProduct.setName(name.trim());
+                        newProduct.setCategory(category);
+                        newProduct.setUnit(unit.trim());
+                        newProduct.setSellUnit(unit.trim());
+                        newProduct.setCostPrice(cost);
+                        newProduct.setSellPrice(cost); // sellPrice = costPrice, admin điều chỉnh sau
+                        newProduct.setStockQty(0);     // stock sẽ được cộng sau
+                        newProduct.setActive(true);
+                        newProduct.setPiecesPerImportUnit(1);
+                        newProduct.setCreatedAt(LocalDateTime.now());
+                        newProduct.setUpdatedAt(LocalDateTime.now());
+                        // Auto-generate code theo category
+                        String generatedCode = (code != null && !code.isBlank())
+                                ? code.trim().toUpperCase()
+                                : productService.generateProductCode(category);
+                        newProduct.setCode(generatedCode);
+
+                        newProduct = productRepository.save(newProduct);
+                        productOpt = Optional.of(newProduct);
+                        newProducts++;
+                        warnings.add("Dòng " + lineNum + ": Tạo SP mới '" + generatedCode
+                                + "' - " + name.trim() + " (danh mục: " + catName + ")");
+                        log.info("Dòng {}: Auto-created product code='{}' name='{}'",
+                                lineNum, generatedCode, name);
                     }
 
                     Product product = productOpt.get();
@@ -198,16 +246,24 @@ public class ExcelReceiptImportService {
                     batch.setCostPrice(costPerRetailUnit);
                     batchRepository.save(batch);
 
-                    // ── Tạo Receipt Item ──────────────────────────────────────
-                    InventoryReceiptItem item = new InventoryReceiptItem();
-                    item.setReceipt(savedReceipt);
-                    item.setProduct(product);
-                    item.setQuantity(qty);            // số lượng theo đơn vị NHẬP (kg/xâu/hộp)
-                    item.setUnitCost(cost);           // giá theo đơn vị NHẬP
+                    // ── Tạo/Merge Receipt Item ───────────────────────────────
+                    // Nếu cùng product đã có trong phiếu → cộng dồn (tránh unique constraint)
+                    BigDecimal lineTotal = cost.multiply(BigDecimal.valueOf(qty));
+                    totalAmount = totalAmount.add(lineTotal);
 
-                    // totalAmount theo đơn vị nhập (= cost * qty nhập)
-                    totalAmount = totalAmount.add(cost.multiply(BigDecimal.valueOf(qty)));
-                    items.add(item);
+                    if (itemMap.containsKey(product.getId())) {
+                        InventoryReceiptItem existing = itemMap.get(product.getId());
+                        existing.setQuantity(existing.getQuantity() + qty);
+                        warnings.add("Dòng " + lineNum + ": SP '" + product.getCode()
+                                + "' trùng trong file → gộp số lượng");
+                    } else {
+                        InventoryReceiptItem item = new InventoryReceiptItem();
+                        item.setReceipt(savedReceipt);
+                        item.setProduct(product);
+                        item.setQuantity(qty);   // số lượng theo đơn vị NHẬP
+                        item.setUnitCost(cost);  // giá theo đơn vị NHẬP
+                        itemMap.put(product.getId(), item);
+                    }
 
                     successItems++;
                     log.info("Dòng {}: OK '{}' qty={} {} (+{} retail)", lineNum,
@@ -224,7 +280,7 @@ public class ExcelReceiptImportService {
         // ── Finalize receipt ──────────────────────────────────────────────────
         if (successItems > 0) {
             savedReceipt.setTotalAmount(totalAmount);
-            savedReceipt.getItems().addAll(items);
+            savedReceipt.getItems().addAll(itemMap.values());
             receiptRepository.save(savedReceipt);
         } else {
             // Không có item nào thành công → xóa phiếu nhập rỗng
@@ -235,19 +291,44 @@ public class ExcelReceiptImportService {
         return new ExcelReceiptResult(
                 successItems > 0 ? savedReceipt.getReceiptNo() : null,
                 supplierName, totalRows, successItems, skippedItems, errorItems,
-                totalAmount, errors, warnings);
+                newProducts, totalAmount, errors, warnings);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    /** Tìm row đầu tiên có cột A là mã SP hợp lệ (không phải header text) */
+    /** Tìm row data đầu tiên — template cố định 3 dòng header nên mặc định index 3.
+     *  Fallback detect bằng cột C (số lượng) phải là số > 0. */
     private int findDataStartRow(Sheet sheet) {
+        // Template cố định: Row 0=Title, Row 1=Subtitle, Row 2=Header → data từ Row 3
+        Row row3 = sheet.getRow(3);
+        if (row3 != null) {
+            String colC = getCellString(row3, COL_QUANTITY);
+            if (colC != null && !colC.isBlank()) {
+                try { if (Double.parseDouble(colC.replace(",", "")) > 0) return 3; } catch (NumberFormatException ignored) {}
+            }
+            // Row 3 có tên SP (cột B) không phải header → cũng dùng
+            String colB = getCellString(row3, COL_NAME);
+            if (colB != null && !colB.isBlank() && !isHeaderText(colB)) return 3;
+        }
+        // Fallback: tìm dòng đầu tiên có cột C là số > 0
         for (int i = 0; i <= Math.min(sheet.getLastRowNum(), 10); i++) {
             Row row = sheet.getRow(i);
             if (row == null) continue;
-            if (isValidCode(getCellString(row, COL_CODE))) return i;
+            String colC = getCellString(row, COL_QUANTITY);
+            if (colC != null && !colC.isBlank()) {
+                try { if (Double.parseDouble(colC.replace(",", "")) > 0) return i; } catch (NumberFormatException ignored) {}
+            }
         }
-        return 1;
+        return 3; // default: skip 3 dòng header
+    }
+
+    private boolean isHeaderText(String val) {
+        if (val == null) return false;
+        String l = val.trim().toLowerCase();
+        return l.equals("ten sp") || l.equals("tên sp") || l.equals("name") || l.equals("ten san pham")
+                || l.startsWith("template") || l.startsWith("nha dan") || l.startsWith("nhà đan")
+                || l.startsWith("huong dan") || l.startsWith("do tim")
+                || l.equals("b: ten sp") || l.equals("ma sp") || l.equals("a: ma sp");
     }
 
     private boolean isValidCode(String val) {
@@ -255,9 +336,13 @@ public class ExcelReceiptImportService {
         if (val.contains("*") || val.contains("¶") || val.contains("\n")
                 || val.contains("(") || val.contains("/")) return false;
         String lower = val.trim().toLowerCase();
+        // Lọc các header phổ biến
         return !lower.equals("code") && !lower.equals("ma") && !lower.equals("stt")
+                && !lower.equals("ma sp") && !lower.equals("mã sp") && !lower.equals("ma san pham")
+                && !lower.equals("ten sp") && !lower.equals("tên sp") && !lower.equals("product")
                 && !lower.startsWith("phiếu") && !lower.startsWith("api:")
-                && !lower.startsWith("nhà dân") && !lower.startsWith("nha dan");
+                && !lower.startsWith("nhà dân") && !lower.startsWith("nha dan")
+                && !lower.startsWith("header") && !lower.startsWith("sheet");
     }
 
     private String buildUniqueBatchCode(String receiptNo, String productCode) {
@@ -284,6 +369,24 @@ public class ExcelReceiptImportService {
             }
         }
         return true;
+    }
+
+    /**
+     * Kiểm tra dòng chú thích / legend trong template (ví dụ: "Mau xanh la = SP da co san pham").
+     * Các dòng này có cột A hoặc B bắt đầu bằng từ khóa legend → bỏ qua.
+     */
+    private boolean isLegendRow(Row row) {
+        String colA = getCellString(row, COL_CODE);
+        String colB = getCellString(row, COL_NAME);
+        for (String val : new String[]{colA, colB}) {
+            if (val == null) continue;
+            String l = val.trim().toLowerCase();
+            if (l.startsWith("mau xanh") || l.startsWith("màu xanh")
+                    || l.startsWith("mau vang") || l.startsWith("màu vàng")
+                    || l.startsWith("legend") || l.startsWith("chu thich")
+                    || l.startsWith("chú thích") || l.startsWith("ghi chu mau")) return true;
+        }
+        return false;
     }
 
     private String getCellString(Row row, int col) {
@@ -323,5 +426,79 @@ public class ExcelReceiptImportService {
                 default -> null;
             };
         } catch (NumberFormatException e) { return null; }
+    }
+
+    /** Kết quả tìm SP: ambiguous=true khi nhiều SP khớp tên, cần admin nhập mã */
+    private record FindResult(Optional<Product> product, boolean isAmbiguous) {
+        static FindResult found(Product p) { return new FindResult(Optional.of(p), false); }
+        static FindResult notFound()       { return new FindResult(Optional.empty(), false); }
+        static FindResult ambiguous()      { return new FindResult(Optional.empty(), true); }
+    }
+
+    /**
+     * Tìm sản phẩm theo 3 tầng ưu tiên:
+     *  1. Mã SP (code)        — chính xác tuyệt đối
+     *  2. Tên chính xác       — exact match, ignore case
+     *  3. Tên chứa chuỗi     — containing:
+     *       1 kết quả  → dùng + warning
+     *      >1 kết quả  → ambiguous → caller skip dòng, add error yêu cầu nhập mã
+     *       0 kết quả  → notFound → caller auto-create SP mới
+     */
+    private FindResult findProduct(String code, String name,
+                                   int lineNum, List<String> errors, List<String> warnings) {
+        // Tầng 1: MÃ SP — chính xác tuyệt đối
+        if (code != null && !code.isBlank()) {
+            Optional<Product> byCode = productRepository.findByCode(code.trim().toUpperCase());
+            if (byCode.isPresent()) {
+                log.debug("Dòng {}: match mã '{}'", lineNum, code.trim());
+                return FindResult.found(byCode.get());
+            }
+            warnings.add("Dòng " + lineNum + ": Không tìm thấy mã '" + code.trim()
+                    + "' → thử tìm theo tên SP (cột B)");
+        }
+
+        if (name == null || name.isBlank()) return FindResult.notFound();
+
+        // Tầng 2: TÊN CHÍNH XÁC — exact, ignore case (dùng list để tránh NonUniqueResultException)
+        List<Product> exactMatches = productRepository.findByNameContainingIgnoreCase(name.trim())
+                .stream()
+                .filter(p -> p.getName().equalsIgnoreCase(name.trim()))
+                .toList();
+        if (!exactMatches.isEmpty()) {
+            Product p = exactMatches.get(0);
+            if (exactMatches.size() > 1) {
+                warnings.add("Dòng " + lineNum + ": Tên '" + name.trim() + "' khớp "
+                        + exactMatches.size() + " SP exact → chọn [" + p.getCode() + "] " + p.getName());
+            } else {
+                warnings.add("Dòng " + lineNum + ": Không có mã → khớp tên chính xác '"
+                        + name.trim() + "' → [" + p.getCode() + "] " + p.getName());
+            }
+            log.info("Dòng {}: exact name '{}' → [{}]", lineNum, name.trim(), p.getCode());
+            return FindResult.found(p);
+        }
+
+        // Tầng 3: TÊN CHỨA CHUỖI — fallback thận trọng
+        List<Product> candidates = productRepository.findByNameContainingIgnoreCase(name.trim());
+
+        if (candidates.isEmpty()) return FindResult.notFound();
+
+        if (candidates.size() == 1) {
+            Product p = candidates.get(0);
+            warnings.add("Dòng " + lineNum + ": Tìm gần đúng '" + name.trim()
+                    + "' → [" + p.getCode() + "] " + p.getName() + " (1 kết quả, tự chọn)");
+            log.info("Dòng {}: containing '{}' → [{}]", lineNum, name.trim(), p.getCode());
+            return FindResult.found(p);
+        }
+
+        // Nhiều kết quả → AMBIGUOUS
+        String list = candidates.stream().limit(5)
+                .map(p -> "[" + p.getCode() + "] " + p.getName())
+                .collect(Collectors.joining(" | "));
+        errors.add("Dòng " + lineNum + ": Tên '" + name.trim() + "' khớp "
+                + candidates.size() + " SP: " + list
+                + (candidates.size() > 5 ? " ..." : "")
+                + " → Vui lòng nhập MÃ SP (cột A) để chọn đúng");
+        log.warn("Dòng {}: ambiguous '{}' → {} results", lineNum, name.trim(), candidates.size());
+        return FindResult.ambiguous();
     }
 }

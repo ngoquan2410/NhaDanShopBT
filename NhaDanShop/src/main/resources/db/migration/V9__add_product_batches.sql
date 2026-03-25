@@ -7,33 +7,33 @@
 -- =========================================================
 
 CREATE TABLE product_batches (
-    id              BIGINT IDENTITY(1,1) PRIMARY KEY,
+    id            BIGSERIAL      PRIMARY KEY,
 
     -- Sản phẩm thuộc lô này
-    product_id      BIGINT       NOT NULL,
+    product_id    BIGINT         NOT NULL,
 
     -- Phiếu nhập kho tạo ra lô này (NULL = nhập thủ công/tồn kho ban đầu)
-    receipt_id      BIGINT       NULL,
+    receipt_id    BIGINT         NULL,
 
     -- Mã lô tự sinh: BATCH-{receiptNo}-{productCode}
-    batch_code      NVARCHAR(80) NOT NULL,
+    batch_code    VARCHAR(80)    NOT NULL,
 
     -- Ngày sản xuất (optional, do người dùng nhập)
-    mfg_date        DATE         NULL,
+    mfg_date      DATE           NULL,
 
     -- Ngày hết hạn thực tế = receiptDate + product.expiryDays
-    expiry_date     DATE         NOT NULL,
+    expiry_date   DATE           NOT NULL,
 
     -- Số lượng nhập ban đầu (đơn vị bán lẻ)
-    import_qty      INT          NOT NULL,
+    import_qty    INT            NOT NULL,
 
     -- Số lượng còn lại trong lô (đơn vị bán lẻ) - giảm dần khi bán
-    remaining_qty   INT          NOT NULL,
+    remaining_qty INT            NOT NULL,
 
     -- Giá vốn của lô này (có thể khác các lô trước)
-    cost_price      DECIMAL(18,2) NOT NULL,
+    cost_price    DECIMAL(18,2)  NOT NULL,
 
-    created_at      DATETIME2    NOT NULL DEFAULT SYSDATETIME(),
+    created_at    TIMESTAMP      NOT NULL DEFAULT NOW(),
 
     CONSTRAINT fk_pb_product FOREIGN KEY (product_id) REFERENCES products(id),
     CONSTRAINT fk_pb_receipt FOREIGN KEY (receipt_id) REFERENCES inventory_receipts(id),

@@ -22,7 +22,13 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     /** Dùng cho ExpiryWarningService - chỉ lấy sản phẩm có expiryDays */
     List<Product> findByActiveTrueAndExpiryDaysIsNotNull();
 
-    /** Tìm theo tên (chứa chuỗi, không phân biệt hoa/thường) - dùng cho Excel import */
+    /** Tìm theo tên CHÍNH XÁC (exact, ignore case) — ưu tiên dùng trước */
+    Optional<Product> findByNameIgnoreCase(String name);
+
+    /** Check trùng tên + danh mục (dùng cho import và API tạo mới) */
+    boolean existsByNameIgnoreCaseAndCategoryId(String name, Long categoryId);
+
+    /** Tìm theo tên (chứa chuỗi, không phân biệt hoa/thường) - fallback khi không exact match */
     List<Product> findByNameContainingIgnoreCase(String name);
 
     /**

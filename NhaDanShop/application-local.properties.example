@@ -9,3 +9,30 @@ google.drive.credentials-path=./google-drive-credentials.json
 # ID của Google Drive folder để lưu ảnh sản phẩm
 # Lấy từ URL: https://drive.google.com/drive/folders/[FOLDER_ID_HERE]
 google.drive.folder-id=PASTE_YOUR_FOLDER_ID_HERE
+
+# ============================================================
+# application-local.properties – TEMPLATE (KHÔNG commit file thật)
+# Copy thành: src/main/resources/application-local.properties
+# ============================================================
+
+# ── PostgreSQL local (dùng docker-compose.yml ở root) ──────
+spring.datasource.url=jdbc:postgresql://localhost:5432/nhadanshop
+spring.datasource.username=postgres
+spring.datasource.password=P@ssword123
+spring.datasource.driver-class-name=org.postgresql.Driver
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+
+# ── Cloudflare R2 ───────────────────────────────────────────
+r2.account-id=PASTE_YOUR_ACCOUNT_ID
+r2.access-key-id=PASTE_YOUR_ACCESS_KEY_ID
+r2.secret-access-key=PASTE_YOUR_SECRET_ACCESS_KEY
+r2.bucket-name=nhadanshop-images
+r2.public-url=https://pub-xxxx.r2.dev
+
+# ── JWT ─────────────────────────────────────────────────────
+jwt.secret=NhaDanShop_SuperSecret_2024_ChangeThis_InProduction_256bit!
+jwt.access-token-expiry-minutes=30
+jwt.refresh-token-expiry-days=7
+
+# ── TOTP ────────────────────────────────────────────────────
+totp.issuer=NhaDanShop

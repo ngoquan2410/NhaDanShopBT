@@ -1,7 +1,10 @@
-﻿import { useState } from 'react'
+﻿import { useState, useRef } from 'react'
 import { useReceipts, useReceiptMutations } from '../../hooks/useReceipts'
 import { useProducts } from '../../hooks/useProducts'
 import { useSort } from '../../hooks/useSort'
+import { receiptService } from '../../services/receiptService'
+import { useQueryClient } from '@tanstack/react-query'
+import toast from 'react-hot-toast'
 import dayjs from 'dayjs'
 
 function Modal({ title, onClose, children }) {
@@ -47,7 +50,7 @@ function ReceiptForm({ products, onSubmit, loading }) {
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Nhà cung c��p</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Nhà cung cấp</label>
           <input value={supplierName} onChange={e => setSupplierName(e.target.value)}
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
             placeholder="Tên nhà cung cấp" />
@@ -56,7 +59,7 @@ function ReceiptForm({ products, onSubmit, loading }) {
           <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú</label>
           <input value={note} onChange={e => setNote(e.target.value)}
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-            placeholder="Ghi chú (tùy ch��n)" />
+            placeholder="Ghi chú (tùy chọn)" />
         </div>
       </div>
 
@@ -113,12 +116,229 @@ function ReceiptForm({ products, onSubmit, loading }) {
   )
 }
 
+// ── Import Excel Phiếu Nhập ───────────────────────────────────────────────────
+function ImportReceiptExcelForm({ onClose, onSuccess }) {
+  const [file, setFile] = useState(null)
+  const [supplierName, setSupplierName] = useState('')
+  const [note, setNote] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [result, setResult] = useState(null)
+  const [dragging, setDragging] = useState(false)
+  const fileRef = useRef(null)
+
+  const handleFile = (f) => {
+    if (!f) return
+    if (!f.name.endsWith('.xlsx')) { toast.error('Chỉ hỗ trợ file .xlsx'); return }
+    setFile(f); setResult(null)
+  }
+
+  const handleDownloadTemplate = async () => {
+    setDownloading(true)
+    try {
+      await receiptService.downloadTemplate()
+      toast.success('Đã tải template! Xem sheet "Hướng dẫn" trong file.')
+    } catch {
+      toast.error('Lỗi tải template')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const handleImport = async () => {
+    if (!file) { toast.error('Chưa chọn file Excel'); return }
+    if (!supplierName.trim()) { toast.error('Vui lòng nhập tên nhà cung cấp'); return }
+    setLoading(true)
+    try {
+      const res = await receiptService.importExcel(file, supplierName.trim(), note.trim())
+      setResult(res)
+      if (res.successItems > 0) {
+        toast.success(`Tạo phiếu nhập ${res.receiptNo} thành công! (${res.successItems} SP)`)
+        onSuccess()
+      } else {
+        toast.error('Không có dòng nào thành công — phiếu không được tạo')
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Lỗi import Excel')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Banner download template */}
+      <div className="bg-gradient-to-r from-green-600 to-green-700 rounded-xl p-4 flex items-center justify-between">
+        <div className="text-white">
+          <p className="font-bold text-base">📥 Bước 1: Tải file template</p>
+          <p className="text-green-100 text-xs mt-0.5">Có dummy data mẫu (SP có sẵn + SP mới tạo) + sheet hướng dẫn</p>
+        </div>
+        <button
+          onClick={handleDownloadTemplate}
+          disabled={downloading}
+          className="bg-white text-green-700 font-bold px-5 py-2.5 rounded-lg hover:bg-green-50 transition flex items-center gap-2 text-sm whitespace-nowrap disabled:opacity-70"
+        >
+          {downloading
+            ? <><span className="w-4 h-4 border-2 border-green-500 border-t-transparent rounded-full animate-spin"/>Đang tải...</>
+            : <>⬇️ Tải Template Excel</>}
+        </button>
+      </div>
+
+      {/* Cấu trúc nhanh */}
+      <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
+        <p className="font-semibold mb-2">📋 Bước 2: Điền dữ liệu (từ dòng 4):</p>
+        <div className="overflow-x-auto">
+          <table className="text-xs w-full border-collapse">
+            <thead>
+              <tr className="bg-green-100">
+                {['A: Mã SP','B: Tên SP','C: SL *','D: Giá nhập *','E: Ghi chú','F: Danh mục (tạo mới)','G: Đơn vị (tạo mới)'].map(h => (
+                  <th key={h} className="border border-green-200 px-2 py-1 text-left whitespace-nowrap font-semibold">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="bg-white">
+                {['BT001','Bánh Tráng Rong Biển','5','65000','SP có sẵn','',''].map((v,i) => (
+                  <td key={i} className="border border-green-200 px-2 py-1 text-gray-700">{v}</td>
+                ))}
+              </tr>
+              <tr className="bg-yellow-50">
+                {['','Sản Phẩm Mới XYZ','10','25000','SP mới tạo','Danh Mục Mới','gói'].map((v,i) => (
+                  <td key={i} className="border border-green-200 px-2 py-1 text-amber-700 font-medium">{v}</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+          <div className="bg-white rounded p-2">
+            <p className="font-semibold text-green-700">✅ SP đã có trong hệ thống:</p>
+            <p>Tìm theo Mã (cột A) → Tên (cột B)</p>
+          </div>
+          <div className="bg-yellow-50 rounded p-2 border border-yellow-200">
+            <p className="font-semibold text-amber-700">✨ SP chưa có (tự tạo mới):</p>
+            <p>Để trống cột A + điền cột F, G</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Thông tin phiếu */}
+      <div>
+        <p className="text-sm font-semibold text-gray-700 mb-2">📝 Bước 3: Nhập thông tin phiếu</p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Nhà cung cấp *</label>
+            <input value={supplierName} onChange={e => setSupplierName(e.target.value)}
+              placeholder="VD: Nhà Cung Cấp ABC"
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú phiếu</label>
+            <input value={note} onChange={e => setNote(e.target.value)}
+              placeholder="VD: Nhập hàng tháng 3"
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+          </div>
+        </div>
+      </div>
+
+      {/* Upload */}
+      <div>
+        <p className="text-sm font-semibold text-gray-700 mb-2">📤 Bước 4: Upload file Excel</p>
+        <div
+          onDragOver={e => { e.preventDefault(); setDragging(true) }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
+          onClick={() => fileRef.current?.click()}
+          className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
+            ${dragging ? 'border-green-500 bg-green-50' : file ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-green-400 hover:bg-green-50'}`}
+        >
+          <input ref={fileRef} type="file" accept=".xlsx" className="hidden"
+            onChange={e => handleFile(e.target.files?.[0])} />
+          {file ? (
+            <div className="space-y-1">
+              <div className="text-3xl">📄</div>
+              <p className="font-medium text-green-700">{file.name}</p>
+              <p className="text-xs text-gray-400">{(file.size / 1024).toFixed(1)} KB</p>
+              <button type="button" onClick={e => { e.stopPropagation(); setFile(null); setResult(null) }}
+                className="text-xs text-red-500 hover:text-red-700 underline">Chọn file kh��c</button>
+            </div>
+          ) : (
+            <div className="space-y-2 text-gray-500">
+              <div className="text-4xl">📊</div>
+              <p className="font-medium text-gray-700">Kéo thả file .xlsx vào đây hoặc click để chọn</p>
+              <p className="text-xs text-gray-400">SP chưa có sẽ được tạo tự động từ file</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex justify-end gap-3">
+        <button onClick={onClose} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Hủy</button>
+        <button onClick={handleImport} disabled={!file || !supplierName.trim() || loading}
+          className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-60 flex items-center gap-2">
+          {loading
+            ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Đang xử lý...</>
+            : '📥 Tạo phiếu nhập từ Excel'}
+        </button>
+      </div>
+
+      {/* Kết quả */}
+      {result && (
+        <div className={`rounded-xl border p-5 space-y-4 ${result.successItems > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-gray-800">📊 Kết quả Import</h4>
+            {result.receiptNo && (
+              <span className="font-mono text-sm bg-green-200 text-green-800 px-3 py-1 rounded-full font-bold">
+                Phiếu: {result.receiptNo}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-5 gap-2">
+            {[
+              { label: 'Tổng dòng', value: result.totalRows, color: 'blue' },
+              { label: '✅ Thành công', value: result.successItems, color: 'green' },
+              { label: '✨ SP mới tạo', value: result.newProducts || 0, color: 'purple' },
+              { label: '⏭️ Bỏ qua', value: result.skippedItems, color: 'yellow' },
+              { label: '❌ Lỗi', value: result.errorItems, color: 'red' },
+            ].map(({ label, value, color }) => (
+              <div key={label} className={`bg-${color}-100 rounded-lg p-3 text-center`}>
+                <div className={`text-xl font-bold text-${color}-700`}>{value}</div>
+                <div className={`text-xs text-${color}-600 mt-1`}>{label}</div>
+              </div>
+            ))}
+          </div>
+          {result.warnings?.length > 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              <p className="text-sm font-semibold text-yellow-700 mb-2">⚠️ SP mới tạo / Cảnh báo:</p>
+              <ul className="space-y-1 max-h-32 overflow-y-auto">
+                {result.warnings.map((w, i) => <li key={i} className="text-xs text-yellow-700">• {w}</li>)}
+              </ul>
+            </div>
+          )}
+          {result.errors?.length > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+              <p className="text-sm font-semibold text-red-700 mb-2">❌ Lỗi:</p>
+              <ul className="space-y-1 max-h-32 overflow-y-auto">
+                {result.errors.map((e, i) => <li key={i} className="text-xs text-red-600">• {e}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 export default function ReceiptsPage() {
   const [page, setPage] = useState(0)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [showModal, setShowModal] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
   const [detail, setDetail] = useState(null)
+  const queryClient = useQueryClient()
 
   const { data, isLoading } = useReceipts(page, from || undefined, to || undefined)
   const { data: products = [] } = useProducts()
@@ -137,10 +357,16 @@ export default function ReceiptsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-800">Phiếu Nhập Kho</h2>
-        <button onClick={() => setShowModal(true)}
-          className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
-          + Tạo phiếu nhập
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowImportModal(true)}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm">
+            📊 Import Excel
+          </button>
+          <button onClick={() => setShowModal(true)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+            + Tạo phiếu nhập
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow p-4 space-y-4">
@@ -208,10 +434,23 @@ export default function ReceiptsPage() {
         </div>
       </div>
 
-      {/* Create modal */}
+      {/* Create modal (nhập tay) */}
       {showModal && (
         <Modal title="Tạo phiếu nhập kho" onClose={() => setShowModal(false)}>
           <ReceiptForm products={products} onSubmit={handleCreate} loading={create.isLoading} />
+        </Modal>
+      )}
+
+      {/* Import Excel modal */}
+      {showImportModal && (
+        <Modal title="📊 Import phiếu nhập từ Excel" onClose={() => setShowImportModal(false)}>
+          <ImportReceiptExcelForm
+            onClose={() => setShowImportModal(false)}
+            onSuccess={() => {
+              queryClient.invalidateQueries(['receipts'])
+              queryClient.invalidateQueries(['products'])
+            }}
+          />
         </Modal>
       )}
 

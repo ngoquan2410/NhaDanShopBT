@@ -1,0 +1,29 @@
+# Docker Compose – PostgreSQL local dev
+# Chạy: docker compose up -d
+# Dừng: docker compose down
+# Xóa data: docker compose down -v
+
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nhadanshop-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nhadanshop
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: P@ssword123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nhadanshop"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local
