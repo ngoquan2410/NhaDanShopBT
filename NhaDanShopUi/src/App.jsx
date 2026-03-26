@@ -12,6 +12,7 @@ import ReceiptsPage from './pages/admin/ReceiptsPage'
 import InvoicesPage from './pages/admin/InvoicesPage'
 import InventoryReportPage from './pages/admin/InventoryReportPage'
 import ProfitReportPage from './pages/admin/ProfitReportPage'
+import RevenuePage from './pages/admin/RevenuePage'
 import UsersPage from './pages/admin/UsersPage'
 import SecuritySettingsPage from './pages/admin/SecuritySettingsPage'
 import StorefrontPage from './pages/store/StorefrontPage'
@@ -53,6 +54,7 @@ export default function App() {
             <Route path="invoices" element={<InvoicesPage />} />
             <Route path="inventory-report" element={<InventoryReportPage />} />
             <Route path="profit-report" element={<ProfitReportPage />} />
+            <Route path="revenue" element={<RevenuePage />} />
             <Route path="users" element={<UsersPage />} />
             <Route path="security" element={<SecuritySettingsPage />} />
           </Route>

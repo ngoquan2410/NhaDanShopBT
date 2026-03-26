@@ -80,4 +80,66 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
     List<Object[]> sumSoldQtyByProductBetween(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
+
+    // ─── Revenue by Product ───────────────────────────────────────────────────
+
+    /**
+     * Doanh thu theo từng sản phẩm trong khoảng thời gian.
+     * Object[]: [productId, productCode, productName, categoryName, unit, totalQty, totalAmount]
+     */
+    @Query("""
+            SELECT item.product.id,
+                   item.product.code,
+                   item.product.name,
+                   item.product.category.name,
+                   item.product.sellUnit,
+                   COALESCE(SUM(item.quantity), 0),
+                   COALESCE(SUM(item.quantity * item.unitPrice), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+            GROUP BY item.product.id, item.product.code, item.product.name,
+                     item.product.category.name, item.product.sellUnit
+            ORDER BY COALESCE(SUM(item.quantity * item.unitPrice), 0) DESC
+            """)
+    List<Object[]> revenueByProduct(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
+
+    // ─── Revenue by Category ─────────────────────────────────────────────────
+
+    /**
+     * Doanh thu theo từng danh mục.
+     * Object[]: [categoryId, categoryName, totalAmount]
+     */
+    @Query("""
+            SELECT item.product.category.id,
+                   item.product.category.name,
+                   COALESCE(SUM(item.quantity * item.unitPrice), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+            GROUP BY item.product.category.id, item.product.category.name
+            ORDER BY COALESCE(SUM(item.quantity * item.unitPrice), 0) DESC
+            """)
+    List<Object[]> revenueByCategory(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
+
+    // ─── Daily revenue (group by date) ───────────────────────────────────────
+
+    /**
+     * Tổng doanh thu từng ngày.
+     * Object[]: [dateStr (String yyyy-MM-dd), totalAmount]
+     * Dùng native query để tránh vấn đề JPQL DATE() compatibility.
+     */
+    @Query(value = """
+            SELECT CONVERT(DATE, invoice_date) AS sale_date,
+                   COALESCE(SUM(total_amount), 0) AS total
+            FROM sales_invoices
+            WHERE invoice_date BETWEEN :from AND :to
+            GROUP BY CONVERT(DATE, invoice_date)
+            ORDER BY CONVERT(DATE, invoice_date)
+            """, nativeQuery = true)
+    List<Object[]> dailyRevenue(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
 }
