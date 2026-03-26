@@ -61,23 +61,29 @@ export default function RevenuePage() {
   const [exporting, setExporting] = useState(false)
 
   // ── Queries ────────────────────────────────────────────────────────────────
-  const totalQ = useQuery(
-    ['revenue-total', from, to, period],
-    () => revenueService.getTotal(from, to, period),
-    { enabled: !!from && !!to && tab === 'total', keepPreviousData: true }
-  )
+  const totalQ = useQuery({
+    queryKey: ['revenue-total', from, to, period],
+    queryFn: () => revenueService.getTotal(from, to, period),
+    enabled: !!from && !!to && tab === 'total',
+    staleTime: 30_000,
+    keepPreviousData: true,
+  })
 
-  const productQ = useQuery(
-    ['revenue-product', from, to, period],
-    () => revenueService.getByProduct(from, to, period),
-    { enabled: !!from && !!to && tab === 'product', keepPreviousData: true }
-  )
+  const productQ = useQuery({
+    queryKey: ['revenue-product', from, to, period],
+    queryFn: () => revenueService.getByProduct(from, to, period),
+    enabled: !!from && !!to && tab === 'product',
+    staleTime: 30_000,
+    keepPreviousData: true,
+  })
 
-  const categoryQ = useQuery(
-    ['revenue-category', from, to, period],
-    () => revenueService.getByCategory(from, to, period),
-    { enabled: !!from && !!to && tab === 'category', keepPreviousData: true }
-  )
+  const categoryQ = useQuery({
+    queryKey: ['revenue-category', from, to, period],
+    queryFn: () => revenueService.getByCategory(from, to, period),
+    enabled: !!from && !!to && tab === 'category',
+    staleTime: 30_000,
+    keepPreviousData: true,
+  })
 
   // ── Export ─────────────────────────────────────────────────────────────────
   const handleExport = useCallback(async () => {
@@ -105,7 +111,13 @@ export default function RevenuePage() {
   }, [tab, from, to, period])
 
   // ── Xác định data active ───────────────────────────────────────────────────
-  const isLoading = totalQ.isLoading || productQ.isLoading || categoryQ.isLoading
+  // Chỉ check isLoading của query đang active (tab hiện tại)
+  // Các query disabled (tab khác) có isFetching=false nhưng isLoading=true → gây loop
+  const isLoading = tab === 'total'
+    ? totalQ.isFetching
+    : tab === 'product'
+      ? productQ.isFetching
+      : categoryQ.isFetching
 
   // Tổng doanh thu
   const totalData   = totalQ.data
