@@ -1,9 +1,10 @@
-﻿import { useState, useEffect, useRef } from 'react'
+﻿﻿import { useState, useEffect, useRef } from 'react'
 import { useInvoices, useInvoiceMutations } from '../../hooks/useInvoices'
 import { useProducts } from '../../hooks/useProducts'
 import { useSort } from '../../hooks/useSort'
 import { usePendingOrders } from '../../hooks/usePendingOrders'
 import PendingOrdersTab from './PendingOrdersTab'
+import BarcodeScanner from '../../components/BarcodeScanner'
 import dayjs from 'dayjs'
 
 // ── Shared invoice HTML builder (cũng dùng ở StorefrontPage) ─────────────────
@@ -58,103 +59,6 @@ function printInvoice(inv) {
   setTimeout(() => win.print(), 400)
 }
 
-// ── Barcode Scanner Component ─────────────────────────────────────────────────
-function BarcodeScanner({ products, onScan, onClose }) {
-  const videoRef = useRef(null)
-  const [manualCode, setManualCode] = useState('')
-  const [scanning, setScanning] = useState(false)
-  const [error, setError] = useState('')
-  const readerRef = useRef(null)
-
-  useEffect(() => {
-    let active = true
-    async function startScan() {
-      try {
-        const { BrowserMultiFormatReader } = await import('@zxing/browser')
-        const reader = new BrowserMultiFormatReader()
-        readerRef.current = reader
-        setScanning(true)
-        const devices = await BrowserMultiFormatReader.listVideoInputDevices()
-        if (devices.length === 0) { setError('Không tìm thấy camera'); return }
-        const deviceId = devices[devices.length - 1].deviceId // prefer back camera
-        reader.decodeFromVideoDevice(deviceId, videoRef.current, (result, err) => {
-          if (!active) return
-          if (result) {
-            const code = result.getText()
-            const product = products.find(p => p.code === code || p.code === code.toUpperCase())
-            if (product) {
-              onScan(product)
-              setError('')
-            } else {
-              setError(`Không tìm thấy sản phẩm với mã: ${code}`)
-            }
-          }
-        })
-      } catch (e) {
-        setError('Lỗi khởi động camera: ' + e.message)
-      }
-    }
-    startScan()
-    return () => {
-      active = false
-      readerRef.current?.reset()
-    }
-  }, [])
-
-  const handleManual = (e) => {
-    e.preventDefault()
-    const code = manualCode.trim().toUpperCase()
-    const product = products.find(p => p.code === code)
-    if (product) { onScan(product); setManualCode(''); setError('') }
-    else setError(`Không tìm thấy sản phẩm: ${code}`)
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 bg-green-700 text-white">
-          <h3 className="font-bold text-lg">📷 Quét mã sản phẩm</h3>
-          <button onClick={onClose} className="text-2xl leading-none">&times;</button>
-        </div>
-        <div className="p-4 space-y-4">
-          {/* Camera view */}
-          <div className="relative bg-black rounded-xl overflow-hidden" style={{aspectRatio:'4/3'}}>
-            <video ref={videoRef} className="w-full h-full object-cover" />
-            {/* Scan frame overlay */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="w-48 h-48 border-4 border-green-400 rounded-xl opacity-80 shadow-lg" />
-            </div>
-            {scanning && (
-              <div className="absolute bottom-2 left-0 right-0 text-center text-xs text-white bg-black/40 py-1">
-                Đưa mã vạch vào khung xanh
-              </div>
-            )}
-          </div>
-
-          {error && <p className="text-red-600 text-sm text-center bg-red-50 rounded-lg py-2 px-3">{error}</p>}
-
-          {/* Manual input fallback */}
-          <div className="border-t pt-3">
-            <p className="text-xs text-gray-500 mb-2 text-center">Hoặc nhập mã thủ công</p>
-            <form onSubmit={handleManual} className="flex gap-2">
-              <input
-                value={manualCode}
-                onChange={e => setManualCode(e.target.value)}
-                placeholder="Nhập mã sản phẩm (VD: BT001)..."
-                className="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                autoFocus
-              />
-              <button type="submit"
-                className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700">
-                Thêm
-              </button>
-            </form>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 function Modal({ title, onClose, children }) {

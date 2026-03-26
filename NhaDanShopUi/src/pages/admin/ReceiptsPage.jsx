@@ -1,4 +1,4 @@
-﻿import { useState, useRef } from 'react'
+﻿﻿import { useState, useRef } from 'react'
 import { useReceipts, useReceiptMutations } from '../../hooks/useReceipts'
 import { useProducts } from '../../hooks/useProducts'
 import { useSort } from '../../hooks/useSort'
@@ -6,6 +6,7 @@ import { receiptService } from '../../services/receiptService'
 import { useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import dayjs from 'dayjs'
+import BarcodeLabelPrinter from '../../components/BarcodeLabelPrinter'
 
 function Modal({ title, onClose, children }) {
   return (
@@ -338,6 +339,7 @@ export default function ReceiptsPage() {
   const [showModal, setShowModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [detail, setDetail] = useState(null)
+  const [printReceipt, setPrintReceipt] = useState(null) // receipt vừa tạo → in nhãn
   const queryClient = useQueryClient()
 
   const { data, isLoading } = useReceipts(page, from || undefined, to || undefined)
@@ -349,8 +351,10 @@ export default function ReceiptsPage() {
   const { sorted: sortedReceipts, SortHeader } = useSort(receipts, 'receiptDate', 'desc')
 
   const handleCreate = async (formData) => {
-    await create.mutateAsync(formData)
+    const newReceipt = await create.mutateAsync(formData)
     setShowModal(false)
+    // Prompt in nhãn ngay sau khi tạo phiếu nhập
+    setPrintReceipt(newReceipt)
   }
 
   return (
@@ -415,8 +419,15 @@ export default function ReceiptsPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{r.note || '—'}</td>
                   <td className="px-4 py-3 text-center">
-                    <button onClick={() => { if (window.confirm('Xóa phiếu nhập này?')) remove.mutate(r.id) }}
-                      className="text-red-600 hover:text-red-800 text-xs">🗑️ Xóa</button>
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => setPrintReceipt({ ...r, showPrinter: true })}
+                        className="text-amber-600 hover:text-amber-800 text-xs font-medium"
+                        title="In nhãn mã vạch"
+                      >🏷️ In nhãn</button>
+                      <button onClick={() => { if (window.confirm('Xóa phiếu nhập này?')) remove.mutate(r.id) }}
+                        className="text-red-600 hover:text-red-800 text-xs">🗑️ Xóa</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -495,6 +506,90 @@ export default function ReceiptsPage() {
           </div>
         </Modal>
       )}
+
+      {/* ── In nhãn mã vạch sau khi tạo phiếu nhập ────────────────────── */}
+      {printReceipt && (() => {
+        // Build items cho printer: { product, qty }
+        const printerItems = (printReceipt.items || []).map(it => {
+          const product = products.find(p => p.id === it.productId || p.name === it.productName)
+          return {
+            product: product ? {
+              ...product,
+              categoryName: product.categoryName || product.category?.name || it.categoryName || ''
+            } : {
+              id: it.productId,
+              name: it.productName,
+              code: it.productCode || it.productName,
+              sellPrice: it.sellPrice || 0,
+              unit: it.unit || '',
+              categoryName: it.categoryName || '',
+            },
+            qty: it.quantity,
+          }
+        }).filter(x => x.product)
+
+        if (printerItems.length === 0) { setPrintReceipt(null); return null }
+
+        return (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-40 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center">
+              <div className="text-5xl mb-3">🏷️</div>
+              <h3 className="text-lg font-bold text-gray-800 mb-2">Tạo phiếu nhập thành công!</h3>
+              <p className="text-sm text-gray-500 mb-6">
+                Phiếu <b>{printReceipt.receiptNo}</b> đã được lưu.<br />
+                Bạn có muốn in nhãn mã vạch để dán cho sản phẩm không?
+              </p>
+              <div className="flex gap-3 justify-center">
+                <button
+                  onClick={() => setPrintReceipt(null)}
+                  className="px-5 py-2.5 border rounded-xl text-gray-600 hover:bg-gray-50 text-sm"
+                >
+                  Bỏ qua
+                </button>
+                <button
+                  onClick={() => {
+                    // Chuyển sang màn hình in nhãn
+                    setPrintReceipt({ ...printReceipt, showPrinter: true })
+                  }}
+                  className="px-5 py-2.5 bg-amber-600 text-white rounded-xl font-semibold text-sm hover:bg-amber-700"
+                >
+                  🖨️ In nhãn ngay
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── BarcodeLabelPrinter ─────────────────────────────────────────── */}
+      {printReceipt?.showPrinter && (() => {
+        const printerItems = (printReceipt.items || []).map(it => {
+          const product = products.find(p => p.id === it.productId || p.name === it.productName)
+          return {
+            product: product ? {
+              ...product,
+              categoryName: product.categoryName || product.category?.name || it.categoryName || ''
+            } : {
+              id: it.productId,
+              name: it.productName,
+              code: it.productCode || it.productName,
+              sellPrice: it.sellPrice || 0,
+              unit: it.unit || '',
+              categoryName: it.categoryName || '',
+            },
+            qty: it.quantity,
+          }
+        }).filter(x => x.product)
+
+        return (
+          <BarcodeLabelPrinter
+            items={printerItems}
+            receiptDate={dayjs(printReceipt.receiptDate).format('DD/MM/YYYY')}
+            receiptNo={printReceipt.receiptNo}
+            onClose={() => setPrintReceipt(null)}
+          />
+        )
+      })()}
     </div>
   )
 }
