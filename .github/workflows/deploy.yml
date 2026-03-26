@@ -29,6 +29,8 @@ env:
   RDS_HOST: nhadanshop-db.c5w6eg2au3ph.ap-southeast-1.rds.amazonaws.com
   RDS_PORT: 5432
   RDS_DB: nhadanshop
+  RDS_INSTANCE_ID: nhadanshop-db
+  AWS_REGION: ap-southeast-1
 
 jobs:
   # ─────────────────────────────────────────────
@@ -162,6 +164,37 @@ jobs:
       (needs.build-backend.result == 'success' || needs.build-frontend.result == 'success')
 
     steps:
+      # ── BƯỚC 1: Start RDS nếu đang stopped ──────────────────────────────
+      - name: 🗄️ Start RDS (nếu đang stopped)
+        run: |
+          STATUS=$(aws rds describe-db-instances \
+            --db-instance-identifier ${{ env.RDS_INSTANCE_ID }} \
+            --query 'DBInstances[0].DBInstanceStatus' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          echo "RDS status: $STATUS"
+
+          if [ "$STATUS" = "stopped" ]; then
+            echo "▶️ Starting RDS..."
+            aws rds start-db-instance \
+              --db-instance-identifier ${{ env.RDS_INSTANCE_ID }} \
+              --region ${{ env.AWS_REGION }}
+
+            echo "⏳ Chờ RDS available (tối đa 5 phút)..."
+            aws rds wait db-instance-available \
+              --db-instance-identifier ${{ env.RDS_INSTANCE_ID }} \
+              --region ${{ env.AWS_REGION }}
+            echo "✅ RDS đã available!"
+          elif [ "$STATUS" = "available" ]; then
+            echo "✅ RDS đang chạy, không cần start."
+          else
+            echo "⚠️ RDS status: $STATUS — chờ thêm 60s..."
+            sleep 60
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
       - name: 📥 Download Backend JAR (nếu BE thay đổi)
         if: needs.detect-changes.outputs.backend == 'true'
         uses: actions/download-artifact@v4
@@ -247,3 +280,34 @@ jobs:
           curl -f http://${{ secrets.EC2_HOST }}/ \
             && echo "✅ Frontend OK" \
             || echo "⚠️ Frontend health check failed"
+
+      # ── GHI CHÚ VỀ STOP RDS ─────────────────────────────────────────────
+      # KHÔNG nên stop RDS ngay sau deploy vì:
+      # ��� Spring Boot mất connection pool → app lỗi 500 ngay lập tức
+      # → HikariCP sẽ báo "Connection is not available"
+      #
+      # CHIẾN LƯỢC ĐÚNG để tiết kiệm chi phí RDS:
+      # Option A (Khuyến nghị — dùng Free Tier):
+      #   → Dùng RDS Free Tier (db.t3.micro, 12 tháng đầu) = $0
+      #   → Sau 12 tháng: stop EC2 + RDS khi không demo/dùng
+      #
+      # Option B (Tắt cả hệ thống khi không dùng):
+      #   → Stop EC2 + RDS thủ công qua AWS Console khi không cần demo
+      #   → Start lại khi cần (mất ~3-5 phút boot)
+      #
+      # Option C (Tự động stop vào ban đêm — dùng EventBridge):
+      #   → EventBridge rule: stop EC2+RDS lúc 22:00, start lại lúc 08:00
+      #   → Tiết kiệm 58% chi phí (~14h stop / 24h)
+      - name: 💡 Chi phí ước tính
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Deploy hoàn thành! Chi phí ước tính:"
+          echo "  EC2 t2.micro  : Free Tier (750h/tháng)"
+          echo "  RDS db.t3.micro: Free Tier (750h/tháng)"
+          echo "  RDS Storage   : ~\$2.30/tháng (luôn tính)"
+          echo "  → Tổng hiện tại: ~\$2-3/tháng"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  💡 Để tiết kiệm: Stop EC2 + RDS qua AWS Console"
+          echo "     khi không cần dùng hệ thống."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
