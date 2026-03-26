@@ -62,17 +62,17 @@ public class InvoiceService {
                         "Tồn kho: " + product.getStockQty() + ", yêu cầu: " + itemReq.quantity());
             }
 
-            // Tính weighted avg cost từ các lô FEFO TRƯỚC KHI deduct
-            BigDecimal fefoAvgCost = batchService.computeWeightedAvgCostFEFO(
+            // [ATOMIC] Tính weighted avg cost VÀ trừ lô hàng FEFO trong 1 transaction
+            // với PESSIMISTIC WRITE LOCK → tránh race condition khi nhiều request đồng thời
+            // costSnapshot luôn khớp chính xác với lô thực tế bị deduct
+            BigDecimal fefoAvgCost = batchService.deductStockFEFOAndComputeCost(
                     product.getId(), itemReq.quantity());
 
-            // Trừ tồn kho tổng
+            // Trừ tồn kho tổng trên product
             product.setStockQty(product.getStockQty() - itemReq.quantity());
             product.setUpdatedAt(LocalDateTime.now());
             productRepo.save(product);
 
-            // Trừ theo FEFO trong các lô
-            batchService.deductStockFEFO(product.getId(), itemReq.quantity());
 
             SalesInvoiceItem item = new SalesInvoiceItem();
             item.setInvoice(invoice);

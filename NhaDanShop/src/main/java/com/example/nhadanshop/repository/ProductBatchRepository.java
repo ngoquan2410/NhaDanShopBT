@@ -1,7 +1,9 @@
 package com.example.nhadanshop.repository;
 
 import com.example.nhadanshop.entity.ProductBatch;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -67,4 +69,18 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
      * Kiểm tra batch_code đã tồn tại chưa.
      */
     boolean existsByBatchCode(String batchCode);
+
+    /**
+     * FEFO với PESSIMISTIC WRITE LOCK (SELECT ... FOR UPDATE).
+     * Dùng khi deduct stock để tránh race condition.
+     * Chỉ 1 transaction được đọc+sửa tại 1 thời điểm.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT b FROM ProductBatch b
+            WHERE b.product.id = :productId
+              AND b.remainingQty > 0
+            ORDER BY b.expiryDate ASC
+            """)
+    List<ProductBatch> findByProductIdForUpdateFEFO(@Param("productId") Long productId);
 }
