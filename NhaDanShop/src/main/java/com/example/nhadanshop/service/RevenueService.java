@@ -86,13 +86,13 @@ public class RevenueService {
         List<RevenueByProductDto> result = new ArrayList<>();
 
         for (Object[] r : raw) {
-            Long productId     = (Long) r[0];
-            String code        = (String) r[1];
-            String name        = (String) r[2];
-            String categoryName= r[3] != null ? (String) r[3] : "Không phân loại";
-            String unit        = r[4] != null ? (String) r[4] : "";
-            Long totalQty      = ((Number) r[5]).longValue();
-            BigDecimal totalAmt= (BigDecimal) r[6];
+            Long productId      = (Long) r[0];
+            String code         = (String) r[1];
+            String name         = (String) r[2];
+            String categoryName = r[3] != null ? (String) r[3] : "Không phân loại";
+            String unit         = r[4] != null ? (String) r[4] : "";
+            Long totalQty       = r[5] != null ? ((Number) r[5]).longValue() : 0L;
+            BigDecimal totalAmt = r[6] != null ? (BigDecimal) r[6] : BigDecimal.ZERO;
 
             // Rows trống (API product không cần breakdown kỳ — chỉ 1 dòng tổng kỳ)
             List<RevenueRowDto> rows = List.of(
@@ -100,6 +100,8 @@ public class RevenueService {
 
             result.add(new RevenueByProductDto(productId, code, name, categoryName, unit, rows, totalAmt, totalQty));
         }
+        // Sort DESC vì JPQL không hỗ trợ ORDER BY aggregate
+        result.sort((a, b) -> b.totalAmount().compareTo(a.totalAmount()));
         return result;
     }
 
@@ -117,13 +119,15 @@ public class RevenueService {
         for (Object[] r : raw) {
             Long catId     = (Long) r[0];
             String catName = (String) r[1];
-            BigDecimal amt = (BigDecimal) r[2];
+            BigDecimal amt = r[2] != null ? (BigDecimal) r[2] : BigDecimal.ZERO;
 
             List<RevenueRowDto> rows = List.of(
                     new RevenueRowDto(from.format(DAY_FMT) + " → " + to.format(DAY_FMT), amt));
 
             result.add(new RevenueByCategoryDto(catId, catName, rows, amt));
         }
+        // Sort DESC
+        result.sort((a, b) -> b.totalAmount().compareTo(a.totalAmount()));
         return result;
     }
 
@@ -139,8 +143,7 @@ public class RevenueService {
         RevenueTotalDto data = getTotalRevenue(from, to, period);
         try (XSSFWorkbook wb = new XSSFWorkbook()) {
             Sheet sheet = wb.createSheet("So D-thu S1a");
-            buildS1aSheet(wb, sheet, data.rows(), data.totalAmount(),
-                    period, from, to, "Tổng doanh thu bán hàng");
+            buildS1aSheet(wb, sheet, data.rows(), data.totalAmount(), period, from, to);
             return toBytes(wb);
         }
     }
@@ -164,7 +167,7 @@ public class RevenueService {
             BigDecimal total = data.stream().map(RevenueByProductDto::totalAmount)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-            buildS1aSheet(wb, sheet, rows, total, period, from, to, "Doanh thu theo sản phẩm");
+            buildS1aSheet(wb, sheet, rows, total, period, from, to);
             return toBytes(wb);
         }
     }
@@ -184,7 +187,7 @@ public class RevenueService {
             BigDecimal total = data.stream().map(RevenueByCategoryDto::totalAmount)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-            buildS1aSheet(wb, sheet, rows, total, period, from, to, "Doanh thu theo danh mục");
+            buildS1aSheet(wb, sheet, rows, total, period, from, to);
             return toBytes(wb);
         }
     }
@@ -195,8 +198,7 @@ public class RevenueService {
 
     private void buildS1aSheet(XSSFWorkbook wb, Sheet sheet,
                                List<RevenueRowDto> rows, BigDecimal total,
-                               String period, LocalDate from, LocalDate to,
-                               String description) {
+                               String period, LocalDate from, LocalDate to) {
 
         DataFormat df = wb.createDataFormat();
 
@@ -423,11 +425,6 @@ public class RevenueService {
         signNote.setCellValue("(Ký, ghi rõ họ tên, đóng dấu (nếu có))");
         signNote.setCellStyle(italicCenter);
         sheet.addMergedRegion(new CellRangeAddress(r - 1, r - 1, 1, 3));
-
-        // ── Lưu ý (cột D) ─────────────────────────────────────────────
-        // Thêm ghi chú bên phải ở dòng tổng cộng
-        Row noteRow1 = sheet.getRow(r - 5 < 0 ? 0 : r - 5);
-        if (noteRow1 == null) noteRow1 = sheet.createRow(r - 5 < 0 ? 0 : r - 5);
     }
 
     // ══════════════════════════════════════════════════════════════════════

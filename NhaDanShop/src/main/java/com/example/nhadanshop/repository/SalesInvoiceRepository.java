@@ -127,17 +127,16 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
     // ─── Daily revenue (group by date) ───────────────────────────────────────
 
     /**
-     * Tổng doanh thu từng ngày.
-     * Object[]: [dateStr (String yyyy-MM-dd), totalAmount]
-     * Dùng native query để tránh vấn đề JPQL DATE() compatibility.
+     * Tổng doanh thu từng ngày — PostgreSQL syntax.
+     * Object[]: [sale_date (java.sql.Date), total (BigDecimal)]
      */
     @Query(value = """
-            SELECT CONVERT(DATE, invoice_date) AS sale_date,
+            SELECT invoice_date::DATE             AS sale_date,
                    COALESCE(SUM(total_amount), 0) AS total
             FROM sales_invoices
             WHERE invoice_date BETWEEN :from AND :to
-            GROUP BY CONVERT(DATE, invoice_date)
-            ORDER BY CONVERT(DATE, invoice_date)
+            GROUP BY invoice_date::DATE
+            ORDER BY invoice_date::DATE
             """, nativeQuery = true)
     List<Object[]> dailyRevenue(
             @Param("from") LocalDateTime from,
