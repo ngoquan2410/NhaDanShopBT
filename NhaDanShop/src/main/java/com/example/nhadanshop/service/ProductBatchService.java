@@ -75,91 +75,83 @@ public class ProductBatchService {
     // ─── Internal helpers (dùng bởi InventoryReceiptService & InvoiceService) ─
 
     /**
-     * Trừ tồn kho theo FEFO (First Expired First Out).
-     * Gọi khi tạo hóa đơn bán hàng.
+     * [ATOMIC] Tính weighted average cost VÀ trừ tồn kho FEFO trong cùng 1 transaction
+     * với PESSIMISTIC WRITE LOCK (SELECT ... FOR UPDATE).
      *
-     * @param productId   sản phẩm cần trừ
-     * @param qtyNeeded   số lượng bán (đơn vị bán lẻ)
+     * FIX BUG #1 — Race Condition:
+     *   Code cũ query DB 2 lần riêng (computeAvgCost + deductStock). Giữa 2 lần,
+     *   request khác có thể đã deduct → costSnapshot tính trên dữ liệu cũ → SAI.
+     *   Method này lock row trước, tính và trừ trên cùng 1 snapshot → luôn ĐÚNG.
+     *
+     * Ví dụ: bán 150 bịch
+     *   Lô A còn 100 × 9.000đ → deduct 100, cost = 900.000
+     *   Lô B còn 200 × 9.500đ → deduct  50, cost = 475.000
+     *   → weighted avg = 1.375.000 / 150 = 9.166,67đ  ← chính xác 100%
+     *
+     * @param productId  sản phẩm cần trừ
+     * @param qtyNeeded  số lượng bán (đơn vị bán lẻ)
+     * @return weighted average cost per unit → ghi vào SalesInvoiceItem.unitCostSnapshot
      * @throws IllegalStateException nếu không đủ hàng trong các lô
      */
     @Transactional
-    public void deductStockFEFO(Long productId, int qtyNeeded) {
-        List<ProductBatch> batches = batchRepo
-                .findByProductIdAndRemainingQtyGreaterThanOrderByExpiryDateAsc(productId, 0);
+    public BigDecimal deductStockFEFOAndComputeCost(Long productId, int qtyNeeded) {
+        if (qtyNeeded <= 0) return BigDecimal.ZERO;
 
-        int remaining = qtyNeeded;
-        for (ProductBatch batch : batches) {
-            if (remaining <= 0) break;
-            int deduct = Math.min(batch.getRemainingQty(), remaining);
-            batch.setRemainingQty(batch.getRemainingQty() - deduct);
-            remaining -= deduct;
-            batchRepo.save(batch);
-            log.debug("FEFO deduct: batch={} productId={} deduct={} remaining={}",
-                    batch.getBatchCode(), productId, deduct, batch.getRemainingQty());
-        }
-
-        if (remaining > 0) {
-            throw new IllegalStateException(
-                    "Lỗi đồng bộ lô hàng: productId=" + productId +
-                    " còn thiếu " + remaining + " đơn vị trong các lô");
-        }
-    }
-
-    /**
-     * Tính giá vốn bình quân gia quyền (weighted average cost) từ các lô FEFO
-     * sẽ được deduct khi bán {@code qtyNeeded} đơn vị.
-     * Dùng để set unitCostSnapshot chính xác trong SalesInvoiceItem.
-     *
-     * Ví dụ: bán 15 bịch
-     *   lô A còn 10 bịch, costPrice=9000  → dùng 10 bịch
-     *   lô B còn 20 bịch, costPrice=9500  → dùng 5 bịch
-     *   → weighted avg = (10*9000 + 5*9500) / 15 = 9166.67
-     */
-    @Transactional(readOnly = true)
-    public BigDecimal computeWeightedAvgCostFEFO(Long productId, int qtyNeeded) {
-        List<ProductBatch> batches = batchRepo
-                .findByProductIdAndRemainingQtyGreaterThanOrderByExpiryDateAsc(productId, 0);
+        // PESSIMISTIC WRITE LOCK: DB khoá các row lại, request khác phải chờ
+        List<ProductBatch> batches = batchRepo.findByProductIdForUpdateFEFO(productId);
 
         BigDecimal totalCost = BigDecimal.ZERO;
         int remaining = qtyNeeded;
 
         for (ProductBatch batch : batches) {
             if (remaining <= 0) break;
-            int take = Math.min(batch.getRemainingQty(), remaining);
-            totalCost = totalCost.add(batch.getCostPrice().multiply(BigDecimal.valueOf(take)));
-            remaining -= take;
+            int deduct = Math.min(batch.getRemainingQty(), remaining);
+            totalCost = totalCost.add(batch.getCostPrice().multiply(BigDecimal.valueOf(deduct)));
+            batch.setRemainingQty(batch.getRemainingQty() - deduct);
+            remaining -= deduct;
+            batchRepo.save(batch);
+            log.debug("FEFO deduct+cost: batch={} productId={} deduct={} batchRemaining={} costPrice={}",
+                    batch.getBatchCode(), productId, deduct, batch.getRemainingQty(), batch.getCostPrice());
         }
 
-        if (qtyNeeded <= 0) return BigDecimal.ZERO;
-        // Nếu không đủ lô (edge case), fallback về giá vốn lô đầu tiên
-        int actualQty = qtyNeeded - Math.max(remaining, 0);
-        if (actualQty <= 0) return batches.isEmpty() ? BigDecimal.ZERO : batches.get(0).getCostPrice();
-        return totalCost.divide(BigDecimal.valueOf(actualQty), 2, RoundingMode.HALF_UP);
+        if (remaining > 0) {
+            throw new IllegalStateException(
+                    "Lỗi đồng bộ lô hàng: productId=" + productId +
+                    " còn thiếu " + remaining + " đơn vị. Kiểm tra lại tồn kho.");
+        }
+
+        // Weighted average = tổng(qty × cost) / tổng qty deducted
+        return totalCost.divide(BigDecimal.valueOf(qtyNeeded), 2, RoundingMode.HALF_UP);
     }
 
     /**
-     * Hoàn lại tồn kho vào lô gần nhất khi huỷ hóa đơn.
-     * Chiến lược: cộng lại vào lô có expiryDate xa nhất (hàng vừa bán).
+     * Hoàn lại tồn kho khi hủy hóa đơn.
+     *
+     * FIX BUG #2 — Restore sai lô:
+     *   Code cũ hoàn vào lô XA NHẤT (reduce lấy phần tử cuối).
+     *   Nhưng FEFO bán từ lô GẦN NHẤT trước → phải hoàn về lô GẦN NHẤT.
+     *   Nếu hoàn sai lô, lần bán tiếp theo FEFO sẽ tính costSnapshot sai.
      */
     @Transactional
     public void restoreStockOnCancel(Long productId, int qty) {
-        List<ProductBatch> batches = batchRepo
-                .findByProductIdOrderByExpiryDateAsc(productId);
+        List<ProductBatch> batches = batchRepo.findByProductIdOrderByExpiryDateAsc(productId);
 
-        // Tìm lô có hết hạn xa nhất còn active (không expired hẳn)
+        if (batches.isEmpty()) {
+            log.warn("Không tìm thấy lô để hoàn hàng: productId={} qty={}", productId, qty);
+            return;
+        }
+
+        // Hoàn về lô GẦN HẾT HẠN NHẤT (expiryDate ASC → phần tử đầu tiên)
+        // vì đó là lô FEFO đã bán trước → hoàn đúng lô
         ProductBatch target = batches.stream()
                 .filter(b -> !b.isExpired())
-                .reduce((first, second) -> second) // lấy cuối (xa nhất)
-                .orElse(batches.isEmpty() ? null : batches.get(batches.size() - 1));
+                .findFirst()                          // ← lô gần nhất, KHÔNG phải xa nhất
+                .orElse(batches.get(0));              // fallback nếu tất cả đã expired
 
-        if (target != null) {
-            target.setRemainingQty(target.getRemainingQty() + qty);
-            batchRepo.save(target);
-            log.debug("Restore stock: batch={} productId={} qty=+{}",
-                    target.getBatchCode(), productId, qty);
-        } else {
-            log.warn("Không tìm thấy lô để hoàn hàng: productId={} qty={}", productId, qty);
-        }
+        target.setRemainingQty(target.getRemainingQty() + qty);
+        batchRepo.save(target);
+        log.debug("Restore stock: batch={} productId={} qty=+{} newRemaining={}",
+                target.getBatchCode(), productId, qty, target.getRemainingQty());
     }
 
     // ─── Mapper ───────────────────────────────────────────────────────────────
