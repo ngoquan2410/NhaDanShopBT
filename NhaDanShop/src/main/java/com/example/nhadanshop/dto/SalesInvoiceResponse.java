@@ -10,7 +10,14 @@ public record SalesInvoiceResponse(
         LocalDateTime invoiceDate,
         String customerName,
         String note,
+        /** Tổng tiền trước KM */
         BigDecimal totalAmount,
+        /** Số tiền được giảm từ KM */
+        BigDecimal discountAmount,
+        /** Tổng tiền THỰC TẾ phải trả = totalAmount - discountAmount */
+        BigDecimal finalAmount,
+        /** Tên chương trình KM đã áp dụng (null nếu không có) */
+        String promotionName,
         BigDecimal totalProfit,
         String createdBy,
         List<SalesInvoiceItemResponse> items,

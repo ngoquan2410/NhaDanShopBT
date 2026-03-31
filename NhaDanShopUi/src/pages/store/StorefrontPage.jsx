@@ -1,10 +1,11 @@
-﻿import { useState, useMemo, useCallback, useEffect } from 'react'
+﻿﻿import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProducts } from '../../hooks/useProducts'
 import { useCategories } from '../../hooks/useCategories'
 import { useAuth } from '../../context/AuthContext'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { invoiceService } from '../../services/invoiceService'
+import { promotionService } from '../../services/promotionService'
 import { productService } from '../../services/productService'
 import { pendingOrderService, ORDER_STATUS } from '../../services/pendingOrderService'
 import { usePendingOrderMutations, usePendingOrderById } from '../../hooks/usePendingOrders'
@@ -254,12 +255,37 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
   const [customerName, setCustomerName] = useState(user?.fullName || user?.username || '')
   const [note, setNote] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
-  const [stockConflicts, setStockConflicts] = useState([]) // lỗi tồn kho realtime
+  const [stockConflicts, setStockConflicts] = useState([])
   const [checking, setChecking] = useState(false)
+  const [selectedPromoId, setSelectedPromoId] = useState('')
+
+  const { data: activePromos = [] } = useQuery({
+    queryKey: ['promotions-active'],
+    queryFn: promotionService.getActive,
+    staleTime: 60_000,
+  })
+
   const total = cart.reduce((s, i) => s + i.product.sellPrice * i.qty, 0)
 
-  // Tiền mặt → tạo invoice ngay (flow cũ)
-  const createInvoice = useMutation(invoiceService.create, {
+  // Preview discount
+  const selectedPromo = activePromos.find(p => String(p.id) === String(selectedPromoId))
+  const previewDiscount = (() => {
+    if (!selectedPromo || total <= 0) return 0
+    if (total < Number(selectedPromo.minOrderValue)) return 0
+    if (selectedPromo.type === 'PERCENT_DISCOUNT') {
+      let disc = total * Number(selectedPromo.discountValue) / 100
+      if (selectedPromo.maxDiscount) disc = Math.min(disc, Number(selectedPromo.maxDiscount))
+      return Math.round(disc)
+    }
+    if (selectedPromo.type === 'FIXED_DISCOUNT') {
+      return Math.min(Number(selectedPromo.discountValue), total)
+    }
+    return 0
+  })()
+  const finalTotal = total - previewDiscount
+
+  const createInvoice = useMutation({
+    mutationFn: invoiceService.create,
     onSuccess: (inv) => {
       toast.success('Đặt hàng thành công!')
       onCashSuccess(inv)
@@ -267,14 +293,12 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
     onError: (e) => toast.error(e?.response?.data?.detail || e?.response?.data?.message || 'Lỗi khi tạo đơn hàng'),
   })
 
-  // Online → tạo pending order
   const { create: createPending } = usePendingOrderMutations()
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!isAuthenticated) { navigate('/login'); return }
 
-    // ── Bước 1: Validate tồn kho realtime từ BE ──────────────────────────────
     setChecking(true)
     setStockConflicts([])
     try {
@@ -283,23 +307,21 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
       )
       if (!checkResult.allAvailable) {
         setStockConflicts(checkResult.conflicts)
-        // Invalidate products cache → UI cập nhật availableQty mới nhất
         qc.invalidateQueries(['products'])
         setChecking(false)
-        return // Dừng, không submit
+        return
       }
     } catch (err) {
-      // Nếu check thất bại (network...) vẫn cho phép submit, BE sẽ validate lại
       console.warn('Stock check failed, proceeding:', err)
     }
     setChecking(false)
 
-    // ── Bước 2: Submit đơn hàng ───────────────────────────────────────────────
     const method = PAYMENT_METHODS.find(m => m.id === paymentMethod)
     const payload = {
       customerName,
       note: [note, `[${method?.label}]`].filter(Boolean).join(' | '),
       paymentMethod,
+      promotionId: selectedPromoId ? Number(selectedPromoId) : null,
       items: cart.map(i => ({ productId: i.product.id, quantity: i.qty })),
     }
 
@@ -310,7 +332,7 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
         const pending = await createPending.mutateAsync(payload)
         onPendingCreated(pending)
       } catch {
-        // Error đã xử lý trong usePendingOrderMutations
+        // Error handled in usePendingOrderMutations
       }
     }
   }
@@ -334,7 +356,7 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
   }
 
   const selectedMethod = PAYMENT_METHODS.find(m => m.id === paymentMethod)
-  const isLoading = checking || createInvoice.isLoading || createPending.isLoading
+  const isLoading = checking || createInvoice.isPending || createPending.isLoading
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -356,6 +378,37 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
               className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
               placeholder="Ghi chú đặc biệt..." />
           </div>
+
+          {/* Khuyến mãi */}
+          {activePromos.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">🎉 Chương trình khuyến mãi</label>
+              <select value={selectedPromoId} onChange={e => setSelectedPromoId(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
+                <option value="">— Không áp dụng —</option>
+                {activePromos.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.type === 'PERCENT_DISCOUNT' ? ` (Giảm ${p.discountValue}%)` :
+                     p.type === 'FIXED_DISCOUNT'   ? ` (Giảm ${Number(p.discountValue).toLocaleString('vi-VN')}₫)` :
+                     p.type === 'FREE_SHIPPING'     ? ' (Free ship)' :
+                     p.type === 'BUY_X_GET_Y'       ? ' (Mua X tặng Y)' : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedPromo?.type === 'BUY_X_GET_Y' && (
+                <p className="text-xs text-amber-700 bg-amber-50 rounded p-2 mt-1">
+                  🎁 {selectedPromo.description || 'Xem chi tiết tại quầy'}
+                </p>
+              )}
+              {selectedPromo && total < Number(selectedPromo.minOrderValue) && (
+                <p className="text-xs text-red-500 mt-1">
+                  ⚠️ Đơn chưa đủ điều kiện (tối thiểu {Number(selectedPromo.minOrderValue).toLocaleString('vi-VN')} ₫)
+                </p>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Phương thức thanh toán</label>
             <div className="grid grid-cols-2 gap-2">
@@ -375,7 +428,7 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
                 <p className="font-semibold text-amber-800">Thông tin thanh toán:</p>
                 <p className="text-amber-700">{selectedMethod.desc}</p>
                 <p className="text-amber-700 font-mono font-bold">
-                  Số tiền: {Number(total).toLocaleString('vi-VN')} ₫
+                  Số tiền: {Number(finalTotal).toLocaleString('vi-VN')} ₫
                 </p>
                 <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-800">
                   <p className="font-semibold">⚠️ Lưu ý quan trọng:</p>
@@ -385,7 +438,7 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
             )}
           </div>
 
-          {/* ── Cảnh báo tồn kho không đủ (realtime từ BE) ───────────────── */}
+          {/* Cảnh báo tồn kho */}
           {stockConflicts.length > 0 && (
             <div className="bg-red-50 border border-red-300 rounded-xl p-3 space-y-2">
               <p className="text-sm font-bold text-red-700">⚠️ Một số sản phẩm không đủ hàng:</p>
@@ -401,9 +454,6 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
                   </span>
                 </div>
               ))}
-              <p className="text-xs text-red-500 mt-1">
-                Vui lòng cập nhật số lượng trong giỏ hàng trước khi tiếp tục.
-              </p>
             </div>
           )}
 
@@ -418,11 +468,22 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
                 </span>
               </div>
             ))}
-            <div className="border-t pt-2 flex justify-between font-bold text-base">
-              <span>Tổng:</span>
-              <span className="text-amber-700">{Number(total).toLocaleString('vi-VN')} ₫</span>
+            <div className="border-t pt-2 flex justify-between text-sm text-gray-600">
+              <span>Tổng tiền hàng:</span>
+              <span>{Number(total).toLocaleString('vi-VN')} ₫</span>
+            </div>
+            {previewDiscount > 0 && (
+              <div className="flex justify-between text-sm text-amber-600 font-medium">
+                <span>🎉 Giảm KM:</span>
+                <span>-{previewDiscount.toLocaleString('vi-VN')} ₫</span>
+              </div>
+            )}
+            <div className="flex justify-between font-bold text-base text-amber-700 border-t pt-1">
+              <span>Thanh toán:</span>
+              <span>{Number(finalTotal).toLocaleString('vi-VN')} ₫</span>
             </div>
           </div>
+
 
           <button type="submit" disabled={isLoading}
             className="w-full text-white py-3 rounded-xl font-bold text-base transition disabled:opacity-60 flex items-center justify-center gap-2"

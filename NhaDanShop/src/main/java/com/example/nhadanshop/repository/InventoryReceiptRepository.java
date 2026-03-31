@@ -22,7 +22,7 @@ public interface InventoryReceiptRepository extends JpaRepository<InventoryRecei
      * Trả về max sequence (phần số cuối) hoặc 0 nếu chưa có.
      */
     @Query(value = """
-            SELECT COALESCE(MAX(CAST(SUBSTRING(receipt_no, LEN(:prefix) + 1, 10) AS INT)), 0)
+            SELECT COALESCE(MAX(CAST(SUBSTRING(receipt_no, LENGTH(:prefix) + 1, 10) AS INT)), 0)
             FROM inventory_receipts
             WHERE receipt_no LIKE :prefixPattern
             """, nativeQuery = true)

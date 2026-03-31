@@ -32,15 +32,19 @@ public class ReportService {
         LocalDateTime fromDt = from.atStartOfDay();
         LocalDateTime toDt = to.atTime(LocalTime.MAX);
 
-        BigDecimal totalRevenue = invoiceRepo.sumTotalAmountBetween(fromDt, toDt);
-        BigDecimal totalCost = invoiceRepo.sumCostBetween(fromDt, toDt);
-        BigDecimal totalProfit = invoiceRepo.sumProfitBetween(fromDt, toDt);
-        long totalInvoices = invoiceRepo.countByInvoiceDateBetween(fromDt, toDt);
+        BigDecimal totalRevenue  = invoiceRepo.sumTotalAmountBetween(fromDt, toDt);
+        BigDecimal totalCost     = invoiceRepo.sumCostBetween(fromDt, toDt);
+        BigDecimal totalDiscount = invoiceRepo.sumDiscountAmountBetween(fromDt, toDt);
+        long totalInvoices       = invoiceRepo.countByInvoiceDateBetween(fromDt, toDt);
+
+        // Doanh thu thực = tổng hóa đơn - tổng chiết khấu KM
+        BigDecimal netRevenue = nullSafe(totalRevenue).subtract(nullSafe(totalDiscount));
+        BigDecimal netProfit  = netRevenue.subtract(nullSafe(totalCost));
 
         return new ProfitReportResponse(from, to,
-                nullSafe(totalRevenue),
+                netRevenue,
                 nullSafe(totalCost),
-                nullSafe(totalProfit),
+                netProfit,
                 totalInvoices);
     }
 
