@@ -15,6 +15,7 @@ import ProfitReportPage from './pages/admin/ProfitReportPage'
 import RevenuePage from './pages/admin/RevenuePage'
 import UsersPage from './pages/admin/UsersPage'
 import SecuritySettingsPage from './pages/admin/SecuritySettingsPage'
+import PromotionsPage from './pages/admin/PromotionsPage'
 import StorefrontPage from './pages/store/StorefrontPage'
 import './App.css'
 
@@ -55,6 +56,7 @@ export default function App() {
             <Route path="inventory-report" element={<InventoryReportPage />} />
             <Route path="profit-report" element={<ProfitReportPage />} />
             <Route path="revenue" element={<RevenuePage />} />
+            <Route path="promotions" element={<PromotionsPage />} />
             <Route path="users" element={<UsersPage />} />
             <Route path="security" element={<SecuritySettingsPage />} />
           </Route>

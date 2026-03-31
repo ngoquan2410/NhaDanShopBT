@@ -10,5 +10,9 @@ public record InventoryReceiptItemResponse(
         String unit,
         Integer quantity,
         BigDecimal unitCost,
+        BigDecimal discountPercent,
+        BigDecimal discountedCost,
+        BigDecimal shippingAllocated,
+        BigDecimal finalCost,
         BigDecimal lineTotal
 ) {}
