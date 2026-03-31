@@ -25,9 +25,10 @@ function Modal({ title, onClose, children }) {
 function ReceiptForm({ products, onSubmit, loading }) {
   const [supplierName, setSupplierName] = useState('')
   const [note, setNote] = useState('')
-  const [items, setItems] = useState([{ productId: '', quantity: 1, unitCost: 0 }])
+  const [shippingFee, setShippingFee] = useState(0)
+  const [items, setItems] = useState([{ productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
 
-  const addItem = () => setItems(i => [...i, { productId: '', quantity: 1, unitCost: 0 }])
+  const addItem = () => setItems(i => [...i, { productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
   const removeItem = (idx) => setItems(i => i.filter((_, j) => j !== idx))
   const setItem = (idx, key, val) =>
     setItems(i => i.map((it, j) => j === idx ? { ...it, [key]: val } : it))
@@ -37,15 +38,24 @@ function ReceiptForm({ products, onSubmit, loading }) {
     onSubmit({
       supplierName,
       note,
+      shippingFee: Number(shippingFee),
       items: items.map(it => ({
         productId: Number(it.productId),
         quantity: Number(it.quantity),
         unitCost: Number(it.unitCost),
+        discountPercent: Number(it.discountPercent) || 0,
       })),
     })
   }
 
-  const total = items.reduce((s, it) => s + Number(it.quantity) * Number(it.unitCost), 0)
+  // Tổng tiền gốc trước chiết khấu
+  const subtotal = items.reduce((s, it) => s + Number(it.quantity) * Number(it.unitCost), 0)
+  // Tổng sau chiết khấu từng dòng
+  const totalAfterDiscount = items.reduce((s, it) => {
+    const disc = Number(it.discountPercent) || 0
+    return s + Number(it.quantity) * Number(it.unitCost) * (1 - disc / 100)
+  }, 0)
+  const grandTotal = totalAfterDiscount + Number(shippingFee)
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -61,6 +71,16 @@ function ReceiptForm({ products, onSubmit, loading }) {
           <input value={note} onChange={e => setNote(e.target.value)}
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
             placeholder="Ghi chú (tùy chọn)" />
+        </div>
+        <div className="col-span-2">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            🚚 Phí vận chuyển (₫)
+            <span className="ml-1 text-xs text-gray-400 font-normal">— sẽ được chia đều vào giá vốn từng sản phẩm</span>
+          </label>
+          <input type="number" min={0} step={1000} value={shippingFee}
+            onChange={e => setShippingFee(e.target.value)}
+            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            placeholder="0" />
         </div>
       </div>
 
@@ -98,12 +118,49 @@ function ReceiptForm({ products, onSubmit, loading }) {
                 onChange={e => setItem(idx, 'unitCost', e.target.value)}
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
             </div>
+            <div className="w-24">
+              {idx === 0 && <label className="block text-xs text-gray-500 mb-1">CK % 🏷️</label>}
+              <div className="relative">
+                <input type="number" min={0} max={100} step={0.1} value={item.discountPercent}
+                  onChange={e => setItem(idx, 'discountPercent', e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 pr-6"
+                  placeholder="0" />
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
+              </div>
+            </div>
+            <div className="w-28 text-right pb-2">
+              {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Sau CK</label>}
+              <span className={`text-xs font-semibold ${Number(item.discountPercent) > 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                {(Number(item.quantity) * Number(item.unitCost) * (1 - (Number(item.discountPercent) || 0) / 100)).toLocaleString('vi-VN')} ₫
+              </span>
+            </div>
             <button type="button" onClick={() => removeItem(idx)}
               className="text-red-500 hover:text-red-700 pb-2 text-lg">&times;</button>
           </div>
         ))}
-        <div className="text-right mt-3 font-semibold text-green-700">
-          Tổng tiền nhập: {total.toLocaleString('vi-VN')} ₫
+
+        {/* Summary */}
+        <div className="mt-4 bg-green-50 rounded-lg p-3 space-y-1.5 text-sm">
+          <div className="flex justify-between text-gray-600">
+            <span>Tổng tiền gốc:</span>
+            <span>{subtotal.toLocaleString('vi-VN')} ₫</span>
+          </div>
+          {totalAfterDiscount < subtotal && (
+            <div className="flex justify-between text-green-700">
+              <span>Sau chiết khấu:</span>
+              <span>-{(subtotal - totalAfterDiscount).toLocaleString('vi-VN')} ₫</span>
+            </div>
+          )}
+          {Number(shippingFee) > 0 && (
+            <div className="flex justify-between text-blue-600">
+              <span>Phí vận chuyển:</span>
+              <span>+{Number(shippingFee).toLocaleString('vi-VN')} ₫</span>
+            </div>
+          )}
+          <div className="flex justify-between font-bold text-green-800 border-t pt-1.5 text-base">
+            <span>Tổng thực trả:</span>
+            <span>{grandTotal.toLocaleString('vi-VN')} ₫</span>
+          </div>
         </div>
       </div>
 
@@ -474,33 +531,62 @@ export default function ReceiptsPage() {
               <div><span className="text-gray-500">Ngày:</span> {dayjs(detail.receiptDate).format('DD/MM/YYYY HH:mm')}</div>
               <div><span className="text-gray-500">Người tạo:</span> {detail.createdBy}</div>
               <div><span className="text-gray-500">Ghi chú:</span> {detail.note || '—'}</div>
+              {Number(detail.shippingFee) > 0 && (
+                <div className="col-span-2 text-blue-600 font-medium">
+                  🚚 Phí vận chuyển: {Number(detail.shippingFee).toLocaleString('vi-VN')} ₫
+                </div>
+              )}
             </div>
-            <table className="w-full border rounded-lg overflow-hidden mt-3">
+            <table className="w-full border rounded-lg overflow-hidden mt-3 text-xs">
               <thead className="bg-gray-50">
-                <tr className="text-gray-600 text-xs">
+                <tr className="text-gray-600">
                   <th className="text-left px-3 py-2">Sản phẩm</th>
                   <th className="text-right px-3 py-2">SL</th>
-                  <th className="text-right px-3 py-2">Đơn giá</th>
-                  <th className="text-right px-3 py-2">Thành tiền</th>
+                  <th className="text-right px-3 py-2">Đơn giá gốc</th>
+                  <th className="text-right px-3 py-2">CK %</th>
+                  <th className="text-right px-3 py-2">Sau CK</th>
+                  <th className="text-right px-3 py-2">+ Ship</th>
+                  <th className="text-right px-3 py-2 text-green-700 font-bold">Giá vốn cuối</th>
                 </tr>
               </thead>
               <tbody>
                 {detail.items?.map((it, i) => (
-                  <tr key={i} className="border-t">
-                    <td className="px-3 py-2">{it.productName}</td>
+                  <tr key={i} className="border-t hover:bg-gray-50">
+                    <td className="px-3 py-2 font-medium">{it.productName}</td>
                     <td className="px-3 py-2 text-right">{it.quantity} {it.unit}</td>
                     <td className="px-3 py-2 text-right">{Number(it.unitCost).toLocaleString('vi-VN')}</td>
-                    <td className="px-3 py-2 text-right font-medium">{Number(it.quantity * it.unitCost).toLocaleString('vi-VN')}</td>
+                    <td className="px-3 py-2 text-right">
+                      {Number(it.discountPercent) > 0
+                        ? <span className="text-orange-600 font-medium">{it.discountPercent}%</span>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-right">{Number(it.discountedCost).toLocaleString('vi-VN')}</td>
+                    <td className="px-3 py-2 text-right text-blue-600">
+                      {Number(it.shippingAllocated) > 0
+                        ? `+${Number(it.shippingAllocated).toLocaleString('vi-VN')}`
+                        : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right font-bold text-green-700">
+                      {Number(it.finalCost).toLocaleString('vi-VN')} ₫
+                    </td>
                   </tr>
                 ))}
               </tbody>
               <tfoot className="bg-gray-50">
                 <tr>
-                  <td colSpan={3} className="px-3 py-2 font-semibold text-right">Tổng cộng:</td>
-                  <td className="px-3 py-2 text-right font-bold text-green-700">
+                  <td colSpan={6} className="px-3 py-2 font-semibold text-right">Tổng tiền gốc:</td>
+                  <td className="px-3 py-2 text-right font-bold text-gray-700">
                     {Number(detail.totalAmount).toLocaleString('vi-VN')} ₫
                   </td>
                 </tr>
+                {Number(detail.shippingFee) > 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-2 text-right text-blue-600">+ Phí vận chuyển:</td>
+                    <td className="px-3 py-2 text-right font-bold text-blue-600">
+                      {Number(detail.shippingFee).toLocaleString('vi-VN')} ₫
+                    </td>
+                  </tr>
+                )}
               </tfoot>
             </table>
           </div>

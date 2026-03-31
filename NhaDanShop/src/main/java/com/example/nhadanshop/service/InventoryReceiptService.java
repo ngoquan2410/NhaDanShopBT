@@ -20,6 +20,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -44,39 +45,85 @@ public class InventoryReceiptService {
         receipt.setNote(req.note());
         receipt.setReceiptDate(LocalDateTime.now());
 
+        BigDecimal shippingFee = req.shippingFee() != null ? req.shippingFee() : BigDecimal.ZERO;
+        receipt.setShippingFee(shippingFee);
+
         // Gán người tạo
         String currentUsername = SecurityContextHolder.getContext().getAuthentication().getName();
         userRepo.findByUsername(currentUsername).ifPresent(receipt::setCreatedBy);
 
-        BigDecimal totalAmount = BigDecimal.ZERO;
-        List<InventoryReceiptItem> items = new ArrayList<>();
-
         // Lưu receipt trước để có ID dùng cho batch_code
         InventoryReceipt saved = receiptRepo.save(receipt);
 
-        for (ReceiptItemRequest itemReq : req.items()) {
+        // ── Bước 1: Tính discountedCost và tổng tiền sau chiết khấu ────────
+        //    discountedCost(i) = unitCost(i) * qty(i) * (1 - discount%/100)
+        //    Dùng để phân bổ shippingFee tỷ lệ theo giá trị từng dòng
+        List<ReceiptItemRequest> reqItems = req.items();
+        List<BigDecimal> discountedLineTotals = new ArrayList<>();
+        BigDecimal totalDiscountedValue = BigDecimal.ZERO;
+
+        for (ReceiptItemRequest itemReq : reqItems) {
+            BigDecimal discount = itemReq.discountPercent() != null ? itemReq.discountPercent() : BigDecimal.ZERO;
+            // discountedUnitCost = unitCost * (1 - discount/100)
+            BigDecimal discountedUnit = itemReq.unitCost()
+                    .multiply(BigDecimal.ONE.subtract(discount.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP)));
+            BigDecimal discountedLine = discountedUnit.multiply(BigDecimal.valueOf(itemReq.quantity()));
+            discountedLineTotals.add(discountedLine);
+            totalDiscountedValue = totalDiscountedValue.add(discountedLine);
+        }
+
+        // ── Bước 2: Phân bổ shippingFee theo tỷ lệ giá trị từng dòng ────────
+        //    shippingAllocated(i) = shippingFee * discountedLine(i) / totalDiscountedValue
+        //    finalCost(i) per unit = (discountedLine(i) + shippingAllocated(i)) / qty(i)
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        List<InventoryReceiptItem> items = new ArrayList<>();
+
+        for (int i = 0; i < reqItems.size(); i++) {
+            ReceiptItemRequest itemReq = reqItems.get(i);
+
             Product product = productRepo.findById(itemReq.productId())
                     .orElseThrow(() -> new EntityNotFoundException(
                             "Không tìm thấy sản phẩm ID: " + itemReq.productId()));
 
             // Quy đổi số lượng nhập → đơn vị bán lẻ
-            // Nếu importUnit là "bịch"/"hộp" → atomic, không nhân pieces
-            // Nếu importUnit là "kg"/"xâu"   → nhân piecesPerImportUnit
             int addedRetailQty = UnitConverter.toRetailQty(
                     product.getImportUnit(),
                     product.getPiecesPerImportUnit(),
                     itemReq.quantity());
 
-            // Cập nhật giá vốn mới nhất và cộng tồn kho
-            product.setCostPrice(itemReq.unitCost());
+            BigDecimal discount = itemReq.discountPercent() != null ? itemReq.discountPercent() : BigDecimal.ZERO;
+
+            // discountedCost per unit
+            BigDecimal discountedUnitCost = itemReq.unitCost()
+                    .multiply(BigDecimal.ONE.subtract(discount.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP)))
+                    .setScale(2, RoundingMode.HALF_UP);
+
+            BigDecimal discountedLine = discountedLineTotals.get(i);
+
+            // shippingAllocated per unit (chia đều từ tổng shippingFee theo tỷ lệ giá trị)
+            BigDecimal shippingAllocatedLine = BigDecimal.ZERO;
+            if (totalDiscountedValue.compareTo(BigDecimal.ZERO) > 0) {
+                shippingAllocatedLine = shippingFee
+                        .multiply(discountedLine)
+                        .divide(totalDiscountedValue, 2, RoundingMode.HALF_UP);
+            }
+            BigDecimal shippingPerUnit = addedRetailQty > 0
+                    ? shippingAllocatedLine.divide(BigDecimal.valueOf(addedRetailQty), 2, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
+
+            // finalCost per unit = discountedUnitCost + shippingPerUnit
+            BigDecimal finalUnitCost = discountedUnitCost.add(shippingPerUnit).setScale(2, RoundingMode.HALF_UP);
+
+            // Cập nhật giá vốn mới nhất (finalCost) và cộng tồn kho
+            product.setCostPrice(finalUnitCost);
             product.setStockQty(product.getStockQty() + addedRetailQty);
             product.setUpdatedAt(LocalDateTime.now());
             productRepo.save(product);
 
-            // ── Tạo lô hàng (Batch) ──────────────────────────────────────────
+            // ── Tạo lô hàng (Batch) ─────────────────────────────────────────
             LocalDate expiryDate = (product.getExpiryDays() != null && product.getExpiryDays() > 0)
                     ? LocalDate.now().plusDays(product.getExpiryDays())
-                    : LocalDate.now().plusYears(10); // Không có expiryDays → 10 năm
+                    : LocalDate.now().plusYears(10);
 
             String batchCode = buildBatchCode(saved.getReceiptNo(), product.getCode());
 
@@ -87,7 +134,7 @@ public class InventoryReceiptService {
             batch.setExpiryDate(expiryDate);
             batch.setImportQty(addedRetailQty);
             batch.setRemainingQty(addedRetailQty);
-            batch.setCostPrice(itemReq.unitCost());
+            batch.setCostPrice(finalUnitCost); // dùng finalCost (sau chiết khấu + phí ship)
             batchRepo.save(batch);
             // ─────────────────────────────────────────────────────────────────
 
@@ -96,7 +143,12 @@ public class InventoryReceiptService {
             item.setProduct(product);
             item.setQuantity(itemReq.quantity());
             item.setUnitCost(itemReq.unitCost());
+            item.setDiscountPercent(discount);
+            item.setDiscountedCost(discountedUnitCost);
+            item.setShippingAllocated(shippingPerUnit);
+            item.setFinalCost(finalUnitCost);
 
+            // totalAmount = tổng tiền gốc trước chiết khấu (để dễ đối chiếu)
             totalAmount = totalAmount.add(
                     itemReq.unitCost().multiply(BigDecimal.valueOf(itemReq.quantity())));
             items.add(item);

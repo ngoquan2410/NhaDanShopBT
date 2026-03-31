@@ -11,6 +11,7 @@ const links = [
   { to: '/admin/inventory-report', label: 'Tồn kho',         icon: '📊' },
   { to: '/admin/profit-report',    label: 'Lợi nhuận',       icon: '💰' },
   { to: '/admin/revenue',          label: 'Doanh thu',        icon: '📈' },
+  { to: '/admin/promotions',       label: 'Khuyến mãi',       icon: '🎉' },
   { to: '/admin/users',            label: 'Người dùng',      icon: '👥' },
   { to: '/admin/security',         label: 'Bảo mật / 2FA',   icon: '🔐' },
 ]
