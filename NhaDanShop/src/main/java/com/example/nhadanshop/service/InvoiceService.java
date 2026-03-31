@@ -4,9 +4,11 @@ import com.example.nhadanshop.dto.InvoiceItemRequest;
 import com.example.nhadanshop.dto.SalesInvoiceRequest;
 import com.example.nhadanshop.dto.SalesInvoiceResponse;
 import com.example.nhadanshop.entity.Product;
+import com.example.nhadanshop.entity.Promotion;
 import com.example.nhadanshop.entity.SalesInvoice;
 import com.example.nhadanshop.entity.SalesInvoiceItem;
 import com.example.nhadanshop.repository.ProductRepository;
+import com.example.nhadanshop.repository.PromotionRepository;
 import com.example.nhadanshop.repository.SalesInvoiceRepository;
 import com.example.nhadanshop.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -18,6 +20,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,6 +35,7 @@ public class InvoiceService {
     private final UserRepository userRepo;
     private final InvoiceNumberGenerator numberGen;
     private final ProductBatchService batchService;
+    private final PromotionRepository promotionRepo;
 
     @Transactional
     public SalesInvoiceResponse createInvoice(SalesInvoiceRequest req) {
@@ -50,37 +54,30 @@ public class InvoiceService {
         for (InvoiceItemRequest itemReq : req.items()) {
             Product product = productRepo.findById(itemReq.productId())
                     .orElseThrow(() -> new EntityNotFoundException(
-                            "Không tìm thấy sản phẩm ID: " + itemReq.productId()));
+                            "Khong tim thay san pham ID: " + itemReq.productId()));
 
             if (!product.getActive()) {
                 throw new IllegalArgumentException(
-                        "Sản phẩm '" + product.getName() + "' đã ngừng kinh doanh");
+                        "San pham '" + product.getName() + "' da ngung kinh doanh");
             }
             if (product.getStockQty() < itemReq.quantity()) {
                 throw new IllegalArgumentException(
-                        "Sản phẩm '" + product.getName() + "' không đủ hàng. " +
-                        "Tồn kho: " + product.getStockQty() + ", yêu cầu: " + itemReq.quantity());
+                        "San pham '" + product.getName() + "' khong du hang. " +
+                        "Ton kho: " + product.getStockQty() + ", yeu cau: " + itemReq.quantity());
             }
 
-            // [ATOMIC] Tính weighted avg cost VÀ trừ lô hàng FEFO trong 1 transaction
-            // với PESSIMISTIC WRITE LOCK → tránh race condition khi nhiều request đồng thời
-            // costSnapshot luôn khớp chính xác với lô thực tế bị deduct
             BigDecimal fefoAvgCost = batchService.deductStockFEFOAndComputeCost(
                     product.getId(), itemReq.quantity());
 
-            // Trừ tồn kho tổng trên product
             product.setStockQty(product.getStockQty() - itemReq.quantity());
             product.setUpdatedAt(LocalDateTime.now());
             productRepo.save(product);
-
 
             SalesInvoiceItem item = new SalesInvoiceItem();
             item.setInvoice(invoice);
             item.setProduct(product);
             item.setQuantity(itemReq.quantity());
             item.setUnitPrice(product.getSellPrice());
-            // Dùng giá vốn bình quân FEFO thay vì product.getCostPrice()
-            // → đảm bảo lợi nhuận tính đúng theo từng lô
             item.setUnitCostSnapshot(fefoAvgCost.compareTo(BigDecimal.ZERO) > 0
                     ? fefoAvgCost : product.getCostPrice());
 
@@ -92,13 +89,53 @@ public class InvoiceService {
         invoice.setTotalAmount(totalAmount);
         invoice.getItems().addAll(items);
 
+        // Apply promotion discount
+        BigDecimal discountAmount = BigDecimal.ZERO;
+        if (req.promotionId() != null) {
+            Promotion promo = promotionRepo.findById(req.promotionId()).orElse(null);
+            if (promo != null && promo.isCurrentlyActive()) {
+                discountAmount = computeDiscount(promo, totalAmount);
+                invoice.setPromotionId(promo.getId());
+                invoice.setPromotionName(promo.getName());
+            }
+        }
+        invoice.setDiscountAmount(discountAmount);
+
         SalesInvoice saved = invoiceRepo.save(invoice);
         return DtoMapper.toResponse(saved);
     }
 
+    /**
+     * Tinh so tien giam tu khuyen mai.
+     * PERCENT_DISCOUNT: giam % tong HĐ, co the cap boi maxDiscount
+     * FIXED_DISCOUNT  : giam so tien co dinh
+     * FREE_SHIPPING, BUY_X_GET_Y: ghi nhan ten KM, khong tu dong tru tien
+     */
+    private BigDecimal computeDiscount(Promotion promo, BigDecimal totalAmount) {
+        if (totalAmount.compareTo(promo.getMinOrderValue()) < 0) {
+            return BigDecimal.ZERO;
+        }
+        return switch (promo.getType()) {
+            case "PERCENT_DISCOUNT" -> {
+                BigDecimal pct = promo.getDiscountValue()
+                        .divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP);
+                BigDecimal disc = totalAmount.multiply(pct).setScale(0, RoundingMode.HALF_UP);
+                if (promo.getMaxDiscount() != null && disc.compareTo(promo.getMaxDiscount()) > 0) {
+                    disc = promo.getMaxDiscount();
+                }
+                yield disc;
+            }
+            case "FIXED_DISCOUNT" -> {
+                BigDecimal disc = promo.getDiscountValue();
+                yield disc.compareTo(totalAmount) > 0 ? totalAmount : disc;
+            }
+            default -> BigDecimal.ZERO;
+        };
+    }
+
     public SalesInvoiceResponse getInvoice(Long id) {
         SalesInvoice inv = invoiceRepo.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy hóa đơn ID: " + id));
+                .orElseThrow(() -> new EntityNotFoundException("Khong tim thay hoa don ID: " + id));
         return DtoMapper.toResponse(inv);
     }
 
@@ -116,18 +153,14 @@ public class InvoiceService {
     @Transactional
     public void deleteInvoice(Long id) {
         SalesInvoice inv = invoiceRepo.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy hóa đơn ID: " + id));
-
+                .orElseThrow(() -> new EntityNotFoundException("Khong tim thay hoa don ID: " + id));
         for (SalesInvoiceItem item : inv.getItems()) {
             Product p = item.getProduct();
-            // Hoàn tồn kho tổng
             p.setStockQty(p.getStockQty() + item.getQuantity());
             p.setUpdatedAt(LocalDateTime.now());
             productRepo.save(p);
-            // Hoàn lại lô hàng
             batchService.restoreStockOnCancel(p.getId(), item.getQuantity());
         }
         invoiceRepo.delete(inv);
     }
 }
-

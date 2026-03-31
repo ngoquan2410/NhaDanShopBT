@@ -3,6 +3,8 @@ import { useInvoices, useInvoiceMutations } from '../../hooks/useInvoices'
 import { useProducts } from '../../hooks/useProducts'
 import { useSort } from '../../hooks/useSort'
 import { usePendingOrders } from '../../hooks/usePendingOrders'
+import { useQuery } from '@tanstack/react-query'
+import { promotionService } from '../../services/promotionService'
 import PendingOrdersTab from './PendingOrdersTab'
 import BarcodeScanner from '../../components/BarcodeScanner'
 import dayjs from 'dayjs'
@@ -81,6 +83,12 @@ function InvoiceForm({ products, onSubmit, loading }) {
   const [note, setNote] = useState('')
   const [items, setItems] = useState([{ productId: '', quantity: 1 }])
   const [showScanner, setShowScanner] = useState(false)
+  const [selectedPromoId, setSelectedPromoId] = useState('')
+
+  const { data: activePromos = [] } = useQuery({
+    queryKey: ['promotions-active'],
+    queryFn: promotionService.getActive,
+  })
 
   const addItem = () => setItems(i => [...i, { productId: '', quantity: 1 }])
   const removeItem = (idx) => setItems(i => i.filter((_, j) => j !== idx))
@@ -109,11 +117,33 @@ function InvoiceForm({ products, onSubmit, loading }) {
     return s + (p ? Number(p.sellPrice) * Number(it.quantity) : 0)
   }, 0)
 
+  // Tính preview discount
+  const selectedPromo = activePromos.find(p => String(p.id) === String(selectedPromoId))
+  const previewDiscount = (() => {
+    if (!selectedPromo || total <= 0) return 0
+    if (total < Number(selectedPromo.minOrderValue)) return 0
+    if (selectedPromo.type === 'PERCENT_DISCOUNT') {
+      let disc = total * Number(selectedPromo.discountValue) / 100
+      if (selectedPromo.maxDiscount) disc = Math.min(disc, Number(selectedPromo.maxDiscount))
+      return Math.round(disc)
+    }
+    if (selectedPromo.type === 'FIXED_DISCOUNT') {
+      return Math.min(Number(selectedPromo.discountValue), total)
+    }
+    return 0
+  })()
+  const finalTotal = total - previewDiscount
+
   const handleSubmit = (e) => {
     e.preventDefault()
     const validItems = items.filter(i => i.productId)
     if (!validItems.length) return
-    onSubmit({ customerName, note, items: validItems.map(it => ({ productId: Number(it.productId), quantity: Number(it.quantity) })) })
+    onSubmit({
+      customerName,
+      note,
+      promotionId: selectedPromoId ? Number(selectedPromoId) : null,
+      items: validItems.map(it => ({ productId: Number(it.productId), quantity: Number(it.quantity) })),
+    })
   }
 
   return (
@@ -132,11 +162,38 @@ function InvoiceForm({ products, onSubmit, loading }) {
               className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               placeholder="Ghi chú (tùy chọn)" />
           </div>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">🎉 Chương trình khuyến mãi</label>
+            <select value={selectedPromoId} onChange={e => setSelectedPromoId(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
+              <option value="">— Không áp dụng KM —</option>
+              {activePromos.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.type === 'PERCENT_DISCOUNT' ? ` (Giảm ${p.discountValue}%)` :
+                   p.type === 'FIXED_DISCOUNT'   ? ` (Giảm ${Number(p.discountValue).toLocaleString('vi-VN')} ₫)` :
+                   p.type === 'FREE_SHIPPING'     ? ' (Free ship)' :
+                   p.type === 'BUY_X_GET_Y'       ? ' (Mua X tặng Y)' : ''}
+                  {p.minOrderValue > 0 ? ` | Đơn từ ${Number(p.minOrderValue).toLocaleString('vi-VN')} ₫` : ''}
+                </option>
+              ))}
+            </select>
+            {selectedPromo?.type === 'BUY_X_GET_Y' && (
+              <p className="text-xs text-amber-600 mt-1 bg-amber-50 rounded p-2">
+                🎁 <b>Mua X tặng Y:</b> {selectedPromo.description || 'Xem chi tiết chương trình'}
+              </p>
+            )}
+            {selectedPromo?.type === 'FREE_SHIPPING' && (
+              <p className="text-xs text-blue-600 mt-1 bg-blue-50 rounded p-2">
+                🚚 <b>Miễn phí vận chuyển</b> đã được áp dụng cho đơn hàng này
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="border-t pt-4">
           <div className="flex items-center justify-between mb-3">
-            <h4 className="font-semibold text-gray-700">Chi tiết nhập hàng</h4>
+            <h4 className="font-semibold text-gray-700">Chi tiết hóa đơn</h4>
             <div className="flex gap-2">
               <button type="button" onClick={() => setShowScanner(true)}
                 className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 border border-blue-200 rounded-lg px-3 py-1">
@@ -176,8 +233,27 @@ function InvoiceForm({ products, onSubmit, loading }) {
               </div>
             )
           })}
-          <div className="text-right mt-3 font-semibold text-green-700 text-lg">
-            Tổng cộng: {total.toLocaleString('vi-VN')} ₫
+          {/* Summary */}
+          <div className="mt-3 bg-gray-50 rounded-lg p-3 space-y-1.5 text-sm">
+            <div className="flex justify-between text-gray-600">
+              <span>Tổng tiền hàng:</span>
+              <span>{total.toLocaleString('vi-VN')} ₫</span>
+            </div>
+            {previewDiscount > 0 && (
+              <div className="flex justify-between text-amber-600 font-medium">
+                <span>🎉 Giảm KM ({selectedPromo?.name}):</span>
+                <span>-{previewDiscount.toLocaleString('vi-VN')} ₫</span>
+              </div>
+            )}
+            {selectedPromo && total < Number(selectedPromo.minOrderValue) && (
+              <p className="text-xs text-red-500">
+                ⚠️ Đơn chưa đủ điều kiện (tối thiểu {Number(selectedPromo.minOrderValue).toLocaleString('vi-VN')} ₫)
+              </p>
+            )}
+            <div className="flex justify-between font-bold text-green-700 text-base border-t pt-1.5">
+              <span>Khách thanh toán:</span>
+              <span>{finalTotal.toLocaleString('vi-VN')} ₫</span>
+            </div>
           </div>
         </div>
 
@@ -210,6 +286,12 @@ function InvoiceDetail({ inv, onClose }) {
           <div><span className="text-gray-500">Ngày:</span> <b>{dayjs(inv.invoiceDate).format('DD/MM/YYYY HH:mm')}</b></div>
           <div><span className="text-gray-500">Người tạo:</span> {inv.createdBy}</div>
           <div><span className="text-gray-500">Ghi chú:</span> {inv.note || '—'}</div>
+          {inv.promotionName && (
+            <div className="col-span-2">
+              <span className="text-gray-500">🎉 Khuyến mãi:</span>{' '}
+              <span className="text-amber-600 font-semibold">{inv.promotionName}</span>
+            </div>
+          )}
         </div>
         <table className="w-full border rounded-lg overflow-hidden mt-3">
           <thead className="bg-gray-50">
@@ -232,11 +314,23 @@ function InvoiceDetail({ inv, onClose }) {
           </tbody>
           <tfoot className="bg-gray-50 text-sm font-semibold">
             <tr>
-              <td colSpan={3} className="px-3 py-2 text-right">Tổng doanh thu:</td>
-              <td className="px-3 py-2 text-right text-green-700">{Number(inv.totalAmount).toLocaleString('vi-VN')} ₫</td>
+              <td colSpan={3} className="px-3 py-2 text-right text-gray-600">Tổng tiền hàng:</td>
+              <td className="px-3 py-2 text-right text-gray-700">{Number(inv.totalAmount).toLocaleString('vi-VN')} ₫</td>
+            </tr>
+            {Number(inv.discountAmount) > 0 && (
+              <tr>
+                <td colSpan={3} className="px-3 py-2 text-right text-amber-600">🎉 Giảm KM:</td>
+                <td className="px-3 py-2 text-right text-amber-600 font-bold">-{Number(inv.discountAmount).toLocaleString('vi-VN')} ₫</td>
+              </tr>
+            )}
+            <tr>
+              <td colSpan={3} className="px-3 py-2 text-right text-green-700 font-bold text-base">Khách thanh toán:</td>
+              <td className="px-3 py-2 text-right text-green-700 font-bold text-base">
+                {Number(inv.finalAmount ?? inv.totalAmount).toLocaleString('vi-VN')} ₫
+              </td>
             </tr>
             <tr>
-              <td colSpan={3} className="px-3 py-2 text-right">Lợi nhuận:</td>
+              <td colSpan={3} className="px-3 py-2 text-right text-blue-600">Lợi nhuận gộp:</td>
               <td className="px-3 py-2 text-right text-blue-600">{Number(inv.totalProfit).toLocaleString('vi-VN')} ₫</td>
             </tr>
           </tfoot>

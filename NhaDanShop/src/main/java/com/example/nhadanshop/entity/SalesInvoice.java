@@ -31,8 +31,21 @@ public class SalesInvoice {
     @Column(name = "note", length = 500)
     private String note;
 
+    /** Tổng tiền trước khi áp dụng khuyến mãi */
     @Column(name = "total_amount", nullable = false, precision = 18, scale = 2)
     private BigDecimal totalAmount = BigDecimal.ZERO;
+
+    /** ID chương trình khuyến mãi đã áp dụng (nullable) */
+    @Column(name = "promotion_id")
+    private Long promotionId;
+
+    /** Tên chương trình KM (snapshot, tránh mất data khi KM bị xóa) */
+    @Column(name = "promotion_name", length = 200)
+    private String promotionName;
+
+    /** Số tiền được giảm từ KM (= totalAmount - finalAmount) */
+    @Column(name = "discount_amount", nullable = false, precision = 18, scale = 2)
+    private BigDecimal discountAmount = BigDecimal.ZERO;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

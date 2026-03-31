@@ -23,7 +23,7 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
      * Trả về max sequence (phần số cuối) hoặc 0 nếu chưa có.
      */
     @Query(value = """
-            SELECT COALESCE(MAX(CAST(SUBSTRING(invoice_no, LEN(:prefix) + 1, 10) AS INT)), 0)
+            SELECT COALESCE(MAX(CAST(SUBSTRING(invoice_no, LENGTH(:prefix) + 1, 10) AS INT)), 0)
             FROM sales_invoices
             WHERE invoice_no LIKE :prefixPattern
             """, nativeQuery = true)
@@ -61,6 +61,16 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
             WHERE item.invoice.invoiceDate BETWEEN :from AND :to
             """)
     BigDecimal sumCostBetween(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
+
+    /** Tổng tiền giảm từ khuyến mãi trong khoảng thời gian */
+    @Query("""
+            SELECT COALESCE(SUM(i.discountAmount), 0)
+            FROM SalesInvoice i
+            WHERE i.invoiceDate BETWEEN :from AND :to
+            """)
+    BigDecimal sumDiscountAmountBetween(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 

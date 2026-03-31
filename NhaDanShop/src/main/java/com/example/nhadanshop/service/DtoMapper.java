@@ -62,9 +62,19 @@ public final class DtoMapper {
                         .multiply(BigDecimal.valueOf(i.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        BigDecimal discountAmount = inv.getDiscountAmount() != null ? inv.getDiscountAmount() : BigDecimal.ZERO;
+        BigDecimal finalAmount = inv.getTotalAmount().subtract(discountAmount);
+        // Profit should also deduct the promotion discount
+        BigDecimal adjustedProfit = totalProfit.subtract(discountAmount);
+
         return new SalesInvoiceResponse(
                 inv.getId(), inv.getInvoiceNo(), inv.getInvoiceDate(),
-                inv.getCustomerName(), inv.getNote(), inv.getTotalAmount(), totalProfit,
+                inv.getCustomerName(), inv.getNote(),
+                inv.getTotalAmount(),
+                discountAmount,
+                finalAmount,
+                inv.getPromotionName(),
+                adjustedProfit,
                 inv.getCreatedBy() != null ? inv.getCreatedBy().getUsername() : null,
                 inv.getItems().stream().map(DtoMapper::toResponse).collect(Collectors.toList()),
                 inv.getCreatedAt(), inv.getUpdatedAt()
