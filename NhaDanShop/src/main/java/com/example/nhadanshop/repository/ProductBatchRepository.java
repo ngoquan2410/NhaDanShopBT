@@ -1,5 +1,7 @@
 package com.example.nhadanshop.repository;
 
+import com.example.nhadanshop.entity.InventoryReceipt;
+import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.entity.ProductBatch;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -14,22 +16,15 @@ import java.util.List;
 @Repository
 public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long> {
 
-    /**
-     * FEFO: Lấy các lô còn hàng của 1 sản phẩm,
-     * sắp xếp theo expiryDate tăng dần (hết hạn sớm → bán trước).
-     */
     List<ProductBatch> findByProductIdAndRemainingQtyGreaterThanOrderByExpiryDateAsc(
             Long productId, int minQty);
 
-    /**
-     * Tất cả lô của 1 sản phẩm (bao gồm đã hết hàng), mới nhất trước.
-     */
     List<ProductBatch> findByProductIdOrderByExpiryDateAsc(Long productId);
 
-    /**
-     * Lô thuộc 1 phiếu nhập kho cụ thể.
-     */
     List<ProductBatch> findByReceiptIdOrderByExpiryDateAsc(Long receiptId);
+
+    /** Lô thuộc 1 phiếu nhập cụ thể VÀ 1 sản phẩm cụ thể (dùng khi cập nhật finalCost sau phân bổ ship) */
+    List<ProductBatch> findByReceiptAndProduct(InventoryReceipt receipt, Product product);
 
     /**
      * Cảnh báo sắp hết hạn: lô còn hàng AND expiryDate <= ngưỡng,

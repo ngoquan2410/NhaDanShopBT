@@ -11,11 +11,12 @@ export const receiptService = {
 
   // ── Import Excel ──────────────────────────────────────────────────────────
   /** Import phiếu nhập kho từ file .xlsx */
-  importExcel: (file, supplierName, note = '') => {
+  importExcel: (file, supplierName, note = '', shippingFee = 0) => {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('supplierName', supplierName)
     if (note) formData.append('note', note)
+    if (shippingFee > 0) formData.append('shippingFee', String(shippingFee))
     return api.post('/api/receipts/import-excel', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)

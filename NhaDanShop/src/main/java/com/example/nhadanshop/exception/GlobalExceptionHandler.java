@@ -1,5 +1,6 @@
 package com.example.nhadanshop.exception;
 
+import com.example.nhadanshop.service.ExcelReceiptImportService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -12,10 +13,27 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /**
+     * Xử lý lỗi validate file Excel import phiếu nhập kho.
+     * HTTP 422 Unprocessable Entity — trả về danh sách lỗi từng dòng để admin sửa.
+     */
+    @ExceptionHandler(ExcelReceiptImportService.ExcelImportValidationException.class)
+    public ProblemDetail handleExcelValidation(ExcelReceiptImportService.ExcelImportValidationException ex) {
+        ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
+        pd.setTitle("File Excel có lỗi — không thể import");
+        pd.setDetail("Phát hiện " + ex.getValidationErrors().size()
+                + " lỗi trong file. Vui lòng kiểm tra và sửa trước khi import lại.");
+        pd.setProperty("validationErrors", ex.getValidationErrors());
+        pd.setProperty("errorCount", ex.getValidationErrors().size());
+        pd.setProperty("hint", "Toàn bộ file bị huỷ — không có dòng nào được lưu. Sửa tất cả lỗi rồi upload lại.");
+        return pd;
+    }
 
     @ExceptionHandler(EntityNotFoundException.class)
     public ProblemDetail handleNotFound(EntityNotFoundException ex) {
