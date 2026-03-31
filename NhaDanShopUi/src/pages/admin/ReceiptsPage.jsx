@@ -179,6 +179,7 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
   const [file, setFile] = useState(null)
   const [supplierName, setSupplierName] = useState('')
   const [note, setNote] = useState('')
+  const [shippingFee, setShippingFee] = useState(0)
   const [loading, setLoading] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [result, setResult] = useState(null)
@@ -203,12 +204,16 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
     }
   }
 
+  const [validationErrors, setValidationErrors] = useState([])
+
   const handleImport = async () => {
     if (!file) { toast.error('Chưa chọn file Excel'); return }
     if (!supplierName.trim()) { toast.error('Vui lòng nhập tên nhà cung cấp'); return }
     setLoading(true)
+    setValidationErrors([])
+    setResult(null)
     try {
-      const res = await receiptService.importExcel(file, supplierName.trim(), note.trim())
+      const res = await receiptService.importExcel(file, supplierName.trim(), note.trim(), Number(shippingFee) || 0)
       setResult(res)
       if (res.successItems > 0) {
         toast.success(`Tạo phiếu nhập ${res.receiptNo} thành công! (${res.successItems} SP)`)
@@ -217,7 +222,15 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
         toast.error('Không có dòng nào thành công — phiếu không được tạo')
       }
     } catch (e) {
-      toast.error(e?.response?.data?.message || 'Lỗi import Excel')
+      // HTTP 422 = lỗi validate file — hiển thị danh sách lỗi từng dòng
+      if (e?.response?.status === 422) {
+        const data = e.response.data
+        const errs = data?.validationErrors || []
+        setValidationErrors(errs)
+        toast.error(`File có ${errs.length} lỗi — chưa lưu dữ liệu nào. Kiểm tra bên dưới.`, { duration: 5000 })
+      } else {
+        toast.error(e?.response?.data?.detail || e?.response?.data?.message || 'Lỗi import Excel')
+      }
     } finally {
       setLoading(false)
     }
@@ -229,7 +242,7 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
       <div className="bg-gradient-to-r from-green-600 to-green-700 rounded-xl p-4 flex items-center justify-between">
         <div className="text-white">
           <p className="font-bold text-base">📥 Bước 1: Tải file template</p>
-          <p className="text-green-100 text-xs mt-0.5">Có dummy data mẫu (SP có sẵn + SP mới tạo) + sheet hướng dẫn</p>
+          <p className="text-green-100 text-xs mt-0.5">Có dummy data mẫu + cột chiết khấu % + sheet hướng dẫn</p>
         </div>
         <button
           onClick={handleDownloadTemplate}
@@ -249,19 +262,19 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
           <table className="text-xs w-full border-collapse">
             <thead>
               <tr className="bg-green-100">
-                {['A: Mã SP','B: Tên SP','C: SL *','D: Giá nhập *','E: Ghi chú','F: Danh mục (tạo mới)','G: Đơn vị (tạo mới)'].map(h => (
+                {['A: Mã SP','B: Tên SP *','C: SL *','D: Giá nhập *','E: CK %','F: Ghi chú','G: Danh mục (tạo mới)','H: Đơn vị (tạo mới)'].map(h => (
                   <th key={h} className="border border-green-200 px-2 py-1 text-left whitespace-nowrap font-semibold">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               <tr className="bg-white">
-                {['BT001','Bánh Tráng Rong Biển','5','65000','SP có sẵn','',''].map((v,i) => (
+                {['BT001','Bánh Tráng Rong Biển','5','65000','5','SP có sẵn CK 5%','',''].map((v,i) => (
                   <td key={i} className="border border-green-200 px-2 py-1 text-gray-700">{v}</td>
                 ))}
               </tr>
               <tr className="bg-yellow-50">
-                {['','Sản Phẩm Mới XYZ','10','25000','SP mới tạo','Danh Mục Mới','gói'].map((v,i) => (
+                {['','Sản Phẩm Mới XYZ','10','25000','0','SP mới tạo','Danh Mục Mới','gói'].map((v,i) => (
                   <td key={i} className="border border-green-200 px-2 py-1 text-amber-700 font-medium">{v}</td>
                 ))}
               </tr>
@@ -295,6 +308,21 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
             <input value={note} onChange={e => setNote(e.target.value)}
               placeholder="VD: Nhập hàng tháng 3"
               className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              🚚 Phí vận chuyển (₫)
+              <span className="ml-1 text-xs text-gray-400 font-normal">— sẽ được chia tỷ lệ vào giá vốn từng sản phẩm</span>
+            </label>
+            <input type="number" min={0} step={1000} value={shippingFee}
+              onChange={e => setShippingFee(e.target.value)}
+              placeholder="0"
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            {Number(shippingFee) > 0 && (
+              <p className="text-xs text-blue-600 mt-1 bg-blue-50 rounded p-1.5">
+                💡 {Number(shippingFee).toLocaleString('vi-VN')} ₫ sẽ được phân bổ vào giá vốn cuối của từng sản phẩm theo tỷ lệ giá trị sau chiết khấu
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -341,8 +369,46 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
         </button>
       </div>
 
-      {/* Kết quả */}
-      {result && (
+      {/* ── Panel lỗi validation (HTTP 422) ────────────────────────────────── */}
+      {validationErrors.length > 0 && (
+        <div className="rounded-xl border-2 border-red-400 bg-red-50 p-5 space-y-3">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl mt-0.5">🚫</span>
+            <div>
+              <h4 className="font-bold text-red-800 text-base">
+                File Excel có {validationErrors.length} lỗi — TOÀN BỘ bị huỷ, không có dòng nào được lưu
+              </h4>
+              <p className="text-sm text-red-600 mt-1">
+                Vui lòng sửa tất cả lỗi bên dưới rồi tải lên lại file Excel.
+              </p>
+            </div>
+          </div>
+          <div className="bg-white border border-red-200 rounded-lg p-3 max-h-72 overflow-y-auto space-y-1.5">
+            {validationErrors.map((err, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                <span className="text-red-500 font-bold shrink-0">{i + 1}.</span>
+                <span className="text-red-700">{err}</span>
+              </div>
+            ))}
+          </div>
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 space-y-1">
+            <p className="font-semibold">💡 Hướng dẫn sửa lỗi phổ biến:</p>
+            <p>• <b>SP mới + danh mục trống</b>: điền tên danh mục vào cột G, đơn vị vào cột H</p>
+            <p>• <b>Không tìm thấy SP</b>: kiểm tra lại mã SP (cột A) hoặc tên SP (cột B)</p>
+            <p>• <b>SP ngừng KD</b>: vào trang Sản phẩm → kích hoạt lại trước khi nhập</p>
+            <p>• <b>Chiết khấu sai</b>: cột E phải là số từ 0–100 (VD: 5 là 5%, không phải 0.05)</p>
+          </div>
+          <button
+            onClick={() => { setValidationErrors([]); setFile(null) }}
+            className="text-sm text-red-600 hover:text-red-800 underline font-medium"
+          >
+            ✕ Xoá thông báo lỗi và chọn file mới
+          </button>
+        </div>
+      )}
+
+      {/* ── Kết quả import thành công ─────────────────────────────────────── */}
+      {result && !validationErrors.length && (
         <div className={`rounded-xl border p-5 space-y-4 ${result.successItems > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
           <div className="flex items-center justify-between">
             <h4 className="font-bold text-gray-800">📊 Kết quả Import</h4>
@@ -352,13 +418,12 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
               </span>
             )}
           </div>
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             {[
               { label: 'Tổng dòng', value: result.totalRows, color: 'blue' },
               { label: '✅ Thành công', value: result.successItems, color: 'green' },
               { label: '✨ SP mới tạo', value: result.newProducts || 0, color: 'purple' },
-              { label: '⏭️ Bỏ qua', value: result.skippedItems, color: 'yellow' },
-              { label: '❌ Lỗi', value: result.errorItems, color: 'red' },
+              { label: '⚠️ Cảnh báo', value: result.warnings?.length || 0, color: 'yellow' },
             ].map(({ label, value, color }) => (
               <div key={label} className={`bg-${color}-100 rounded-lg p-3 text-center`}>
                 <div className={`text-xl font-bold text-${color}-700`}>{value}</div>
@@ -368,17 +433,9 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
           </div>
           {result.warnings?.length > 0 && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-              <p className="text-sm font-semibold text-yellow-700 mb-2">⚠️ SP mới tạo / Cảnh báo:</p>
+              <p className="text-sm font-semibold text-yellow-700 mb-2">⚠️ SP mới tạo / Gộp dòng trùng:</p>
               <ul className="space-y-1 max-h-32 overflow-y-auto">
                 {result.warnings.map((w, i) => <li key={i} className="text-xs text-yellow-700">• {w}</li>)}
-              </ul>
-            </div>
-          )}
-          {result.errors?.length > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-              <p className="text-sm font-semibold text-red-700 mb-2">❌ Lỗi:</p>
-              <ul className="space-y-1 max-h-32 overflow-y-auto">
-                {result.errors.map((e, i) => <li key={i} className="text-xs text-red-600">• {e}</li>)}
               </ul>
             </div>
           )}
