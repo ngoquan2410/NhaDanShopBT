@@ -30,7 +30,7 @@ public class InventoryReceiptService {
     private final ProductBatchRepository batchRepo;
     private final UserRepository userRepo;
     private final InvoiceNumberGenerator numberGen;
-    private final ProductComboRepository comboRepo;  // repo của ProductComboItem
+    private final ProductComboRepository comboRepo;
 
     @Transactional
     public InventoryReceiptResponse createReceipt(InventoryReceiptRequest req) {
@@ -41,7 +41,8 @@ public class InventoryReceiptService {
         receipt.setNote(req.note());
         receipt.setReceiptDate(LocalDateTime.now());
 
-        BigDecimal shippingFee = req.shippingFee() != null ? req.shippingFee() : BigDecimal.ZERO;
+        BigDecimal shippingFee = safe(req.shippingFee());
+        BigDecimal vatPctOrder = safe(req.vatPercent()); // VAT % toàn đơn
         receipt.setShippingFee(shippingFee);
 
         String currentUsername = SecurityContextHolder.getContext().getAuthentication().getName();
@@ -49,26 +50,21 @@ public class InventoryReceiptService {
 
         InventoryReceipt saved = receiptRepo.save(receipt);
 
-        // ── Expand combo items → ReceiptItemRequest thông thường ──────────────
+        // ── Expand combo items → ReceiptItemRequest đơn lẻ ──────────────────
         List<ReceiptItemRequest> allItems = new ArrayList<>();
         if (req.items() != null) allItems.addAll(req.items());
 
         if (req.comboItems() != null) {
             for (InventoryReceiptRequest.ComboReceiptRequest cr : req.comboItems()) {
-                // Dùng Product(COMBO) thay vì ProductCombo cũ
                 Product comboProduct = productRepo.findById(cr.comboId())
                         .orElseThrow(() -> new EntityNotFoundException(
                                 "Không tìm thấy combo ID: " + cr.comboId()));
                 if (!comboProduct.isCombo()) {
                     throw new IllegalArgumentException("ID " + cr.comboId() + " không phải combo");
                 }
-
                 List<ProductComboItem> comboItems = comboRepo.findByComboProduct(comboProduct);
-                int totalComponentQty = comboItems.stream()
-                        .mapToInt(ProductComboItem::getQuantity).sum();
-
-                BigDecimal totalComboCost = cr.unitCost()
-                        .multiply(BigDecimal.valueOf(cr.quantity()));
+                int totalComponentQty = comboItems.stream().mapToInt(ProductComboItem::getQuantity).sum();
+                BigDecimal totalComboCost = cr.unitCost().multiply(BigDecimal.valueOf(cr.quantity()));
 
                 for (ProductComboItem ci : comboItems) {
                     BigDecimal ratio = totalComponentQty > 0
@@ -82,8 +78,7 @@ public class InventoryReceiptService {
                             ci.getProduct().getId(),
                             ci.getQuantity() * cr.quantity(),
                             componentCost,
-                            cr.discountPercent(),
-                            cr.vatPercent()
+                            safe(cr.discountPercent())
                     ));
                 }
             }
@@ -93,22 +88,29 @@ public class InventoryReceiptService {
             throw new IllegalArgumentException("Phiếu nhập phải có ít nhất 1 sản phẩm hoặc combo");
         }
 
-        // ── Pass 1: tính discountedLineTotal cho từng dòng (dùng phân bổ ship) ─
+        // ── Pass 1: Tính discountedLineTotal từng dòng ───────────────────────
+        // Dùng để phân bổ shippingFee + VAT theo tỷ lệ
         List<BigDecimal> discountedLineTotals = new ArrayList<>();
         BigDecimal totalDiscountedValue = BigDecimal.ZERO;
 
         for (ReceiptItemRequest itemReq : allItems) {
             BigDecimal disc = safe(itemReq.discountPercent());
             BigDecimal discountedUnit = itemReq.unitCost()
-                    .multiply(BigDecimal.ONE.subtract(disc.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP)));
+                    .multiply(BigDecimal.ONE.subtract(
+                            disc.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP)));
             BigDecimal discountedLine = discountedUnit.multiply(BigDecimal.valueOf(itemReq.quantity()));
             discountedLineTotals.add(discountedLine);
             totalDiscountedValue = totalDiscountedValue.add(discountedLine);
         }
 
-        // ── Pass 2: tạo items, batch, cập nhật giá vốn ──────────────────────
+        // ── Tính tổng VAT toàn đơn = totalDiscountedValue × vatPct% ─────────
+        // Sau đó chia theo tỷ lệ discountedLine cho từng dòng
+        BigDecimal totalVatAmount = totalDiscountedValue
+                .multiply(vatPctOrder.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP))
+                .setScale(2, RoundingMode.HALF_UP);
+
+        // ── Pass 2: Tạo items, batch, cập nhật giá vốn ───────────────────────
         BigDecimal totalAmount = BigDecimal.ZERO;
-        BigDecimal totalVat    = BigDecimal.ZERO;
         List<InventoryReceiptItem> items = new ArrayList<>();
 
         for (int i = 0; i < allItems.size(); i++) {
@@ -119,20 +121,17 @@ public class InventoryReceiptService {
                             "Không tìm thấy sản phẩm ID: " + itemReq.productId()));
 
             int addedRetailQty = UnitConverter.toRetailQty(
-                    product.getImportUnit(),
-                    product.getPiecesPerImportUnit(),
-                    itemReq.quantity());
+                    product.getImportUnit(), product.getPiecesPerImportUnit(), itemReq.quantity());
 
             BigDecimal disc = safe(itemReq.discountPercent());
-            BigDecimal vatPct = safe(itemReq.vatPercent());
-
-            // discountedUnitCost (trên đơn vị nhập)
             BigDecimal discountedUnitCost = itemReq.unitCost()
-                    .multiply(BigDecimal.ONE.subtract(disc.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP)))
+                    .multiply(BigDecimal.ONE.subtract(
+                            disc.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP)))
                     .setScale(2, RoundingMode.HALF_UP);
 
-            // Phân bổ shippingFee
             BigDecimal discountedLine = discountedLineTotals.get(i);
+
+            // ── Phân bổ shippingFee theo tỷ lệ ──────────────────────────────
             BigDecimal shippingAllocatedLine = BigDecimal.ZERO;
             if (totalDiscountedValue.compareTo(BigDecimal.ZERO) > 0) {
                 shippingAllocatedLine = shippingFee
@@ -140,26 +139,26 @@ public class InventoryReceiptService {
                         .divide(totalDiscountedValue, 2, RoundingMode.HALF_UP);
             }
             BigDecimal shippingPerUnit = addedRetailQty > 0
-                    ? shippingAllocatedLine.divide(BigDecimal.valueOf(addedRetailQty), 2, RoundingMode.HALF_UP)
+                    ? shippingAllocatedLine.divide(BigDecimal.valueOf(addedRetailQty), 4, RoundingMode.HALF_UP)
                     : BigDecimal.ZERO;
 
-            // finalCost trước VAT
-            BigDecimal finalCostBeforeVat = discountedUnitCost.add(shippingPerUnit).setScale(2, RoundingMode.HALF_UP);
-
-            // VAT phân bổ trên đơn vị bán lẻ
-            //   vatAmount(dòng) = discountedLine × vatPct/100
-            //   vatPerUnit      = vatAmount / addedRetailQty
-            BigDecimal vatAmountLine = discountedLine
-                    .multiply(vatPct.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP))
-                    .setScale(2, RoundingMode.HALF_UP);
+            // ── Phân bổ VAT toàn đơn theo tỷ lệ discountedLine ─────────────
+            // vatLine = totalVatAmount × (discountedLine / totalDiscountedValue)
+            BigDecimal vatAllocatedLine = BigDecimal.ZERO;
+            if (totalDiscountedValue.compareTo(BigDecimal.ZERO) > 0) {
+                vatAllocatedLine = totalVatAmount
+                        .multiply(discountedLine)
+                        .divide(totalDiscountedValue, 2, RoundingMode.HALF_UP);
+            }
             BigDecimal vatPerUnit = addedRetailQty > 0
-                    ? vatAmountLine.divide(BigDecimal.valueOf(addedRetailQty), 2, RoundingMode.HALF_UP)
+                    ? vatAllocatedLine.divide(BigDecimal.valueOf(addedRetailQty), 4, RoundingMode.HALF_UP)
                     : BigDecimal.ZERO;
 
-            // finalCostWithVat = giá vốn cuối (dùng để tính lợi nhuận)
-            BigDecimal finalCostWithVat = finalCostBeforeVat.add(vatPerUnit).setScale(2, RoundingMode.HALF_UP);
-
-            totalVat = totalVat.add(vatAmountLine);
+            // ── Giá vốn cuối = discountedUnit + ship/unit + vat/unit ─────────
+            BigDecimal finalCostBeforeVat = discountedUnitCost.add(shippingPerUnit)
+                    .setScale(2, RoundingMode.HALF_UP);
+            BigDecimal finalCostWithVat = finalCostBeforeVat.add(vatPerUnit)
+                    .setScale(2, RoundingMode.HALF_UP);
 
             // Cập nhật product
             product.setCostPrice(finalCostWithVat);
@@ -190,19 +189,18 @@ public class InventoryReceiptService {
             item.setUnitCost(itemReq.unitCost());
             item.setDiscountPercent(disc);
             item.setDiscountedCost(discountedUnitCost);
-            item.setVatPercent(vatPct);
+            item.setVatPercent(vatPctOrder);           // VAT % toàn đơn — lưu để tham khảo
             item.setVatAllocated(vatPerUnit);
             item.setShippingAllocated(shippingPerUnit);
             item.setFinalCost(finalCostBeforeVat);
             item.setFinalCostWithVat(finalCostWithVat);
 
-            totalAmount = totalAmount.add(
-                    itemReq.unitCost().multiply(BigDecimal.valueOf(itemReq.quantity())));
+            totalAmount = totalAmount.add(itemReq.unitCost().multiply(BigDecimal.valueOf(itemReq.quantity())));
             items.add(item);
         }
 
         saved.setTotalAmount(totalAmount);
-        saved.setTotalVat(totalVat);
+        saved.setTotalVat(totalVatAmount);
         saved.getItems().addAll(items);
 
         return DtoMapper.toResponse(receiptRepo.save(saved));

@@ -12,8 +12,15 @@ import java.util.List;
 public record InventoryReceiptRequest(
         @Size(max = 150) String supplierName,
         @Size(max = 500) String note,
-        /** Phí vận chuyển toàn đơn */
+        /** Phí vận chuyển toàn đơn — phân bổ theo tỷ lệ giá trị sau CK */
         @DecimalMin("0.00") BigDecimal shippingFee,
+        /**
+         * Thuế GTGT (VAT) % cho TOÀN ĐƠN (0-100).
+         * Tính trên tổng sau chiết khấu: vatAmount = totalAfterDiscount × vatPercent/100
+         * Sau đó phân bổ đều vào giá vốn từng sản phẩm theo tỷ lệ.
+         * Để trống / null = 0% (không có VAT).
+         */
+        @DecimalMin("0.00") BigDecimal vatPercent,
         /** Các dòng sản phẩm đơn lẻ */
         @Valid List<ReceiptItemRequest> items,
         /** Các dòng nhập theo combo (optional) */
@@ -21,17 +28,15 @@ public record InventoryReceiptRequest(
 ) {
     /**
      * Nhập 1 dòng theo combo:
-     *  comboId      = ID combo
-     *  quantity     = số lượng combo nhập (không phải số lượng từng thành phần)
-     *  unitCost     = giá nhập 1 combo (sẽ chia đều cho từng thành phần theo qty)
-     *  discountPercent = chiết khấu % áp dụng cho cả combo này
-     *  vatPercent   = VAT % áp dụng cho cả combo này
+     *  comboId         = ID combo (Product.productType=COMBO)
+     *  quantity        = số lượng combo nhập
+     *  unitCost        = giá nhập 1 combo (chia đều cho thành phần theo qty ratio)
+     *  discountPercent = chiết khấu % áp dụng cho combo này
      */
     public record ComboReceiptRequest(
             @NotNull Long comboId,
             @NotNull @Min(1) Integer quantity,
             @NotNull @DecimalMin("0.00") BigDecimal unitCost,
-            @DecimalMin("0.00") BigDecimal discountPercent,
-            @DecimalMin("0.00") BigDecimal vatPercent
+            @DecimalMin("0.00") BigDecimal discountPercent
     ) {}
 }
