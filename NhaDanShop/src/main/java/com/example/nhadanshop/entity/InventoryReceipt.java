@@ -34,9 +34,13 @@ public class InventoryReceipt {
     @Column(name = "total_amount", nullable = false, precision = 18, scale = 2)
     private BigDecimal totalAmount = BigDecimal.ZERO;
 
-    /** Phí vận chuyển của đơn nhập (sẽ được chia đều vào giá vốn từng sản phẩm) */
+    /** Phí vận chuyển của đơn nhập */
     @Column(name = "shipping_fee", nullable = false, precision = 18, scale = 2)
     private BigDecimal shippingFee = BigDecimal.ZERO;
+
+    /** Tổng VAT toàn phiếu (tổng hợp từ các dòng) */
+    @Column(name = "total_vat", nullable = false, precision = 18, scale = 2)
+    private BigDecimal totalVat = BigDecimal.ZERO;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

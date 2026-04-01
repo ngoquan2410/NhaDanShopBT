@@ -190,9 +190,13 @@ public class ExcelTemplateService {
             // Header — 8 cột (thêm E: Chiết khấu %)
             String[] hTexts = {
                 "A: Ma SP", "B: Ten SP (*)", "C: So luong (*)", "D: Gia nhap (*)",
-                "E: Chiet khau %", "F: Ghi chu dong", "G: Danh muc (neu tao moi)", "H: Don vi (neu tao moi)"
+                "E: Chiet khau %", "F: VAT %", "G: Ghi chu dong",
+                "H: Danh muc (neu tao moi)", "I: Don vi (neu tao moi)"
             };
-            CellStyle[] hStyles = {headerStyle, required, required, required, optional, headerStyle, optional, optional};
+            CellStyle[] hStyles = {
+                headerStyle, required, required, required,
+                optional, optional, headerStyle, optional, optional
+            };
 
             Row hRow = data.createRow(2);
             hRow.setHeightInPoints(20);
@@ -208,22 +212,19 @@ public class ExcelTemplateService {
 
             // ── Dummy data: mix SP có sẵn + SP mới + ví dụ chiết khấu ────────
             Object[][] rows = {
-                // code, name, qty, unitCost, discountPct, note, category(new), unit(new)
-                // --- SP ĐÃ CÓ (tìm theo mã) ---
-                {"BT001","Banh Trang Rong Bien",  10, 65000, 0,   "SP co san",         "",           ""},
-                {"BT002","Banh Trang Cuon Tep",    5, 38000, 5,   "Chiet khau 5%",     "",           ""},
-                {"M001", "Muoi Bien Khanh Hoa",   20,  5000, 10,  "Chiet khau 10%",    "",           ""},
-                // --- SP TÌM THEO TÊN ---
-                {"",     "Com Chay Nam Huong",     3, 45000, 0,   "Tim theo ten",      "",           ""},
-                // --- SP MỚI ---
-                {"",     "Banh Phong Tom Viet",    8, 12000, 0,   "SP MOI",            "Banh Phong", "goi"},
-                {"",     "Keo Dua Ben Tre",        5, 35000, 8.5, "SP MOI ck 8.5%",   "Keo Dua",    "hop"},
+                // code, name, qty, unitCost, discountPct, vatPct, note, category(new), unit(new)
+                {"BT001","Banh Trang Rong Bien",  10, 65000, 0,   0,   "SP co san",         "",           ""},
+                {"BT002","Banh Trang Cuon Tep",    5, 38000, 5,   10,  "CK 5% VAT 10%",     "",           ""},
+                {"M001", "Muoi Bien Khanh Hoa",   20,  5000, 10,  0,   "CK 10%",            "",           ""},
+                {"",     "Com Chay Nam Huong",     3, 45000, 0,   8,   "Tim theo ten VAT8%","",           ""},
+                {"",     "Banh Phong Tom Viet",    8, 12000, 0,   0,   "SP MOI",            "Banh Phong", "goi"},
+                {"",     "Keo Dua Ben Tre",        5, 35000, 8.5, 10,  "SP MOI ck+vat",    "Keo Dua",    "hop"},
             };
 
             int rowNum = 3;
             for (Object[] r : rows) {
                 Row row = data.createRow(rowNum++);
-                boolean isNew = r[6] != null && !r[6].toString().isBlank();
+                boolean isNew = r[7] != null && !r[7].toString().isBlank();
                 for (int col = 0; col < r.length; col++) {
                     Cell c = row.createCell(col);
                     if (r[col] instanceof Number) {
@@ -236,23 +237,12 @@ public class ExcelTemplateService {
                 }
             }
 
-            // Chú thích màu
             Row legendRow = data.createRow(rowNum + 1);
-            Cell l1 = legendRow.createCell(0); l1.setCellValue("Mau xanh la = SP co san / SP tim theo ten"); l1.setCellStyle(dataStyle);
-            Cell l2 = legendRow.createCell(3); l2.setCellValue("Mau vang = SP MOI tu dong tao");             l2.setCellStyle(newSpStyle);
+            Cell l1 = legendRow.createCell(0); l1.setCellValue("Mau xanh = SP da co / Tim theo ten"); l1.setCellStyle(dataStyle);
+            Cell l2 = legendRow.createCell(4); l2.setCellValue("Mau vang = SP MOI tu dong tao");       l2.setCellStyle(newSpStyle);
 
-            // Sub-title (cập nhật nội dung)
-            Row subRow = data.createRow(1);
-            subRow.setHeightInPoints(40);
-            Cell subCell = subRow.createCell(0);
-            subCell.setCellValue(
-                "Do tim: Ma SP (cot A) → Ten SP (cot B). SP CHUA CO: de trong cot A, nhap Ten+DanhMuc+DonVi → he thong TU DONG TAO SP MOI.\n" +
-                "Cot E (Chiet khau %): nhap 0-100. De trong = 0%. He thong tinh: GiaVon = GiaNhap×(1-CK%) sau do cong phi ship."
-            );
-            subCell.setCellStyle(noteStyle);
-            data.addMergedRegion(new CellRangeAddress(1, 1, 0, 7));
-
-            data.setAutoFilter(new CellRangeAddress(2, 2, 0, 7));
+            data.addMergedRegion(new CellRangeAddress(0, 0, 0, 8));
+            data.setAutoFilter(new CellRangeAddress(2, 2, 0, 8));
             data.createFreezePane(0, 3);
 
             // ── Sheet 2: Hướng dẫn ───────────────────────────────────────────
@@ -265,17 +255,18 @@ public class ExcelTemplateService {
                 "HUONG DAN IMPORT PHIEU NHAP KHO",
                 new String[][]{
                     {"Cot","Mo ta","Vi du"},
-                    {"A: Ma SP","Ma san pham de tim kiem (uu tien). De trong → dung ten SP (cot B)","BT001"},
-                    {"B: Ten SP (*)","Ten san pham. Dung de tim neu khong co ma.\nSP CHUA CO: nhap ten moi → he thong tu dong tao SP","Banh Trang Rong Bien"},
-                    {"C: So luong (*)","So luong nhap theo DV NHAP (kg/xau/hop/bich).\nHe thong tu tinh so le = qty × pieces","10"},
-                    {"D: Gia nhap (*)","Gia tren 1 DV NHAP. He thong tu chia gia le.\nVD: 1kg=10bich, gia nhap 65000/kg → gia le=6500/bich","65000"},
-                    {"E: Chiet khau %","% chiet khau tu nha cung cap cho dong nay (0-100).\nDe trong hoac 0 = khong chiet khau.\nGia von sau CK = Gia nhap × (1 - CK/100)","5"},
-                    {"F: Ghi chu","Ghi chu rieng tung dong (tuy chon)","Lo nhap thang 3"},
-                    {"G: Danh muc","Chi can nhap khi SP MOI chua co trong he thong.\nNeu chua co danh muc → tu dong tao moi","Banh Trang"},
-                    {"H: Don vi","Chi can nhap khi SP MOI. Don vi ban le: bich/goi/hop/chai","bich"},
-                    {"PHI SHIP","Phi van chuyen nhap tren giao dien web khi upload file.\nHe thong tu dong chia deu phi ship vao gia von tung dong\n(ty le theo gia tri sau chiet khau cua tung dong).","-"},
-                    {"CONG THUC","GiaVon cuoi = GiaNhap/DV × (1-CK%) + PhiShip/DV\nDay la gia von dung de tinh loi nhuan.","-"},
-                    {"LUU Y","- 1 file Excel = 1 phieu nhap kho\n- Nhap ten NCC, ghi chu VA phi ship tren giao dien web\n- Khong nhap gia 0 hoac so luong 0 → bao loi","-"},
+                    {"A: Ma SP","Ma san pham (uu tien). De trong → tim ten SP (cot B)","BT001"},
+                    {"B: Ten SP (*)","Ten san pham. SP CHUA CO → he thong tu tao moi","Banh Trang Rong Bien"},
+                    {"C: So luong (*)","So luong nhap theo DV NHAP (kg/xau/hop/bich)","10"},
+                    {"D: Gia nhap (*)","Gia tren 1 DV NHAP. He thong tu chia sang gia le","65000"},
+                    {"E: Chiet khau %","% chiet khau NCC (0-100). De trong = 0%.\nGia sau CK = Gia nhap × (1 - CK/100)","5"},
+                    {"F: VAT %","% thue GTGT (0-100). De trong = 0%.\nVAT duoc cong vao gia von cuoi de tinh loi nhuan dung.","10"},
+                    {"G: Ghi chu","Ghi chu rieng tung dong (tuy chon)","Lo nhap thang 3"},
+                    {"H: Danh muc","Chi can nhap khi SP MOI chua co trong he thong","Banh Trang"},
+                    {"I: Don vi","Chi can nhap khi SP MOI. Don vi ban le: bich/goi/hop","bich"},
+                    {"PHI SHIP","Nhap phi van chuyen tren giao dien web.\nHe thong chia theo ty le gia tri sau CK.","-"},
+                    {"CONG THUC GIA VON","GiaVon = (GiaNhap/DV × (1-CK%)) + PhiShip/DV + VAT/DV\nDay la gia von chinh xac de tinh loi nhuan.","-"},
+                    {"LUU Y","- 1 file = 1 phieu nhap | Nhap ten NCC + phi ship + ghi chu tren web\n- Khong nhap gia 0 hoac SL 0 → bao loi\n- 1 loi bat ky → rollback toan bo file","-"},
                 }
             );
 

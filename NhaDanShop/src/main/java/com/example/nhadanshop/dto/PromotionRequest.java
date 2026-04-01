@@ -32,10 +32,16 @@ public record PromotionRequest(
         Boolean active,
 
         // ── BUY_X_GET_Y ────────────────────────────────────────────────────
-        /** Số lượng cần mua (X) — chỉ dùng khi type=BUY_X_GET_Y */
+        /** Số lượng cần mua (X) — dùng khi type=BUY_X_GET_Y */
         Integer buyQty,
-        /** ID sản phẩm được tặng (Y) */
+        /** ID sản phẩm được tặng */
         Long getProductId,
-        /** Số lượng sản phẩm được tặng (Y) */
-        Integer getQty
+        /** Số lượng sản phẩm được tặng */
+        Integer getQty,
+
+        // ── QUANTITY_GIFT ──────────────────────────────────────────────────
+        /** Mua tối thiểu N SP → tặng (dùng khi type=QUANTITY_GIFT) */
+        Integer minBuyQty,
+        /** Giới hạn tặng tối đa M lần, null = không giới hạn */
+        Integer maxBuyQty
 ) {}

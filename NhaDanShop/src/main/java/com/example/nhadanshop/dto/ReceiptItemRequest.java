@@ -12,5 +12,7 @@ public record ReceiptItemRequest(
         @NotNull @Min(1) Integer quantity,
         @NotNull @DecimalMin("0.00") BigDecimal unitCost,
         /** Chiết khấu % nhà cung cấp (0-100), mặc định 0 */
-        @DecimalMin("0.00") @DecimalMax("100.00") BigDecimal discountPercent
+        @DecimalMin("0.00") @DecimalMax("100.00") BigDecimal discountPercent,
+        /** VAT % áp dụng cho dòng này (0-100), mặc định 0 */
+        @DecimalMin("0.00") @DecimalMax("100.00") BigDecimal vatPercent
 ) {}

@@ -62,6 +62,15 @@ public class Promotion {
     @Column(name = "get_qty")
     private Integer getQty;
 
+    // ── QUANTITY_GIFT fields ────────────────────────────────────────────────
+    /** QUANTITY_GIFT: mua tối thiểu N sản phẩm thì được tặng */
+    @Column(name = "min_buy_qty")
+    private Integer minBuyQty;
+
+    /** QUANTITY_GIFT: giới hạn tặng tối đa M lần (null = không giới hạn) */
+    @Column(name = "max_buy_qty")
+    private Integer maxBuyQty;
+
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(name = "promotion_categories",
             joinColumns = @JoinColumn(name = "promotion_id"),
