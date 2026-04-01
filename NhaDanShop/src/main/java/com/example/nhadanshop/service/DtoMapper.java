@@ -31,6 +31,7 @@ public final class DtoMapper {
                 p.getImportUnit(), p.getSellUnit(),
                 p.getPiecesPerImportUnit(), p.getConversionNote(),
                 p.getImageUrl(),
+                p.getProductType() != null ? p.getProductType().name() : "SINGLE",
                 p.getCreatedAt(), p.getUpdatedAt()
         );
     }

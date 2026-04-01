@@ -11,9 +11,15 @@ public record ProductComboResponse(
         String description,
         BigDecimal sellPrice,
         Boolean active,
+        Integer stockQty,          // virtual stock = min(component/qty)
+        String unit,
+        String imageUrl,
+        Long categoryId,
+        String categoryName,
         List<ComboItemResponse> items,
         /** Tổng giá bán lẻ từng thành phần (so sánh tiết kiệm được bao nhiêu) */
         BigDecimal totalComponentRetailPrice,
+        BigDecimal totalComponentCost,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -25,6 +31,7 @@ public record ProductComboResponse(
             String unit,
             Integer quantity,
             BigDecimal unitSellPrice,
-            BigDecimal lineTotal
+            BigDecimal lineTotal,
+            BigDecimal lineCost
     ) {}
 }
