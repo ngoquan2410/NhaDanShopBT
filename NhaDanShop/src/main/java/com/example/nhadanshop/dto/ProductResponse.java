@@ -33,6 +33,9 @@ public record ProductResponse(
         /** URL hình ảnh sản phẩm */
         String imageUrl,
 
+        /** Loại sản phẩm: SINGLE (mặc định) hoặc COMBO */
+        String productType,
+
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {}

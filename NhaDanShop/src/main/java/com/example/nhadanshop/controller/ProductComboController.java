@@ -2,13 +2,18 @@ package com.example.nhadanshop.controller;
 
 import com.example.nhadanshop.dto.ProductComboRequest;
 import com.example.nhadanshop.dto.ProductComboResponse;
+import com.example.nhadanshop.service.ExcelTemplateService;
 import com.example.nhadanshop.service.ProductComboService;
+import com.example.nhadanshop.service.ExcelComboImportService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/combos")
@@ -16,6 +21,8 @@ import java.util.List;
 public class ProductComboController {
 
     private final ProductComboService comboService;
+    private final ExcelTemplateService templateService;
+    private final ExcelComboImportService comboImportService;
 
     /** GET /api/combos — Tất cả combo (kể cả inactive, dành cho admin) */
     @GetMapping
@@ -60,5 +67,25 @@ public class ProductComboController {
     @PatchMapping("/{id}/toggle")
     public ProductComboResponse toggle(@PathVariable Long id) {
         return comboService.toggleActive(id);
+    }
+
+    /** GET /api/combos/template — Tải template Excel import combo */
+    @GetMapping("/template")
+    public ResponseEntity<byte[]> downloadTemplate() throws IOException {
+        byte[] bytes = templateService.buildComboTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        headers.setContentDisposition(ContentDisposition.attachment()
+                .filename("template_import_combo.xlsx").build());
+        headers.setContentLength(bytes.length);
+        return ResponseEntity.ok().headers(headers).body(bytes);
+    }
+
+    /** POST /api/combos/import-excel — Import combo từ file Excel */
+    @PostMapping(value = "/import-excel", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Map<String, Object> importExcel(@RequestParam("file") MultipartFile file)
+            throws IOException {
+        return comboImportService.importCombos(file);
     }
 }

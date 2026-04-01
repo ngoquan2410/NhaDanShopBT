@@ -185,7 +185,16 @@ public class ExcelTemplateService {
             Cell titleCell = titleRow.createCell(0);
             titleCell.setCellValue("TEMPLATE IMPORT PHIEU NHAP KHO - NHA DAN SHOP");
             titleCell.setCellStyle(titleStyle);
-            data.addMergedRegion(new CellRangeAddress(0, 0, 0, 7));
+            // Sub-title row 1 (hướng dẫn ngắn)
+            Row subRow = data.createRow(1);
+            subRow.setHeightInPoints(30);
+            Cell subCell = subRow.createCell(0);
+            subCell.setCellValue(
+                "Do tim: Ma SP (cot A) → Ten SP (cot B). SP CHUA CO: de trong cot A, nhap Ten+DanhMuc+DonVi → he thong TU DONG TAO SP MOI.\n" +
+                "Cot E=Chiet khau%, F=VAT%, G=Ghi chu, H=Danh muc (tao moi), I=Don vi (tao moi). Phi ship nhap tren web.");
+            subCell.setCellStyle(noteStyle);
+            // NOTE: merged regions phải khớp với số cột header bên dưới (9 cột → index 0..8)
+            // Chỉ thêm 1 lần ở cuối để tránh overlap
 
             // Header — 8 cột (thêm E: Chiết khấu %)
             String[] hTexts = {
@@ -241,7 +250,9 @@ public class ExcelTemplateService {
             Cell l1 = legendRow.createCell(0); l1.setCellValue("Mau xanh = SP da co / Tim theo ten"); l1.setCellStyle(dataStyle);
             Cell l2 = legendRow.createCell(4); l2.setCellValue("Mau vang = SP MOI tu dong tao");       l2.setCellStyle(newSpStyle);
 
-            data.addMergedRegion(new CellRangeAddress(0, 0, 0, 8));
+            // Merged regions — chỉ gọi 1 lần, sau khi đã tạo xong rows
+            data.addMergedRegion(new CellRangeAddress(0, 0, 0, 8)); // title: 9 cột (A..I)
+            data.addMergedRegion(new CellRangeAddress(1, 1, 0, 8)); // sub-title
             data.setAutoFilter(new CellRangeAddress(2, 2, 0, 8));
             data.createFreezePane(0, 3);
 
@@ -272,6 +283,128 @@ public class ExcelTemplateService {
 
             wb.setActiveSheet(0);
             ByteArrayOutputStream out = new ByteArrayOutputStream();
+            wb.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // 3. TEMPLATE IMPORT COMBO
+    // ══════════════════════════════════════════════════════════════════════════
+
+    public byte[] buildComboTemplate() throws IOException {
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            CellStyle headerStyle  = buildHeaderStyle(wb, new byte[]{(byte)100,(byte)50,(byte)180});
+            CellStyle required     = buildHeaderStyle(wb, new byte[]{(byte)180,(byte)50,(byte)30});
+            CellStyle optional     = buildHeaderStyle(wb, new byte[]{(byte)70,(byte)130,(byte)180});
+            CellStyle compStyle    = buildHeaderStyle(wb, new byte[]{(byte)150,(byte)80,(byte)200});
+            CellStyle dataStyle    = buildDataStyle(wb);
+            CellStyle numberStyle  = buildNumberStyle(wb);
+            CellStyle noteStyle    = buildNoteStyle(wb);
+            CellStyle titleStyle   = buildTitleStyle(wb);
+            CellStyle sectionStyle = buildSectionStyle(wb, new byte[]{(byte)100,(byte)50,(byte)180});
+
+            XSSFSheet data = wb.createSheet("Du lieu Combo");
+            data.setDefaultColumnWidth(16);
+            data.setColumnWidth(1, 35 * 256);  // B: Tên combo
+
+            // Title row 0
+            Row titleRow = data.createRow(0);
+            titleRow.setHeightInPoints(28);
+            Cell tc = titleRow.createCell(0);
+            tc.setCellValue("TEMPLATE IMPORT COMBO SAN PHAM - NHA DAN SHOP");
+            tc.setCellStyle(titleStyle);
+
+            // Sub-title row 1
+            Row subRow = data.createRow(1);
+            subRow.setHeightInPoints(36);
+            Cell sc = subRow.createCell(0);
+            sc.setCellValue(
+                "Moi dong = 1 combo. Toi da 5 thanh phan/dong (cot F-O).\n" +
+                "SP thanh phan phai la ma SP DON LE (SINGLE) da co trong he thong.\n" +
+                "De trong cot A → tu dong sinh ma COMBO###. Cat ID: xem sheet Huong dan.");
+            sc.setCellStyle(noteStyle);
+
+            // Header row 2
+            // Cột A-E: thông tin combo
+            // Cột F-O: từng cặp (Mã SP, SL) × 5 thành phần
+            String[] headers = {
+                "A: Ma combo", "B: Ten combo (*)", "C: Gia ban (*)", "D: Don vi", "E: Cat.ID",
+                "F: Ma SP 1 (*)", "G: SL 1 (*)",
+                "H: Ma SP 2", "I: SL 2",
+                "J: Ma SP 3", "K: SL 3",
+                "L: Ma SP 4", "M: SL 4",
+                "N: Ma SP 5", "O: SL 5"
+            };
+            CellStyle[] hStyles = {
+                headerStyle, required, required, optional, optional,
+                compStyle, compStyle,
+                compStyle, compStyle,
+                compStyle, compStyle,
+                compStyle, compStyle,
+                compStyle, compStyle
+            };
+            Row hRow = data.createRow(2);
+            hRow.setHeightInPoints(20);
+            for (int i = 0; i < headers.length; i++) {
+                Cell c = hRow.createCell(i);
+                c.setCellValue(headers[i]);
+                c.setCellStyle(hStyles[i]);
+            }
+
+            // Dummy data
+            Object[][] rows = {
+                {"", "Combo Banh Trang Dac Biet", 150000, "combo", "", "BT001", 5, "M001", 2, "", "", "", "", "", ""},
+                {"", "Combo Muoi Goi To", 80000, "combo", "", "M001", 5, "M002", 1, "M003", 2, "", "", "", ""},
+                {"COMBO_TEST", "Combo Thu Nghiem", 200000, "bo", "", "BT001", 3, "BT002", 2, "CC001", 1, "", "", "", ""},
+            };
+            int rowNum = 3;
+            for (Object[] r : rows) {
+                Row row = data.createRow(rowNum++);
+                for (int col = 0; col < r.length; col++) {
+                    Cell c = row.createCell(col);
+                    if (r[col] instanceof Number) {
+                        c.setCellValue(((Number)r[col]).doubleValue());
+                        c.setCellStyle(numberStyle);
+                    } else {
+                        c.setCellValue(r[col] != null ? r[col].toString() : "");
+                        c.setCellStyle(dataStyle);
+                    }
+                }
+            }
+
+            data.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(0, 0, 0, 14));
+            data.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(1, 1, 0, 14));
+            data.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(2, 2, 0, 14));
+            data.createFreezePane(0, 3);
+
+            // Guide sheet
+            XSSFSheet guide = wb.createSheet("Huong dan");
+            guide.setColumnWidth(0, 22 * 256);
+            guide.setColumnWidth(1, 55 * 256);
+            guide.setColumnWidth(2, 30 * 256);
+            addGuideHeader(guide, wb, sectionStyle, noteStyle, dataStyle,
+                "HUONG DAN IMPORT COMBO",
+                new String[][]{
+                    {"Cot", "Mo ta", "Vi du"},
+                    {"A: Ma combo", "De trong → tu dong tao COMBO001, COMBO002...\nNhap tay → phai duy nhat, in hoa", "COMBO001 hoac de trong"},
+                    {"B: Ten combo (*)", "Ten combo, bat buoc", "Combo Banh Trang Dac Biet"},
+                    {"C: Gia ban (*)", "Gia ban combo (dong). Thuong thap hon tong SP le", "150000"},
+                    {"D: Don vi", "Don vi cua combo. De trong = 'combo'", "bo, set, combo"},
+                    {"E: Cat.ID", "ID danh muc (so nguyen). De trong = lay tu SP thanh phan dau tien", "3"},
+                    {"F+G: SP 1", "Ma SP + So luong thanh phan 1. BAT BUOC it nhat 1 cap.", "BT001 | 5"},
+                    {"H+I: SP 2", "Ma SP + So luong thanh phan 2 (tuy chon)", "M001 | 2"},
+                    {"J+K...O: SP 3-5", "Tuong tu, toi da 5 thanh phan", ""},
+                    {"LUU Y 1", "SP thanh phan PHAI LA SP DON LE (SINGLE) da co trong he thong", ""},
+                    {"LUU Y 2", "Khong the them combo vao trong combo (khong long combo)", ""},
+                    {"LUU Y 3", "1 dong loi → rollback toan bo file, khong tao combo nao", ""},
+                    {"TON KHO AO", "stockQty combo = min(stockQty_SP / required_qty) moi thanh phan\nVD: BT001 ton 20, can 5 → co the ban 4 combo", ""},
+                    {"GIA VON", "costPrice combo = Σ (costPrice_thanh_phan × qty)\nTu dong cap nhat moi khi nhap kho SP thanh phan", ""},
+                }
+            );
+
+            wb.setActiveSheet(0);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
             wb.write(out);
             return out.toByteArray();
         }

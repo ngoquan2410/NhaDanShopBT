@@ -30,7 +30,7 @@ public class InventoryReceiptService {
     private final ProductBatchRepository batchRepo;
     private final UserRepository userRepo;
     private final InvoiceNumberGenerator numberGen;
-    private final ProductComboRepository comboRepo;
+    private final ProductComboRepository comboRepo;  // repo của ProductComboItem
 
     @Transactional
     public InventoryReceiptResponse createReceipt(InventoryReceiptRequest req) {
@@ -55,19 +55,22 @@ public class InventoryReceiptService {
 
         if (req.comboItems() != null) {
             for (InventoryReceiptRequest.ComboReceiptRequest cr : req.comboItems()) {
-                ProductCombo combo = comboRepo.findById(cr.comboId())
+                // Dùng Product(COMBO) thay vì ProductCombo cũ
+                Product comboProduct = productRepo.findById(cr.comboId())
                         .orElseThrow(() -> new EntityNotFoundException(
                                 "Không tìm thấy combo ID: " + cr.comboId()));
+                if (!comboProduct.isCombo()) {
+                    throw new IllegalArgumentException("ID " + cr.comboId() + " không phải combo");
+                }
 
-                // Tổng số thành phần × qty để phân bổ chi phí tỷ lệ
-                int totalComponentQty = combo.getItems().stream()
+                List<ProductComboItem> comboItems = comboRepo.findByComboProduct(comboProduct);
+                int totalComponentQty = comboItems.stream()
                         .mapToInt(ProductComboItem::getQuantity).sum();
 
                 BigDecimal totalComboCost = cr.unitCost()
                         .multiply(BigDecimal.valueOf(cr.quantity()));
 
-                for (ProductComboItem ci : combo.getItems()) {
-                    // Chi phí phân bổ theo tỷ lệ qty thành phần / tổng qty combo
+                for (ProductComboItem ci : comboItems) {
                     BigDecimal ratio = totalComponentQty > 0
                             ? BigDecimal.valueOf(ci.getQuantity())
                               .divide(BigDecimal.valueOf(totalComponentQty), 10, RoundingMode.HALF_UP)
@@ -77,7 +80,7 @@ public class InventoryReceiptService {
 
                     allItems.add(new ReceiptItemRequest(
                             ci.getProduct().getId(),
-                            ci.getQuantity() * cr.quantity(),   // qty thành phần × số combo
+                            ci.getQuantity() * cr.quantity(),
                             componentCost,
                             cr.discountPercent(),
                             cr.vatPercent()
