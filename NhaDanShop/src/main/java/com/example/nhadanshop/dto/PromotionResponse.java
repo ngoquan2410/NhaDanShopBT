@@ -21,6 +21,11 @@ public record PromotionResponse(
         List<String> categoryNames,
         List<Long> productIds,
         List<String> productNames,
+        // BUY_X_GET_Y
+        Integer buyQty,
+        Long getProductId,
+        String getProductName,
+        Integer getQty,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {}

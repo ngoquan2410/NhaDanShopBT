@@ -29,5 +29,13 @@ public record PromotionRequest(
         /** IDs của sản phẩm áp dụng (khi appliesTo=PRODUCT) */
         List<Long> productIds,
 
-        Boolean active
+        Boolean active,
+
+        // ── BUY_X_GET_Y ────────────────────────────────────────────────────
+        /** Số lượng cần mua (X) — chỉ dùng khi type=BUY_X_GET_Y */
+        Integer buyQty,
+        /** ID sản phẩm được tặng (Y) */
+        Long getProductId,
+        /** Số lượng sản phẩm được tặng (Y) */
+        Integer getQty
 ) {}

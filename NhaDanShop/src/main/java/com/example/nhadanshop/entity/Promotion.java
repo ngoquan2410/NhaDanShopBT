@@ -49,6 +49,19 @@ public class Promotion {
     @Column(name = "applies_to", nullable = false, length = 20)
     private String appliesTo = "ALL";
 
+    // ── BUY_X_GET_Y fields ─────────────────────────────────────────────────
+    /** Số lượng cần mua (X) */
+    @Column(name = "buy_qty")
+    private Integer buyQty;
+
+    /** Sản phẩm được tặng (Y product) */
+    @Column(name = "get_product_id")
+    private Long getProductId;
+
+    /** Số lượng sản phẩm được tặng (Y qty) */
+    @Column(name = "get_qty")
+    private Integer getQty;
+
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(name = "promotion_categories",
             joinColumns = @JoinColumn(name = "promotion_id"),

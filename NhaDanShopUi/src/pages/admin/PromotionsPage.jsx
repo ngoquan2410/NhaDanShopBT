@@ -35,6 +35,10 @@ function discountDisplay(p) {
   if (p.type === 'PERCENT_DISCOUNT') return `${p.discountValue}%`
   if (p.type === 'FIXED_DISCOUNT')   return `${Number(p.discountValue).toLocaleString('vi-VN')} ₫`
   if (p.type === 'FREE_SHIPPING')    return 'Miễn phí ship'
+  if (p.type === 'BUY_X_GET_Y') {
+    const gift = p.getProductName || `SP #${p.getProductId}`
+    return `Mua ${p.buyQty ?? '?'} → Tặng ${p.getQty ?? '?'} ${gift}`
+  }
   return p.discountValue
 }
 
@@ -65,6 +69,10 @@ const EMPTY_FORM = {
   appliesTo: 'ALL',
   categoryIds: [],
   productIds: [],
+  // BUY_X_GET_Y
+  buyQty: '',
+  getProductId: '',
+  getQty: '',
 }
 
 function PromotionForm({ initial, categories, products, onSubmit, loading, onClose }) {
@@ -86,6 +94,10 @@ function PromotionForm({ initial, categories, products, onSubmit, loading, onClo
       discountValue: Number(form.discountValue) || 0,
       minOrderValue: Number(form.minOrderValue) || 0,
       maxDiscount: form.maxDiscount !== '' ? Number(form.maxDiscount) : null,
+      // BUY_X_GET_Y
+      buyQty: form.buyQty !== '' ? Number(form.buyQty) : null,
+      getProductId: form.getProductId !== '' ? Number(form.getProductId) : null,
+      getQty: form.getQty !== '' ? Number(form.getQty) : null,
     })
   }
 
@@ -160,6 +172,56 @@ function PromotionForm({ initial, categories, products, onSubmit, loading, onClo
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
         </div>
       </div>
+
+      {/* ── BUY_X_GET_Y: Combo mua X tặng Y ── */}
+      {form.type === 'BUY_X_GET_Y' && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+          <p className="font-semibold text-amber-800 text-sm">🎁 Cấu hình Mua X Tặng Y</p>
+          <p className="text-xs text-amber-600">
+            Ví dụ: Mua 2 Bánh Tráng Rong Biển → Tặng 1 Muối Ớt
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-3">
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Sản phẩm cần mua (áp dụng từ "Áp dụng cho" phía dưới)
+              </label>
+              <p className="text-xs text-gray-500 bg-white rounded p-2 border">
+                Cấu hình ở mục "Áp dụng cho" → chọn sản phẩm/danh mục mà khách cần mua đủ số lượng X
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Mua tối thiểu (X) *</label>
+              <input type="number" min={1} step={1} value={form.buyQty}
+                onChange={e => set('buyQty', e.target.value)}
+                placeholder="VD: 2"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Sản phẩm được tặng (Y) *</label>
+              <select value={form.getProductId} onChange={e => set('getProductId', e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
+                <option value="">-- Chọn sản phẩm tặng --</option>
+                {products.map(p => (
+                  <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Số lượng tặng (Y) *</label>
+              <input type="number" min={1} step={1} value={form.getQty}
+                onChange={e => set('getQty', e.target.value)}
+                placeholder="VD: 1"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+            </div>
+          </div>
+          {form.buyQty && form.getProductId && form.getQty && (
+            <div className="bg-white rounded-lg p-2 text-xs text-amber-700 border border-amber-200">
+              📋 Tóm tắt: Mua {form.buyQty} sản phẩm đủ điều kiện →
+              Tặng {form.getQty} {products.find(p => String(p.id) === String(form.getProductId))?.name || '...'}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Phạm vi áp dụng */}
       <div>
@@ -308,6 +370,10 @@ export default function PromotionsPage() {
     appliesTo: p.appliesTo,
     categoryIds: p.categoryIds || [],
     productIds: p.productIds || [],
+    // BUY_X_GET_Y
+    buyQty: p.buyQty ?? '',
+    getProductId: p.getProductId ?? '',
+    getQty: p.getQty ?? '',
   })
 
   return (

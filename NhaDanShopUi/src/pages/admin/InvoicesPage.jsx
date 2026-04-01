@@ -12,14 +12,16 @@ import dayjs from 'dayjs'
 // ── Shared invoice HTML builder (cũng dùng ở StorefrontPage) ─────────────────
 export function buildInvoiceHtml(inv) {
   const fmt = n => Number(n || 0).toLocaleString('vi-VN')
-  const items = (inv.items || []).map(i =>
-    `<tr>
-      <td>${i.productName || i.productCode || ''}</td>
+  const items = (inv.items || []).map(i => {
+    const disc = Number(i.lineDiscountPercent || 0)
+    const discNote = disc > 0 ? ` <span style="color:#d97706;font-size:10px">(CK ${disc}%)</span>` : ''
+    return `<tr>
+      <td>${i.productName || i.productCode || ''}${discNote}</td>
       <td align="center">${i.quantity}</td>
       <td align="right">${fmt(i.unitPrice)} ₫</td>
       <td align="right">${fmt(i.lineTotal ?? (i.quantity * i.unitPrice))} ₫</td>
     </tr>`
-  ).join('')
+  }).join('')
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Hóa đơn ${inv.invoiceNo}</title>
 <style>
   @media print{body{margin:0}}
@@ -48,6 +50,8 @@ ${inv.note ? `<p style="font-size:12px"><b>Ghi chú:</b> ${inv.note}</p>` : ''}
   ${items}
 </table>
 <div class="total">Tổng cộng: ${fmt(inv.totalAmount)} ₫</div>
+${Number(inv.discountAmount) > 0 ? `<div style="text-align:right;color:#d97706;font-size:13px">🎉 ${inv.promotionName || 'KM'}: -${fmt(inv.discountAmount)} ₫</div>
+<div class="total">Thanh toán: ${fmt(Number(inv.finalAmount ?? inv.totalAmount))} ₫</div>` : ''}
 <hr/>
 <div class="footer">Cảm ơn quý khách! Hẹn gặp lại 😊<br/>FB: facebook.com/duongthi.mylinh.5</div>
 </body></html>`
@@ -81,7 +85,7 @@ function Modal({ title, onClose, children }) {
 function InvoiceForm({ products, onSubmit, loading }) {
   const [customerName, setCustomerName] = useState('')
   const [note, setNote] = useState('')
-  const [items, setItems] = useState([{ productId: '', quantity: 1 }])
+  const [items, setItems] = useState([{ productId: '', quantity: 1, discountPercent: 0 }])
   const [showScanner, setShowScanner] = useState(false)
   const [selectedPromoId, setSelectedPromoId] = useState('')
 
@@ -90,7 +94,7 @@ function InvoiceForm({ products, onSubmit, loading }) {
     queryFn: promotionService.getActive,
   })
 
-  const addItem = () => setItems(i => [...i, { productId: '', quantity: 1 }])
+  const addItem = () => setItems(i => [...i, { productId: '', quantity: 1, discountPercent: 0 }])
   const removeItem = (idx) => setItems(i => i.filter((_, j) => j !== idx))
   const setItem = (idx, key, val) =>
     setItems(i => i.map((it, j) => j === idx ? { ...it, [key]: val } : it))
@@ -107,14 +111,17 @@ function InvoiceForm({ products, onSubmit, loading }) {
       if (emptyIdx >= 0) {
         setItem(emptyIdx, 'productId', String(product.id))
       } else {
-        setItems(prev => [...prev, { productId: String(product.id), quantity: 1 }])
+        setItems(prev => [...prev, { productId: String(product.id), quantity: 1, discountPercent: 0 }])
       }
     }
   }
 
   const total = items.reduce((s, it) => {
     const p = getProduct(it.productId)
-    return s + (p ? Number(p.sellPrice) * Number(it.quantity) : 0)
+    if (!p) return s
+    const disc = Number(it.discountPercent) || 0
+    const actualPrice = Number(p.sellPrice) * (1 - disc / 100)
+    return s + actualPrice * Number(it.quantity)
   }, 0)
 
   // Tính preview discount
@@ -142,7 +149,11 @@ function InvoiceForm({ products, onSubmit, loading }) {
       customerName,
       note,
       promotionId: selectedPromoId ? Number(selectedPromoId) : null,
-      items: validItems.map(it => ({ productId: Number(it.productId), quantity: Number(it.quantity) })),
+      items: validItems.map(it => ({
+        productId: Number(it.productId),
+        quantity: Number(it.quantity),
+        discountPercent: Number(it.discountPercent) || 0,
+      })),
     })
   }
 
@@ -179,9 +190,11 @@ function InvoiceForm({ products, onSubmit, loading }) {
               ))}
             </select>
             {selectedPromo?.type === 'BUY_X_GET_Y' && (
-              <p className="text-xs text-amber-600 mt-1 bg-amber-50 rounded p-2">
-                🎁 <b>Mua X tặng Y:</b> {selectedPromo.description || 'Xem chi tiết chương trình'}
-              </p>
+              <div className="text-xs text-amber-700 mt-1 bg-amber-50 rounded p-2 space-y-1">
+                <p>🎁 <b>Mua X Tặng Y:</b> Mua {selectedPromo.buyQty ?? '?'} SP đủ điều kiện
+                   → Tặng {selectedPromo.getQty ?? '?'} <b>{selectedPromo.getProductName || '...'}</b></p>
+                <p className="text-gray-500">* Sản phẩm tặng sẽ được ghi nhận trong ghi chú đơn hàng</p>
+              </div>
             )}
             {selectedPromo?.type === 'FREE_SHIPPING' && (
               <p className="text-xs text-blue-600 mt-1 bg-blue-50 rounded p-2">
@@ -205,6 +218,9 @@ function InvoiceForm({ products, onSubmit, loading }) {
           </div>
           {items.map((item, idx) => {
             const p = getProduct(item.productId)
+            const disc = Number(item.discountPercent) || 0
+            const actualPrice = p ? Number(p.sellPrice) * (1 - disc / 100) : 0
+            const lineTotal = p ? Math.round(actualPrice) * Number(item.quantity) : 0
             return (
               <div key={idx} className="flex gap-2 mb-2 items-end">
                 <div className="flex-1">
@@ -219,14 +235,32 @@ function InvoiceForm({ products, onSubmit, loading }) {
                     ))}
                   </select>
                 </div>
-                <div className="w-24">
-                  {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Số lượng</label>}
+                <div className="w-20">
+                  {idx === 0 && <label className="block text-xs text-gray-500 mb-1">SL</label>}
                   <input type="number" min={1} max={p?.stockQty || 9999} value={item.quantity}
                     onChange={e => setItem(idx, 'quantity', e.target.value)}
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
                 </div>
-                <div className="w-32 text-right pb-2 text-sm text-gray-600">
-                  {p ? `${(Number(p.sellPrice) * Number(item.quantity)).toLocaleString('vi-VN')} ₫` : '—'}
+                <div className="w-20">
+                  {idx === 0 && <label className="block text-xs text-gray-500 mb-1">CK %</label>}
+                  <input type="number" min={0} max={100} step={0.5} value={item.discountPercent}
+                    onChange={e => setItem(idx, 'discountPercent', e.target.value)}
+                    placeholder="0"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                </div>
+                <div className="w-32 text-right pb-2 text-sm">
+                  {p ? (
+                    <div>
+                      {disc > 0 && (
+                        <div className="text-xs text-gray-400 line-through">
+                          {(Number(p.sellPrice) * Number(item.quantity)).toLocaleString('vi-VN')} ₫
+                        </div>
+                      )}
+                      <div className={disc > 0 ? 'text-amber-600 font-medium' : 'text-gray-600'}>
+                        {lineTotal.toLocaleString('vi-VN')} ₫
+                      </div>
+                    </div>
+                  ) : '—'}
                 </div>
                 <button type="button" onClick={() => removeItem(idx)}
                   className="text-red-500 hover:text-red-700 pb-2 text-lg">&times;</button>
@@ -250,6 +284,25 @@ function InvoiceForm({ products, onSubmit, loading }) {
                 ⚠️ Đơn chưa đủ điều kiện (tối thiểu {Number(selectedPromo.minOrderValue).toLocaleString('vi-VN')} ₫)
               </p>
             )}
+            {selectedPromo?.appliesTo === 'PRODUCT' && selectedPromo.productIds?.length > 0 && (() => {
+              const eligible = items.some(it => selectedPromo.productIds.includes(Number(it.productId)))
+              return !eligible ? (
+                <p className="text-xs text-red-500">
+                  ⚠️ KM chỉ áp dụng cho: {selectedPromo.productNames?.join(', ')}. Hóa đơn chưa có SP nào phù hợp.
+                </p>
+              ) : null
+            })()}
+            {selectedPromo?.appliesTo === 'CATEGORY' && selectedPromo.categoryIds?.length > 0 && (() => {
+              const itemCatIds = items
+                .map(it => products.find(p => String(p.id) === String(it.productId))?.categoryId)
+                .filter(Boolean)
+              const eligible = itemCatIds.some(cid => selectedPromo.categoryIds.includes(cid))
+              return !eligible ? (
+                <p className="text-xs text-red-500">
+                  ⚠️ KM chỉ áp dụng cho danh mục: {selectedPromo.categoryNames?.join(', ')}. Chưa có SP nào thuộc danh mục này.
+                </p>
+              ) : null
+            })()}
             <div className="flex justify-between font-bold text-green-700 text-base border-t pt-1.5">
               <span>Khách thanh toán:</span>
               <span>{finalTotal.toLocaleString('vi-VN')} ₫</span>
@@ -298,7 +351,9 @@ function InvoiceDetail({ inv, onClose }) {
             <tr className="text-gray-600 text-xs">
               <th className="text-left px-3 py-2">Sản phẩm</th>
               <th className="text-right px-3 py-2">SL</th>
-              <th className="text-right px-3 py-2">Đơn giá</th>
+              <th className="text-right px-3 py-2">Giá gốc</th>
+              <th className="text-right px-3 py-2">CK%</th>
+              <th className="text-right px-3 py-2">Giá bán</th>
               <th className="text-right px-3 py-2">Thành tiền</th>
             </tr>
           </thead>
@@ -306,31 +361,39 @@ function InvoiceDetail({ inv, onClose }) {
             {inv.items?.map((it, i) => (
               <tr key={i} className="border-t">
                 <td className="px-3 py-2">{it.productName}</td>
-                <td className="px-3 py-2 text-right">{it.quantity} {it.unit}</td>
-                <td className="px-3 py-2 text-right">{Number(it.unitPrice).toLocaleString('vi-VN')}</td>
+                <td className="px-3 py-2 text-right text-xs">{it.quantity} {it.unit}</td>
+                <td className="px-3 py-2 text-right text-xs text-gray-500">
+                  {Number(it.originalUnitPrice ?? it.unitPrice).toLocaleString('vi-VN')}
+                </td>
+                <td className="px-3 py-2 text-right text-xs">
+                  {Number(it.lineDiscountPercent) > 0
+                    ? <span className="text-amber-600 font-medium">{Number(it.lineDiscountPercent)}%</span>
+                    : <span className="text-gray-400">—</span>}
+                </td>
+                <td className="px-3 py-2 text-right text-xs">{Number(it.unitPrice).toLocaleString('vi-VN')}</td>
                 <td className="px-3 py-2 text-right font-medium">{Number(it.lineTotal).toLocaleString('vi-VN')}</td>
               </tr>
             ))}
           </tbody>
           <tfoot className="bg-gray-50 text-sm font-semibold">
             <tr>
-              <td colSpan={3} className="px-3 py-2 text-right text-gray-600">Tổng tiền hàng:</td>
+              <td colSpan={5} className="px-3 py-2 text-right text-gray-600">Tổng tiền hàng:</td>
               <td className="px-3 py-2 text-right text-gray-700">{Number(inv.totalAmount).toLocaleString('vi-VN')} ₫</td>
             </tr>
             {Number(inv.discountAmount) > 0 && (
               <tr>
-                <td colSpan={3} className="px-3 py-2 text-right text-amber-600">🎉 Giảm KM:</td>
+                <td colSpan={5} className="px-3 py-2 text-right text-amber-600">🎉 Giảm KM:</td>
                 <td className="px-3 py-2 text-right text-amber-600 font-bold">-{Number(inv.discountAmount).toLocaleString('vi-VN')} ₫</td>
               </tr>
             )}
             <tr>
-              <td colSpan={3} className="px-3 py-2 text-right text-green-700 font-bold text-base">Khách thanh toán:</td>
+              <td colSpan={5} className="px-3 py-2 text-right text-green-700 font-bold text-base">Khách thanh toán:</td>
               <td className="px-3 py-2 text-right text-green-700 font-bold text-base">
                 {Number(inv.finalAmount ?? inv.totalAmount).toLocaleString('vi-VN')} ₫
               </td>
             </tr>
             <tr>
-              <td colSpan={3} className="px-3 py-2 text-right text-blue-600">Lợi nhuận gộp:</td>
+              <td colSpan={5} className="px-3 py-2 text-right text-blue-600">Lợi nhuận gộp:</td>
               <td className="px-3 py-2 text-right text-blue-600">{Number(inv.totalProfit).toLocaleString('vi-VN')} ₫</td>
             </tr>
           </tfoot>
