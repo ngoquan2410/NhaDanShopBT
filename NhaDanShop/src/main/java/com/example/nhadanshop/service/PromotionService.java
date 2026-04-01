@@ -87,6 +87,11 @@ public class PromotionService {
         p.setAppliesTo(req.appliesTo() != null ? req.appliesTo() : "ALL");
         if (req.active() != null) p.setActive(req.active());
 
+        // BUY_X_GET_Y fields
+        p.setBuyQty(req.buyQty());
+        p.setGetProductId(req.getProductId());
+        p.setGetQty(req.getQty());
+
         // Danh mục áp dụng
         Set<Category> categories = new HashSet<>();
         if (req.categoryIds() != null && !req.categoryIds().isEmpty()) {
@@ -108,12 +113,20 @@ public class PromotionService {
         List<Long> prodIds = p.getProducts().stream().map(pr -> pr.getId()).collect(Collectors.toList());
         List<String> prodNames = p.getProducts().stream().map(pr -> pr.getName()).collect(Collectors.toList());
 
+        // Tên sản phẩm tặng (BUY_X_GET_Y)
+        String getProductName = null;
+        if (p.getGetProductId() != null) {
+            getProductName = productRepo.findById(p.getGetProductId())
+                    .map(Product::getName).orElse(null);
+        }
+
         return new PromotionResponse(
                 p.getId(), p.getName(), p.getDescription(), p.getType(),
                 p.getDiscountValue(), p.getMinOrderValue(), p.getMaxDiscount(),
                 p.getStartDate(), p.getEndDate(), p.getActive(), p.isCurrentlyActive(),
                 p.getAppliesTo(),
                 catIds, catNames, prodIds, prodNames,
+                p.getBuyQty(), p.getGetProductId(), getProductName, p.getGetQty(),
                 p.getCreatedAt(), p.getUpdatedAt()
         );
     }

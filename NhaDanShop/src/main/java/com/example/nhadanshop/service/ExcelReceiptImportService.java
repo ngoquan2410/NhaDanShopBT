@@ -194,12 +194,24 @@ public class ExcelReceiptImportService {
                     }
                     String categoryName = getCellString(row, COL_CATEGORY);
                     if (categoryName == null || categoryName.isBlank()) {
-                        // ── ĐIỀU KIỆN LỖI CHÍNH: SP mới mà danh mục trống ──
-                        errors.add("❌ Dòng " + lineNum + ": Sản phẩm '" + name.trim()
-                                + "' chưa tồn tại trong hệ thống nhưng cột G (Danh mục) để trống. "
-                                + "→ Điền tên danh mục vào cột G để hệ thống tạo sản phẩm mới, "
-                                + "hoặc kiểm tra lại mã/tên SP ở cột A, B.");
-                        continue;
+                        // ── Logic 4: Không có danh mục → tìm danh mục có tên chứa trong tên SP ──
+                        final String spName = name.trim().toLowerCase();
+                        categoryName = categoryRepository.findAll().stream()
+                                .filter(cat -> cat.getActive() != null && cat.getActive())
+                                .filter(cat -> spName.contains(cat.getName().trim().toLowerCase()))
+                                .map(cat -> cat.getName())
+                                .findFirst()
+                                .orElse(null);
+
+                        if (categoryName == null) {
+                            errors.add("❌ Dòng " + lineNum + ": Sản phẩm '" + name.trim()
+                                    + "' chưa tồn tại và cột G (Danh mục) để trống. "
+                                    + "Hệ thống cũng không tìm được danh mục phù hợp qua tên sản phẩm. "
+                                    + "→ Điền tên danh mục vào cột G, hoặc đặt tên SP có chứa tên danh mục.");
+                            continue;
+                        }
+                        warnings.add("Dòng " + lineNum + ": Danh mục tự động phát hiện từ tên SP '"
+                                + name.trim() + "' → danh mục '" + categoryName + "'");
                     }
                     String unit = getCellString(row, COL_UNIT);
                     if (unit == null || unit.isBlank()) unit = "cái";

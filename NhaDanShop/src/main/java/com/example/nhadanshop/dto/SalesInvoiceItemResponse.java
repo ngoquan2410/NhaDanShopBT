@@ -9,8 +9,10 @@ public record SalesInvoiceItemResponse(
         String productName,
         String unit,
         Integer quantity,
-        BigDecimal unitPrice,
+        BigDecimal originalUnitPrice,   // giá gốc trước CK dòng
+        BigDecimal lineDiscountPercent, // % CK dòng
+        BigDecimal unitPrice,           // giá thực tế sau CK dòng
         BigDecimal unitCostSnapshot,
-        BigDecimal lineTotal,
-        BigDecimal profit
+        BigDecimal lineTotal,           // = unitPrice × quantity
+        BigDecimal profit               // = (unitPrice - costSnapshot) × quantity
 ) {}

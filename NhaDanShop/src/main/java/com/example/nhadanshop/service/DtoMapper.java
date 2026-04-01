@@ -41,6 +41,10 @@ public final class DtoMapper {
         BigDecimal profit = item.getUnitPrice()
                 .subtract(item.getUnitCostSnapshot())
                 .multiply(BigDecimal.valueOf(item.getQuantity()));
+        BigDecimal origPrice = item.getOriginalUnitPrice() != null
+                ? item.getOriginalUnitPrice() : item.getUnitPrice();
+        BigDecimal lineDsc = item.getLineDiscountPercent() != null
+                ? item.getLineDiscountPercent() : BigDecimal.ZERO;
         return new SalesInvoiceItemResponse(
                 item.getId(),
                 item.getProduct().getId(),
@@ -48,6 +52,8 @@ public final class DtoMapper {
                 item.getProduct().getName(),
                 item.getProduct().getUnit(),
                 item.getQuantity(),
+                origPrice,
+                lineDsc,
                 item.getUnitPrice(),
                 item.getUnitCostSnapshot(),
                 lineTotal,

@@ -119,7 +119,7 @@ public class PendingOrderService {
                 "[" + order.getPaymentMethod() + "] " + (order.getNote() != null ? order.getNote() : ""),
                 null, // promotionId — pending orders không áp dụng KM tự động
                 order.getItems().stream()
-                        .map(i -> new InvoiceItemRequest(i.getProduct().getId(), i.getQuantity()))
+                        .map(i -> new InvoiceItemRequest(i.getProduct().getId(), i.getQuantity(), null))
                         .toList()
         );
         SalesInvoiceResponse invoice = invoiceService.createInvoice(invoiceReq);
