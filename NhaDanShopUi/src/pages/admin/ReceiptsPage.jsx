@@ -26,9 +26,9 @@ function ReceiptForm({ products, onSubmit, loading }) {
   const [supplierName, setSupplierName] = useState('')
   const [note, setNote] = useState('')
   const [shippingFee, setShippingFee] = useState(0)
-  const [items, setItems] = useState([{ productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
+  const [items, setItems] = useState([{ productId: '', quantity: 1, unitCost: 0, discountPercent: 0, vatPercent: 0 }])
 
-  const addItem = () => setItems(i => [...i, { productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
+  const addItem = () => setItems(i => [...i, { productId: '', quantity: 1, unitCost: 0, discountPercent: 0, vatPercent: 0 }])
   const removeItem = (idx) => setItems(i => i.filter((_, j) => j !== idx))
   const setItem = (idx, key, val) =>
     setItems(i => i.map((it, j) => j === idx ? { ...it, [key]: val } : it))
@@ -44,6 +44,7 @@ function ReceiptForm({ products, onSubmit, loading }) {
         quantity: Number(it.quantity),
         unitCost: Number(it.unitCost),
         discountPercent: Number(it.discountPercent) || 0,
+        vatPercent: Number(it.vatPercent) || 0,
       })),
     })
   }
@@ -55,7 +56,13 @@ function ReceiptForm({ products, onSubmit, loading }) {
     const disc = Number(it.discountPercent) || 0
     return s + Number(it.quantity) * Number(it.unitCost) * (1 - disc / 100)
   }, 0)
-  const grandTotal = totalAfterDiscount + Number(shippingFee)
+  const totalVat = items.reduce((s, it) => {
+    const disc = Number(it.discountPercent) || 0
+    const vat  = Number(it.vatPercent) || 0
+    const afterDisc = Number(it.quantity) * Number(it.unitCost) * (1 - disc / 100)
+    return s + afterDisc * vat / 100
+  }, 0)
+  const grandTotal = totalAfterDiscount + Number(shippingFee) + totalVat
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -128,6 +135,16 @@ function ReceiptForm({ products, onSubmit, loading }) {
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
               </div>
             </div>
+            <div className="w-20">
+              {idx === 0 && <label className="block text-xs text-gray-500 mb-1">VAT %</label>}
+              <div className="relative">
+                <input type="number" min={0} max={100} step={0.5} value={item.vatPercent}
+                  onChange={e => setItem(idx, 'vatPercent', e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 pr-6"
+                  placeholder="0" />
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
+              </div>
+            </div>
             <div className="w-28 text-right pb-2">
               {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Sau CK</label>}
               <span className={`text-xs font-semibold ${Number(item.discountPercent) > 0 ? 'text-green-600' : 'text-gray-500'}`}>
@@ -155,6 +172,12 @@ function ReceiptForm({ products, onSubmit, loading }) {
             <div className="flex justify-between text-blue-600">
               <span>Phí vận chuyển:</span>
               <span>+{Number(shippingFee).toLocaleString('vi-VN')} ₫</span>
+            </div>
+          )}
+          {totalVat > 0 && (
+            <div className="flex justify-between text-purple-600">
+              <span>Thuế GTGT (VAT):</span>
+              <span>+{Math.round(totalVat).toLocaleString('vi-VN')} ₫</span>
             </div>
           )}
           <div className="flex justify-between font-bold text-green-800 border-t pt-1.5 text-base">
@@ -242,7 +265,7 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
       <div className="bg-gradient-to-r from-green-600 to-green-700 rounded-xl p-4 flex items-center justify-between">
         <div className="text-white">
           <p className="font-bold text-base">📥 Bước 1: Tải file template</p>
-          <p className="text-green-100 text-xs mt-0.5">Có dummy data mẫu + cột chiết khấu % + sheet hướng dẫn</p>
+          <p className="text-green-100 text-xs mt-0.5">Có dummy data mẫu + cột CK%, VAT%, phân bổ phí ship + sheet hướng dẫn</p>
         </div>
         <button
           onClick={handleDownloadTemplate}
@@ -262,19 +285,19 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
           <table className="text-xs w-full border-collapse">
             <thead>
               <tr className="bg-green-100">
-                {['A: Mã SP','B: Tên SP *','C: SL *','D: Giá nhập *','E: CK %','F: Ghi chú','G: Danh mục (tạo mới)','H: Đơn vị (tạo mới)'].map(h => (
+                {['A: Mã SP','B: Tên SP *','C: SL *','D: Giá nhập *','E: CK %','F: VAT %','G: Ghi chú','H: Danh mục','I: Đơn vị'].map(h => (
                   <th key={h} className="border border-green-200 px-2 py-1 text-left whitespace-nowrap font-semibold">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               <tr className="bg-white">
-                {['BT001','Bánh Tráng Rong Biển','5','65000','5','SP có sẵn CK 5%','',''].map((v,i) => (
+                {['BT001','Bánh Tráng Rong Biển','5','65000','5','10','SP có sẵn CK5% VAT10%','',''].map((v,i) => (
                   <td key={i} className="border border-green-200 px-2 py-1 text-gray-700">{v}</td>
                 ))}
               </tr>
               <tr className="bg-yellow-50">
-                {['','Sản Phẩm Mới XYZ','10','25000','0','SP mới tạo','Danh Mục Mới','gói'].map((v,i) => (
+                {['','Sản Phẩm Mới XYZ','10','25000','0','0','SP mới tạo','Danh Mục Mới','gói'].map((v,i) => (
                   <td key={i} className="border border-green-200 px-2 py-1 text-amber-700 font-medium">{v}</td>
                 ))}
               </tr>

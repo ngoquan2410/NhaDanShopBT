@@ -46,7 +46,19 @@ public class InventoryReceiptItem {
     @Column(name = "shipping_allocated", nullable = false, precision = 18, scale = 2)
     private BigDecimal shippingAllocated = BigDecimal.ZERO;
 
-    /** Giá vốn cuối cùng = discountedCost + shippingAllocated (dùng để tính lợi nhuận) */
+    /** VAT % áp dụng cho dòng này (0–100), admin nhập tay */
+    @Column(name = "vat_percent", nullable = false, precision = 5, scale = 2)
+    private BigDecimal vatPercent = BigDecimal.ZERO;
+
+    /** Phần VAT được phân bổ vào giá vốn/đơn vị bán lẻ */
+    @Column(name = "vat_allocated", nullable = false, precision = 18, scale = 2)
+    private BigDecimal vatAllocated = BigDecimal.ZERO;
+
+    /** Giá vốn cuối = discountedCost + shippingAllocated + vatAllocated */
     @Column(name = "final_cost", nullable = false, precision = 18, scale = 2)
     private BigDecimal finalCost = BigDecimal.ZERO;
+
+    /** Alias sau khi cộng VAT (= finalCost, dùng để phân biệt với finalCost trước VAT) */
+    @Column(name = "final_cost_with_vat", nullable = false, precision = 18, scale = 2)
+    private BigDecimal finalCostWithVat = BigDecimal.ZERO;
 }

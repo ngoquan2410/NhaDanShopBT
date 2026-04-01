@@ -12,7 +12,10 @@ public record InventoryReceiptItemResponse(
         BigDecimal unitCost,
         BigDecimal discountPercent,
         BigDecimal discountedCost,
+        BigDecimal vatPercent,
+        BigDecimal vatAllocated,
         BigDecimal shippingAllocated,
-        BigDecimal finalCost,
+        BigDecimal finalCost,           // sau CK + ship (trước VAT)
+        BigDecimal finalCostWithVat,    // giá vốn cuối = sau CK + ship + VAT
         BigDecimal lineTotal
 ) {}

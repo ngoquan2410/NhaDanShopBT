@@ -12,6 +12,7 @@ public record InventoryReceiptResponse(
         String note,
         BigDecimal totalAmount,
         BigDecimal shippingFee,
+        BigDecimal totalVat,
         String createdBy,
         List<InventoryReceiptItemResponse> items,
         LocalDateTime createdAt,

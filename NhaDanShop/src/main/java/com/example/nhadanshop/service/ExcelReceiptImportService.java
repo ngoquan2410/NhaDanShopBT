@@ -57,15 +57,16 @@ public class ExcelReceiptImportService {
     private final CategoryRepository categoryRepository;   // ← thêm để auto-create product
     private final ProductService productService;           // ← thêm để generate code
 
-    // Column indices — cấu trúc mới (từ phải sang trái, shift thêm cột E: discount)
-    private static final int COL_CODE     = 0; // A: Mã SP
-    private static final int COL_NAME     = 1; // B: Tên SP
-    private static final int COL_QUANTITY = 2; // C: Số lượng đơn vị nhập
-    private static final int COL_COST     = 3; // D: Giá / đơn vị nhập
-    private static final int COL_DISCOUNT = 4; // E: Chiết khấu % (0–100, optional)
-    private static final int COL_NOTE     = 5; // F: Ghi chú dòng (optional)
-    private static final int COL_CATEGORY = 6; // G: Danh mục (khi tạo SP mới)
-    private static final int COL_UNIT     = 7; // H: Đơn vị (khi tạo SP mới)
+    // Column indices
+    private static final int COL_CODE     = 0;
+    private static final int COL_NAME     = 1;
+    private static final int COL_QUANTITY = 2;
+    private static final int COL_COST     = 3;
+    private static final int COL_DISCOUNT = 4; // E: Chiết khấu %
+    private static final int COL_VAT      = 5; // F: VAT %  ← MỚI
+    private static final int COL_NOTE     = 6; // G: Ghi chú
+    private static final int COL_CATEGORY = 7; // H: Danh mục (SP mới)
+    private static final int COL_UNIT     = 8; // I: Đơn vị (SP mới)
 
     /**
      * Kết quả import phiếu nhập từ Excel.
@@ -144,6 +145,8 @@ public class ExcelReceiptImportService {
                 BigDecimal cost = getCellDecimal(row, COL_COST);
                 BigDecimal discountPct = getCellDecimal(row, COL_DISCOUNT);
                 if (discountPct == null) discountPct = BigDecimal.ZERO;
+                BigDecimal vatPct = getCellDecimal(row, COL_VAT);
+                if (vatPct == null) vatPct = BigDecimal.ZERO;
                 String lineNote = getCellString(row, COL_NOTE);
 
                 // ── Validate giá trị bắt buộc ───────────────────────────────
@@ -165,6 +168,10 @@ public class ExcelReceiptImportService {
                     errors.add("❌ Dòng " + lineNum + ": Chiết khấu % (cột E) phải trong khoảng 0–100, hiện là: " + discountPct);
                     continue;
                 }
+                if (vatPct.compareTo(BigDecimal.ZERO) < 0 || vatPct.compareTo(BigDecimal.valueOf(100)) > 0) {
+                    errors.add("❌ Dòng " + lineNum + ": VAT % (cột F) phải trong khoảng 0–100, hiện là: " + vatPct);
+                    continue;
+                }
 
                 // ── Tìm sản phẩm ────────────────────────────────────────────
                 FindResult findResult = findProduct(code, name, lineNum, errors, warnings);
@@ -183,7 +190,7 @@ public class ExcelReceiptImportService {
                     }
                     validatedRows.add(new ValidatedRow(
                             product, null, null, null, null,
-                            qty, cost, discountPct, lineNum, lineNote));
+                            qty, cost, discountPct, vatPct, lineNum, lineNote));
                 } else {
                     // SP chưa tồn tại → cần auto-create
                     if (name == null || name.isBlank()) {
@@ -222,7 +229,7 @@ public class ExcelReceiptImportService {
 
                     validatedRows.add(new ValidatedRow(
                             null, name.trim(), categoryName.trim(), unit.trim(), generatedCode,
-                            qty, cost, discountPct, lineNum, lineNote));
+                            qty, cost, discountPct, vatPct, lineNum, lineNote));
                 }
             }
 
@@ -318,6 +325,7 @@ public class ExcelReceiptImportService {
             BigDecimal lineTotal = vr.cost().multiply(BigDecimal.valueOf(vr.qty()));
             totalAmount = totalAmount.add(lineTotal);
 
+
             if (itemMap.containsKey(product.getId())) {
                 InventoryReceiptItem existing = itemMap.get(product.getId());
                 existing.setQuantity(existing.getQuantity() + vr.qty());
@@ -331,13 +339,16 @@ public class ExcelReceiptImportService {
                 item.setUnitCost(vr.cost());
                 item.setDiscountPercent(vr.discountPct());
                 item.setDiscountedCost(discountedCostPerUnit);
-                item.setShippingAllocated(BigDecimal.ZERO);
-                item.setFinalCost(discountedCostPerUnit);
+                item.setVatPercent(vr.vatPct());
+                item.setVatAllocated(BigDecimal.ZERO);       // cập nhật sau bước phân bổ
+                item.setShippingAllocated(BigDecimal.ZERO);  // cập nhật sau bước phân bổ
+                item.setFinalCost(discountedCostPerUnit);    // tạm
+                item.setFinalCostWithVat(discountedCostPerUnit); // tạm
                 itemMap.put(product.getId(), item);
                 discountedLineTotals.put(product.getId(), discountedLineTotal);
             }
 
-            // Tạo Batch
+            // Tạo Batch tạm — sẽ cập nhật finalCostWithVat sau bước phân bổ
             LocalDate expiryDate = (product.getExpiryDays() != null && product.getExpiryDays() > 0)
                     ? LocalDate.now().plusDays(product.getExpiryDays())
                     : LocalDate.now().plusYears(10);
@@ -349,7 +360,7 @@ public class ExcelReceiptImportService {
             batch.setExpiryDate(expiryDate);
             batch.setImportQty(addedRetailQty);
             batch.setRemainingQty(addedRetailQty);
-            batch.setCostPrice(discountedCostPerUnit);
+            batch.setCostPrice(discountedCostPerUnit); // tạm
             batchRepository.save(batch);
 
             product.setStockQty(product.getStockQty() + addedRetailQty);
@@ -357,11 +368,12 @@ public class ExcelReceiptImportService {
             productRepository.save(product);
 
             successItems++;
-            log.info("Dòng {}: OK '{}' qty={} {} discount={}% (+{} retail)",
-                    vr.lineNum(), product.getCode(), vr.qty(), importUnit, vr.discountPct(), addedRetailQty);
+            log.info("Dòng {}: OK '{}' qty={} {} discount={}% vat={}% (+{} retail)",
+                    vr.lineNum(), product.getCode(), vr.qty(), importUnit,
+                    vr.discountPct(), vr.vatPct(), addedRetailQty);
         }
 
-        // ── Phân bổ shippingFee + cập nhật finalCost ─────────────────────
+        // ── Phân bổ shippingFee + VAT + cập nhật finalCostWithVat ────────────
         final BigDecimal finalShippingFee = shippingFee;
         BigDecimal totalDiscountedValue = discountedLineTotals.values().stream()
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -385,17 +397,32 @@ public class ExcelReceiptImportService {
             BigDecimal shippingPerUnit = retailQty > 0
                     ? shippingForLine.divide(BigDecimal.valueOf(retailQty), 2, RoundingMode.HALF_UP)
                     : BigDecimal.ZERO;
-            BigDecimal finalCostPerUnit = item.getDiscountedCost().add(shippingPerUnit)
+
+            // VAT phân bổ per unit
+            BigDecimal vatPct = item.getVatPercent() != null ? item.getVatPercent() : BigDecimal.ZERO;
+            BigDecimal vatAmountLine = discountedLineTotal
+                    .multiply(vatPct.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP))
+                    .setScale(2, RoundingMode.HALF_UP);
+            BigDecimal vatPerUnit = retailQty > 0
+                    ? vatAmountLine.divide(BigDecimal.valueOf(retailQty), 2, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
+
+            BigDecimal finalCostBeforeVat = item.getDiscountedCost().add(shippingPerUnit)
+                    .setScale(2, RoundingMode.HALF_UP);
+            BigDecimal finalCostWithVat = finalCostBeforeVat.add(vatPerUnit)
                     .setScale(2, RoundingMode.HALF_UP);
 
             item.setShippingAllocated(shippingPerUnit);
-            item.setFinalCost(finalCostPerUnit);
-            product.setCostPrice(finalCostPerUnit);
+            item.setVatAllocated(vatPerUnit);
+            item.setFinalCost(finalCostBeforeVat);
+            item.setFinalCostWithVat(finalCostWithVat);
+
+            product.setCostPrice(finalCostWithVat);
             product.setUpdatedAt(LocalDateTime.now());
             productRepository.save(product);
 
             batchRepository.findByReceiptAndProduct(savedReceipt, product).forEach(b -> {
-                b.setCostPrice(finalCostPerUnit);
+                b.setCostPrice(finalCostWithVat);
                 batchRepository.save(b);
             });
         }
@@ -624,14 +651,15 @@ public class ExcelReceiptImportService {
      * product = null nghĩa là SP chưa tồn tại, cần tạo mới trong Pass 2.
      */
     private record ValidatedRow(
-            Product product,        // SP đã tìm thấy (null nếu cần auto-create)
-            String newProductName,  // tên SP mới (khi product == null)
-            String newCategoryName, // danh mục SP mới
-            String newUnit,         // đơn vị SP mới
-            String newCode,         // mã SP (từ cột A, có thể null → auto-generate)
+            Product product,
+            String newProductName,
+            String newCategoryName,
+            String newUnit,
+            String newCode,
             int qty,
             BigDecimal cost,
             BigDecimal discountPct,
+            BigDecimal vatPct,        // MỚI
             int lineNum,
             String lineNote
     ) {}

@@ -87,10 +87,12 @@ public class PromotionService {
         p.setAppliesTo(req.appliesTo() != null ? req.appliesTo() : "ALL");
         if (req.active() != null) p.setActive(req.active());
 
-        // BUY_X_GET_Y fields
+        // BUY_X_GET_Y + QUANTITY_GIFT fields
         p.setBuyQty(req.buyQty());
         p.setGetProductId(req.getProductId());
         p.setGetQty(req.getQty());
+        p.setMinBuyQty(req.minBuyQty());
+        p.setMaxBuyQty(req.maxBuyQty());
 
         // Danh mục áp dụng
         Set<Category> categories = new HashSet<>();
@@ -127,6 +129,7 @@ public class PromotionService {
                 p.getAppliesTo(),
                 catIds, catNames, prodIds, prodNames,
                 p.getBuyQty(), p.getGetProductId(), getProductName, p.getGetQty(),
+                p.getMinBuyQty(), p.getMaxBuyQty(),
                 p.getCreatedAt(), p.getUpdatedAt()
         );
     }

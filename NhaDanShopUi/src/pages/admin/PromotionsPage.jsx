@@ -9,7 +9,8 @@ import dayjs from 'dayjs'
 const PROMOTION_TYPES = [
   { value: 'PERCENT_DISCOUNT', label: '% Chiết khấu (Giảm %)', icon: '🏷️' },
   { value: 'FIXED_DISCOUNT',   label: 'Giảm tiền cố định',     icon: '💵' },
-  { value: 'BUY_X_GET_Y',      label: 'Mua X tặng Y',          icon: '🎁' },
+  { value: 'BUY_X_GET_Y',      label: 'Mua X tặng Y (combo)',  icon: '🎁' },
+  { value: 'QUANTITY_GIFT',    label: 'Mua min-max → Tặng SP', icon: '🎀' },
   { value: 'FREE_SHIPPING',    label: 'Miễn phí vận chuyển',   icon: '🚚' },
 ]
 
@@ -57,22 +58,13 @@ function Modal({ title, onClose, children, wide }) {
 }
 
 const EMPTY_FORM = {
-  name: '',
-  description: '',
-  type: 'PERCENT_DISCOUNT',
-  discountValue: '',
-  minOrderValue: 0,
-  maxDiscount: '',
+  name: '', description: '', type: 'PERCENT_DISCOUNT',
+  discountValue: '', minOrderValue: 0, maxDiscount: '',
   startDate: dayjs().format('YYYY-MM-DDTHH:mm'),
   endDate: dayjs().add(30, 'day').format('YYYY-MM-DDTHH:mm'),
-  active: true,
-  appliesTo: 'ALL',
-  categoryIds: [],
-  productIds: [],
-  // BUY_X_GET_Y
-  buyQty: '',
-  getProductId: '',
-  getQty: '',
+  active: true, appliesTo: 'ALL', categoryIds: [], productIds: [],
+  buyQty: '', getProductId: '', getQty: '',
+  minBuyQty: '', maxBuyQty: '',
 }
 
 function PromotionForm({ initial, categories, products, onSubmit, loading, onClose }) {
@@ -94,10 +86,11 @@ function PromotionForm({ initial, categories, products, onSubmit, loading, onClo
       discountValue: Number(form.discountValue) || 0,
       minOrderValue: Number(form.minOrderValue) || 0,
       maxDiscount: form.maxDiscount !== '' ? Number(form.maxDiscount) : null,
-      // BUY_X_GET_Y
-      buyQty: form.buyQty !== '' ? Number(form.buyQty) : null,
+      buyQty:       form.buyQty !== ''       ? Number(form.buyQty)       : null,
       getProductId: form.getProductId !== '' ? Number(form.getProductId) : null,
-      getQty: form.getQty !== '' ? Number(form.getQty) : null,
+      getQty:       form.getQty !== ''       ? Number(form.getQty)       : null,
+      minBuyQty:    form.minBuyQty !== ''    ? Number(form.minBuyQty)    : null,
+      maxBuyQty:    form.maxBuyQty !== ''    ? Number(form.maxBuyQty)    : null,
     })
   }
 
@@ -218,6 +211,58 @@ function PromotionForm({ initial, categories, products, onSubmit, loading, onClo
             <div className="bg-white rounded-lg p-2 text-xs text-amber-700 border border-amber-200">
               📋 Tóm tắt: Mua {form.buyQty} sản phẩm đủ điều kiện →
               Tặng {form.getQty} {products.find(p => String(p.id) === String(form.getProductId))?.name || '...'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── QUANTITY_GIFT: Mua min-max → tặng SP ── */}
+      {form.type === 'QUANTITY_GIFT' && (
+        <div className="bg-pink-50 border border-pink-200 rounded-xl p-4 space-y-3">
+          <p className="font-semibold text-pink-800 text-sm">🎀 Cấu hình Mua Min–Max → Tặng Sản Phẩm</p>
+          <p className="text-xs text-pink-600">
+            Ví dụ: Mua từ 5 đến 10 hộp → Tặng 1 gói Muối Ớt miễn phí
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Mua tối thiểu (sp) *</label>
+              <input type="number" min={1} step={1} value={form.minBuyQty}
+                onChange={e => set('minBuyQty', e.target.value)}
+                placeholder="VD: 5"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-400 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Mua tối đa (sp)
+                <span className="ml-1 text-gray-400 font-normal">(để trống = không giới hạn)</span>
+              </label>
+              <input type="number" min={1} step={1} value={form.maxBuyQty}
+                onChange={e => set('maxBuyQty', e.target.value)}
+                placeholder="Không giới hạn"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-400 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Sản phẩm được tặng *</label>
+              <select value={form.getProductId} onChange={e => set('getProductId', e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-400 focus:outline-none">
+                <option value="">-- Chọn sản phẩm tặng --</option>
+                {products.map(p => (
+                  <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Số lượng tặng *</label>
+              <input type="number" min={1} step={1} value={form.getQty}
+                onChange={e => set('getQty', e.target.value)}
+                placeholder="VD: 1"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-400 focus:outline-none" />
+            </div>
+          </div>
+          {form.minBuyQty && form.getProductId && form.getQty && (
+            <div className="bg-white rounded-lg p-2 text-xs text-pink-700 border border-pink-200">
+              📋 Tóm tắt: Mua từ {form.minBuyQty}{form.maxBuyQty ? `–${form.maxBuyQty}` : '+'} sản phẩm đủ điều kiện
+              → Tặng {form.getQty} {products.find(p => String(p.id) === String(form.getProductId))?.name || '...'}
             </div>
           )}
         </div>
@@ -371,9 +416,8 @@ export default function PromotionsPage() {
     categoryIds: p.categoryIds || [],
     productIds: p.productIds || [],
     // BUY_X_GET_Y
-    buyQty: p.buyQty ?? '',
-    getProductId: p.getProductId ?? '',
-    getQty: p.getQty ?? '',
+    buyQty: p.buyQty ?? '', getProductId: p.getProductId ?? '', getQty: p.getQty ?? '',
+    minBuyQty: p.minBuyQty ?? '', maxBuyQty: p.maxBuyQty ?? '',
   })
 
   return (

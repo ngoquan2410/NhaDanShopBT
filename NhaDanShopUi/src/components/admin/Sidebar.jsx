@@ -1,4 +1,4 @@
-﻿﻿import { NavLink, useNavigate } from 'react-router-dom'
+﻿﻿﻿import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { usePendingOrders } from '../../hooks/usePendingOrders'
 
@@ -12,6 +12,7 @@ const links = [
   { to: '/admin/profit-report',    label: 'Lợi nhuận',       icon: '💰' },
   { to: '/admin/revenue',          label: 'Doanh thu',        icon: '📈' },
   { to: '/admin/promotions',       label: 'Khuyến mãi',       icon: '🎉' },
+  { to: '/admin/combos',           label: 'Combo sản phẩm',   icon: '📦' },
   { to: '/admin/users',            label: 'Người dùng',      icon: '👥' },
   { to: '/admin/security',         label: 'Bảo mật / 2FA',   icon: '🔐' },
 ]

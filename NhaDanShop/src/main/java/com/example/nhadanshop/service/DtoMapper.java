@@ -88,9 +88,11 @@ public final class DtoMapper {
     }
 
     public static InventoryReceiptItemResponse toResponse(InventoryReceiptItem item) {
-        // lineTotal dựa theo giá gốc * số lượng (trước chiết khấu, để tham khảo)
         BigDecimal lineTotal = item.getUnitCost()
                 .multiply(BigDecimal.valueOf(item.getQuantity()));
+        BigDecimal vat   = item.getVatPercent()        != null ? item.getVatPercent()        : BigDecimal.ZERO;
+        BigDecimal vatAl = item.getVatAllocated()       != null ? item.getVatAllocated()       : BigDecimal.ZERO;
+        BigDecimal fcVat = item.getFinalCostWithVat()   != null ? item.getFinalCostWithVat()   : item.getFinalCost();
         return new InventoryReceiptItemResponse(
                 item.getId(),
                 item.getProduct().getId(),
@@ -101,8 +103,10 @@ public final class DtoMapper {
                 item.getUnitCost(),
                 item.getDiscountPercent(),
                 item.getDiscountedCost(),
+                vat, vatAl,
                 item.getShippingAllocated(),
                 item.getFinalCost(),
+                fcVat,
                 lineTotal
         );
     }
@@ -111,7 +115,8 @@ public final class DtoMapper {
         return new InventoryReceiptResponse(
                 r.getId(), r.getReceiptNo(), r.getReceiptDate(),
                 r.getSupplierName(), r.getNote(), r.getTotalAmount(),
-                r.getShippingFee() != null ? r.getShippingFee() : java.math.BigDecimal.ZERO,
+                r.getShippingFee()  != null ? r.getShippingFee()  : java.math.BigDecimal.ZERO,
+                r.getTotalVat()     != null ? r.getTotalVat()     : java.math.BigDecimal.ZERO,
                 r.getCreatedBy() != null ? r.getCreatedBy().getUsername() : null,
                 r.getItems().stream().map(DtoMapper::toResponse).collect(Collectors.toList()),
                 r.getCreatedAt(), r.getUpdatedAt()

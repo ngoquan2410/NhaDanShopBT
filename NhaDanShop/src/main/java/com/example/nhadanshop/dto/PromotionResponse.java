@@ -26,6 +26,9 @@ public record PromotionResponse(
         Long getProductId,
         String getProductName,
         Integer getQty,
+        // QUANTITY_GIFT
+        Integer minBuyQty,
+        Integer maxBuyQty,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {}
