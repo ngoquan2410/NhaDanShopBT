@@ -26,9 +26,10 @@ function ReceiptForm({ products, onSubmit, loading }) {
   const [supplierName, setSupplierName] = useState('')
   const [note, setNote] = useState('')
   const [shippingFee, setShippingFee] = useState(0)
-  const [items, setItems] = useState([{ productId: '', quantity: 1, unitCost: 0, discountPercent: 0, vatPercent: 0 }])
+  const [vatPercent, setVatPercent]   = useState(0)   // VAT% toàn đơn
+  const [items, setItems] = useState([{ productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
 
-  const addItem = () => setItems(i => [...i, { productId: '', quantity: 1, unitCost: 0, discountPercent: 0, vatPercent: 0 }])
+  const addItem = () => setItems(i => [...i, { productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
   const removeItem = (idx) => setItems(i => i.filter((_, j) => j !== idx))
   const setItem = (idx, key, val) =>
     setItems(i => i.map((it, j) => j === idx ? { ...it, [key]: val } : it))
@@ -39,12 +40,12 @@ function ReceiptForm({ products, onSubmit, loading }) {
       supplierName,
       note,
       shippingFee: Number(shippingFee),
+      vatPercent:  Number(vatPercent) || 0,
       items: items.map(it => ({
         productId: Number(it.productId),
         quantity: Number(it.quantity),
         unitCost: Number(it.unitCost),
         discountPercent: Number(it.discountPercent) || 0,
-        vatPercent: Number(it.vatPercent) || 0,
       })),
     })
   }
@@ -56,12 +57,8 @@ function ReceiptForm({ products, onSubmit, loading }) {
     const disc = Number(it.discountPercent) || 0
     return s + Number(it.quantity) * Number(it.unitCost) * (1 - disc / 100)
   }, 0)
-  const totalVat = items.reduce((s, it) => {
-    const disc = Number(it.discountPercent) || 0
-    const vat  = Number(it.vatPercent) || 0
-    const afterDisc = Number(it.quantity) * Number(it.unitCost) * (1 - disc / 100)
-    return s + afterDisc * vat / 100
-  }, 0)
+  // VAT toàn đơn tính trên tổng sau chiết khấu
+  const totalVat = totalAfterDiscount * (Number(vatPercent) || 0) / 100
   const grandTotal = totalAfterDiscount + Number(shippingFee) + totalVat
 
   return (
@@ -79,15 +76,29 @@ function ReceiptForm({ products, onSubmit, loading }) {
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
             placeholder="Ghi chú (tùy chọn)" />
         </div>
-        <div className="col-span-2">
+        <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             🚚 Phí vận chuyển (₫)
-            <span className="ml-1 text-xs text-gray-400 font-normal">— sẽ được chia đều vào giá vốn từng sản phẩm</span>
+            <span className="ml-1 text-xs text-gray-400 font-normal">— chia đều vào giá vốn</span>
           </label>
           <input type="number" min={0} step={1000} value={shippingFee}
             onChange={e => setShippingFee(e.target.value)}
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
             placeholder="0" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            🧾 Thuế GTGT — VAT % <span className="text-xs text-gray-400 font-normal">(cho toàn đơn, tính trên tổng sau CK)</span>
+          </label>
+          <input type="number" min={0} max={100} step={0.1} value={vatPercent}
+            onChange={e => setVatPercent(e.target.value)}
+            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            placeholder="0" />
+          {Number(vatPercent) > 0 && (
+            <p className="text-xs text-blue-600 mt-1">
+              💡 Tổng VAT: {totalVat.toLocaleString('vi-VN')} ₫ — phân bổ đều vào giá vốn từng SP theo tỷ lệ
+            </p>
+          )}
         </div>
       </div>
 
@@ -131,16 +142,6 @@ function ReceiptForm({ products, onSubmit, loading }) {
                 <input type="number" min={0} max={100} step={0.1} value={item.discountPercent}
                   onChange={e => setItem(idx, 'discountPercent', e.target.value)}
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 pr-6"
-                  placeholder="0" />
-                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
-              </div>
-            </div>
-            <div className="w-20">
-              {idx === 0 && <label className="block text-xs text-gray-500 mb-1">VAT %</label>}
-              <div className="relative">
-                <input type="number" min={0} max={100} step={0.5} value={item.vatPercent}
-                  onChange={e => setItem(idx, 'vatPercent', e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 pr-6"
                   placeholder="0" />
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
               </div>
@@ -203,6 +204,7 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
   const [supplierName, setSupplierName] = useState('')
   const [note, setNote] = useState('')
   const [shippingFee, setShippingFee] = useState(0)
+  const [vatPercent, setVatPercent]   = useState(0)
   const [loading, setLoading] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [result, setResult] = useState(null)
@@ -236,7 +238,7 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
     setValidationErrors([])
     setResult(null)
     try {
-      const res = await receiptService.importExcel(file, supplierName.trim(), note.trim(), Number(shippingFee) || 0)
+      const res = await receiptService.importExcel(file, supplierName.trim(), note.trim(), Number(shippingFee) || 0, Number(vatPercent) || 0)
       setResult(res)
       if (res.successItems > 0) {
         toast.success(`Tạo phiếu nhập ${res.receiptNo} thành công! (${res.successItems} SP)`)
@@ -285,33 +287,42 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
           <table className="text-xs w-full border-collapse">
             <thead>
               <tr className="bg-green-100">
-                {['A: Mã SP','B: Tên SP *','C: SL *','D: Giá nhập *','E: CK %','F: VAT %','G: Ghi chú','H: Danh mục','I: Đơn vị'].map(h => (
+                {['A: Mã SP','B: Tên SP *','C: SL *','D: Giá nhập *','E: CK %','F: Ghi chú','G: Danh mục','H: Đơn vị'].map(h => (
                   <th key={h} className="border border-green-200 px-2 py-1 text-left whitespace-nowrap font-semibold">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               <tr className="bg-white">
-                {['BT001','Bánh Tráng Rong Biển','5','65000','5','10','SP có sẵn CK5% VAT10%','',''].map((v,i) => (
+                {['BT001','Bánh Tráng Rong Biển','5','65000','5','SP có sẵn CK5%','',''].map((v,i) => (
                   <td key={i} className="border border-green-200 px-2 py-1 text-gray-700">{v}</td>
                 ))}
               </tr>
               <tr className="bg-yellow-50">
-                {['','Sản Phẩm Mới XYZ','10','25000','0','0','SP mới tạo','Danh Mục Mới','gói'].map((v,i) => (
+                {['','Sản Phẩm Mới XYZ','10','25000','0','SP mới tạo','Danh Mục Mới','gói'].map((v,i) => (
                   <td key={i} className="border border-green-200 px-2 py-1 text-amber-700 font-medium">{v}</td>
+                ))}
+              </tr>
+              <tr className="bg-blue-50">
+                {['COMBO001','Combo Bánh Tráng','2','300000','5','Nhập combo → expand SP','',''].map((v,i) => (
+                  <td key={i} className="border border-green-200 px-2 py-1 text-blue-700 font-medium">{v}</td>
                 ))}
               </tr>
             </tbody>
           </table>
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+        <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
           <div className="bg-white rounded p-2">
-            <p className="font-semibold text-green-700">✅ SP đã có trong hệ thống:</p>
-            <p>Tìm theo Mã (cột A) → Tên (cột B)</p>
+            <p className="font-semibold text-green-700">✅ SP đã có:</p>
+            <p>Tìm theo Mã (A) → Tên (B)</p>
           </div>
           <div className="bg-yellow-50 rounded p-2 border border-yellow-200">
-            <p className="font-semibold text-amber-700">✨ SP chưa có (tự tạo mới):</p>
-            <p>Để trống cột A + điền cột F, G</p>
+            <p className="font-semibold text-amber-700">✨ SP mới (tự tạo):</p>
+            <p>Để trống cột A + điền cột G, H</p>
+          </div>
+          <div className="bg-blue-50 rounded p-2 border border-blue-200">
+            <p className="font-semibold text-blue-700">📦 Combo:</p>
+            <p>Nhập mã COMBO → expand thành phần</p>
           </div>
         </div>
       </div>
@@ -332,18 +343,36 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
               placeholder="VD: Nhập hàng tháng 3"
               className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
           </div>
-          <div className="col-span-2">
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               🚚 Phí vận chuyển (₫)
-              <span className="ml-1 text-xs text-gray-400 font-normal">— sẽ được chia tỷ lệ vào giá vốn từng sản phẩm</span>
+              <span className="ml-1 text-xs text-gray-400 font-normal">— chia tỷ lệ vào giá vốn</span>
             </label>
             <input type="number" min={0} step={1000} value={shippingFee}
               onChange={e => setShippingFee(e.target.value)}
               placeholder="0"
               className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
             {Number(shippingFee) > 0 && (
-              <p className="text-xs text-blue-600 mt-1 bg-blue-50 rounded p-1.5">
-                💡 {Number(shippingFee).toLocaleString('vi-VN')} ₫ sẽ được phân bổ vào giá vốn cuối của từng sản phẩm theo tỷ lệ giá trị sau chiết khấu
+              <p className="text-xs text-blue-600 mt-1">
+                💡 {Number(shippingFee).toLocaleString('vi-VN')} ₫ phân bổ theo tỷ lệ giá trị sau CK
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              🧾 Thuế GTGT — VAT %
+              <span className="ml-1 text-xs text-gray-400 font-normal">(toàn đơn, tính trên tổng sau CK)</span>
+            </label>
+            <div className="relative">
+              <input type="number" min={0} max={100} step={0.1} value={vatPercent}
+                onChange={e => setVatPercent(e.target.value)}
+                placeholder="0"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 pr-6" />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span>
+            </div>
+            {Number(vatPercent) > 0 && (
+              <p className="text-xs text-purple-600 mt-1">
+                🧾 {vatPercent}% VAT phân bổ đều vào giá vốn từng SP
               </p>
             )}
           </div>

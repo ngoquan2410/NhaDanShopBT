@@ -97,8 +97,9 @@ public class InventoryReceiptController {
             @RequestParam("file") MultipartFile file,
             @RequestParam("supplierName") String supplierName,
             @RequestParam(value = "note", required = false, defaultValue = "") String note,
-            @RequestParam(value = "shippingFee", required = false, defaultValue = "0") java.math.BigDecimal shippingFee
+            @RequestParam(value = "shippingFee", required = false, defaultValue = "0") java.math.BigDecimal shippingFee,
+            @RequestParam(value = "vatPercent",  required = false, defaultValue = "0") java.math.BigDecimal vatPercent
     ) throws IOException {
-        return excelReceiptImportService.importReceiptFromExcel(file, supplierName, note, shippingFee);
+        return excelReceiptImportService.importReceiptFromExcel(file, supplierName, note, shippingFee, vatPercent);
     }
 }

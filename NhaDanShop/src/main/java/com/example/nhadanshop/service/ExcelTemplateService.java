@@ -191,20 +191,19 @@ public class ExcelTemplateService {
             Cell subCell = subRow.createCell(0);
             subCell.setCellValue(
                 "Do tim: Ma SP (cot A) → Ten SP (cot B). SP CHUA CO: de trong cot A, nhap Ten+DanhMuc+DonVi → he thong TU DONG TAO SP MOI.\n" +
-                "Cot E=Chiet khau%, F=VAT%, G=Ghi chu, H=Danh muc (tao moi), I=Don vi (tao moi). Phi ship nhap tren web.");
+                "Cot E=Chiet khau%, F=Ghi chu, G=Danh muc (tao moi), H=Don vi (tao moi). VAT% va Phi ship nhap tren web (ap dung cho toan don).");
             subCell.setCellStyle(noteStyle);
-            // NOTE: merged regions phải khớp với số cột header bên dưới (9 cột → index 0..8)
-            // Chỉ thêm 1 lần ở cuối để tránh overlap
+            // NOTE: 8 cột (A..H), merged region thêm ở cuối
 
-            // Header — 8 cột (thêm E: Chiết khấu %)
+            // Header row 2 — 8 cột (đã bỏ cột VAT%)
             String[] hTexts = {
                 "A: Ma SP", "B: Ten SP (*)", "C: So luong (*)", "D: Gia nhap (*)",
-                "E: Chiet khau %", "F: VAT %", "G: Ghi chu dong",
-                "H: Danh muc (neu tao moi)", "I: Don vi (neu tao moi)"
+                "E: Chiet khau %", "F: Ghi chu dong",
+                "G: Danh muc (neu tao moi)", "H: Don vi (neu tao moi)"
             };
             CellStyle[] hStyles = {
                 headerStyle, required, required, required,
-                optional, optional, headerStyle, optional, optional
+                optional, headerStyle, optional, optional
             };
 
             Row hRow = data.createRow(2);
@@ -219,15 +218,15 @@ public class ExcelTemplateService {
             data.setColumnWidth(5, 28 * 256);   // F: Ghi chú
             data.setColumnWidth(6, 22 * 256);   // G: Danh mục
 
-            // ── Dummy data: mix SP có sẵn + SP mới + ví dụ chiết khấu ────────
+            // ── Dummy data (8 cột, không còn cột VAT%) ──────────────────────
             Object[][] rows = {
-                // code, name, qty, unitCost, discountPct, vatPct, note, category(new), unit(new)
-                {"BT001","Banh Trang Rong Bien",  10, 65000, 0,   0,   "SP co san",         "",           ""},
-                {"BT002","Banh Trang Cuon Tep",    5, 38000, 5,   10,  "CK 5% VAT 10%",     "",           ""},
-                {"M001", "Muoi Bien Khanh Hoa",   20,  5000, 10,  0,   "CK 10%",            "",           ""},
-                {"",     "Com Chay Nam Huong",     3, 45000, 0,   8,   "Tim theo ten VAT8%","",           ""},
-                {"",     "Banh Phong Tom Viet",    8, 12000, 0,   0,   "SP MOI",            "Banh Phong", "goi"},
-                {"",     "Keo Dua Ben Tre",        5, 35000, 8.5, 10,  "SP MOI ck+vat",    "Keo Dua",    "hop"},
+                // code, name, qty, unitCost, discountPct, note, category(new), unit(new)
+                {"BT001","Banh Trang Rong Bien",  10, 65000, 0,   "SP co san",         "",           ""},
+                {"BT002","Banh Trang Cuon Tep",    5, 38000, 5,   "CK 5%",             "",           ""},
+                {"M001", "Muoi Bien Khanh Hoa",   20,  5000, 10,  "CK 10%",            "",           ""},
+                {"",     "Com Chay Nam Huong",     3, 45000, 0,   "Tim theo ten",      "",           ""},
+                {"",     "Banh Phong Tom Viet",    8, 12000, 0,   "SP MOI",            "Banh Phong", "goi"},
+                {"",     "Keo Dua Ben Tre",        5, 35000, 8.5, "SP MOI ck",        "Keo Dua",    "hop"},
             };
 
             int rowNum = 3;
@@ -251,9 +250,9 @@ public class ExcelTemplateService {
             Cell l2 = legendRow.createCell(4); l2.setCellValue("Mau vang = SP MOI tu dong tao");       l2.setCellStyle(newSpStyle);
 
             // Merged regions — chỉ gọi 1 lần, sau khi đã tạo xong rows
-            data.addMergedRegion(new CellRangeAddress(0, 0, 0, 8)); // title: 9 cột (A..I)
-            data.addMergedRegion(new CellRangeAddress(1, 1, 0, 8)); // sub-title
-            data.setAutoFilter(new CellRangeAddress(2, 2, 0, 8));
+            data.addMergedRegion(new CellRangeAddress(0, 0, 0, 7)); // title: 8 cột (A..H)
+            data.addMergedRegion(new CellRangeAddress(1, 1, 0, 7)); // sub-title
+            data.setAutoFilter(new CellRangeAddress(2, 2, 0, 7));
             data.createFreezePane(0, 3);
 
             // ── Sheet 2: Hướng dẫn ───────────────────────────────────────────
@@ -271,13 +270,14 @@ public class ExcelTemplateService {
                     {"C: So luong (*)","So luong nhap theo DV NHAP (kg/xau/hop/bich)","10"},
                     {"D: Gia nhap (*)","Gia tren 1 DV NHAP. He thong tu chia sang gia le","65000"},
                     {"E: Chiet khau %","% chiet khau NCC (0-100). De trong = 0%.\nGia sau CK = Gia nhap × (1 - CK/100)","5"},
-                    {"F: VAT %","% thue GTGT (0-100). De trong = 0%.\nVAT duoc cong vao gia von cuoi de tinh loi nhuan dung.","10"},
-                    {"G: Ghi chu","Ghi chu rieng tung dong (tuy chon)","Lo nhap thang 3"},
-                    {"H: Danh muc","Chi can nhap khi SP MOI chua co trong he thong","Banh Trang"},
-                    {"I: Don vi","Chi can nhap khi SP MOI. Don vi ban le: bich/goi/hop","bich"},
-                    {"PHI SHIP","Nhap phi van chuyen tren giao dien web.\nHe thong chia theo ty le gia tri sau CK.","-"},
-                    {"CONG THUC GIA VON","GiaVon = (GiaNhap/DV × (1-CK%)) + PhiShip/DV + VAT/DV\nDay la gia von chinh xac de tinh loi nhuan.","-"},
-                    {"LUU Y","- 1 file = 1 phieu nhap | Nhap ten NCC + phi ship + ghi chu tren web\n- Khong nhap gia 0 hoac SL 0 → bao loi\n- 1 loi bat ky → rollback toan bo file","-"},
+                    {"F: Ghi chu","Ghi chu rieng tung dong (tuy chon)","Lo nhap thang 3"},
+                    {"G: Danh muc","Chi can nhap khi SP MOI chua co trong he thong","Banh Trang"},
+                    {"H: Don vi","Chi can nhap khi SP MOI. Don vi ban le: bich/goi/hop","bich"},
+                    {"VAT% (TREN WEB)","✅ Nhap % thue GTGT tren FORM WEB khi upload file.\nAp dung cho TOAN DON: vatAmount = tong_sau_CK × vat%\nTu dong chia deu vao gia von tung SP theo ty le.","10"},
+                    {"PHI SHIP (WEB)","Nhap phi van chuyen tren giao dien web.\nHe thong chia theo ty le gia tri sau CK.","-"},
+                    {"CONG THUC GIA VON","GiaVon = discountedCost + ship/DV + VAT/DV\nDay la gia von chinh xac de tinh loi nhuan.","-"},
+                    {"COMBO trong Excel","Nhap ma combo (VD: COMBO001) vao cot A.\nHe thong tu expand thanh cac SP thanh phan,\nchi phi phan bo theo ty le qty thanh phan.","-"},
+                    {"LUU Y","- 1 file = 1 phieu nhap | Nhap NCC + ship + VAT tren web\n- Khong nhap gia 0 hoac SL 0 → bao loi\n- 1 loi bat ky → rollback toan bo file","-"},
                 }
             );
 
