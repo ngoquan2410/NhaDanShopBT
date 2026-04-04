@@ -12,9 +12,15 @@ export const productService = {
   getExpiryWarnings: (threshold = 30) =>
     api.get(`/api/products/expiry-warnings?threshold=${threshold}`).then(r => r.data),
   getExpired: () => api.get('/api/products/expired').then(r => r.data),
-  // Kiểm tra tồn kho khả dụng (trừ pending) trước khi checkout
   checkAvailability: (items) =>
     api.post('/api/products/check-availability', { items }).then(r => r.data),
+  getLowStockVariants: () => api.get('/api/products/low-stock-variants').then(r => r.data),
+
+  // ── Variant CRUD (Sprint 0) ───────────────────────────────────────────────
+  getVariants:    (productId)           => api.get(`/api/products/${productId}/variants`).then(r => r.data),
+  createVariant:  (productId, data)     => api.post(`/api/products/${productId}/variants`, data).then(r => r.data),
+  updateVariant:  (productId, vid, data)=> api.put(`/api/products/${productId}/variants/${vid}`, data).then(r => r.data),
+  deleteVariant:  (productId, vid)      => api.delete(`/api/products/${productId}/variants/${vid}`),
 
   // ── Image upload to Google Drive ──────────────────────────────────────────
   /** Upload ảnh lên Google Drive, trả về { url, message } */

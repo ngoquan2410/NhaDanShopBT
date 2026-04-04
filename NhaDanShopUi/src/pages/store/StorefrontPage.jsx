@@ -13,10 +13,24 @@ import toast from 'react-hot-toast'
 // ProductCard — dùng product.availableQty (BE tính trừ pending) để hiển thị và giới hạn
 function ProductCard({ product, onAddToCart }) {
   const [qty, setQty] = useState(1)
-  // availableQty từ BE = stockQty - tổng qty đang giữ bởi PENDING orders còn hạn
-  const available = product.availableQty ?? product.stockQty
-  const pendingReserved = product.stockQty - available  // đang bị giữ
-  const outOfStock = available <= 0
+  // [Sprint 0] Variants support
+  const variants = product.variants || []
+  const hasMultiVariant = variants.length > 1
+  const [selectedVariantId, setSelectedVariantId] = useState(
+    variants.find(v => v.isDefault)?.id || variants[0]?.id || null
+  )
+  const selectedVariant = variants.find(v => v.id === selectedVariantId)
+    || variants.find(v => v.isDefault)
+    || null
+
+  // Dùng variant data nếu có, fallback sang product
+  const sellPrice = selectedVariant ? Number(selectedVariant.sellPrice) : Number(product.sellPrice)
+  const sellUnit  = selectedVariant ? selectedVariant.sellUnit : (product.sellUnit || product.unit)
+  const available = selectedVariant
+    ? Math.max(0, selectedVariant.stockQty - (product.stockQty - (selectedVariant.stockQty || 0)))
+    : (product.availableQty ?? product.stockQty)
+  const stockQty  = selectedVariant ? selectedVariant.stockQty : (product.availableQty ?? product.stockQty)
+  const outOfStock = stockQty <= 0
 
   return (
     <div className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-200 hover:-translate-y-1 overflow-hidden border border-amber-100 flex flex-col">
@@ -45,15 +59,28 @@ function ProductCard({ product, onAddToCart }) {
         <p className="text-xs text-gray-400 mt-1 mb-2">{product.categoryName}</p>
         <div className="flex items-center gap-1 mb-2 flex-wrap">
           {outOfStock && <span className="bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded-full">Hết hàng</span>}
-          {!outOfStock && available <= 5 && <span className="bg-orange-100 text-orange-700 text-xs px-1.5 py-0.5 rounded-full">Sắp hết</span>}
-          {!outOfStock && available > 5 && <span className="text-xs text-gray-400">Còn {available} {product.sellUnit || product.unit}</span>}
-          {pendingReserved > 0 && <span className="text-xs text-yellow-600 bg-yellow-50 px-1.5 py-0.5 rounded-full">⏳ {pendingReserved} đang đặt</span>}
+          {!outOfStock && stockQty <= 5 && <span className="bg-orange-100 text-orange-700 text-xs px-1.5 py-0.5 rounded-full">Sắp hết</span>}
+          {!outOfStock && stockQty > 5 && <span className="text-xs text-gray-400">Còn {stockQty} {sellUnit}</span>}
         </div>
+        {/* [Sprint 0] Variant selector — chỉ hiện khi có >1 variant */}
+        {hasMultiVariant && (
+          <div className="mb-2">
+            <select value={selectedVariantId || ''} onChange={e => setSelectedVariantId(Number(e.target.value))}
+              className="w-full border border-purple-200 rounded-lg px-2 py-1 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-400">
+              {variants.map(v => (
+                <option key={v.id} value={v.id} disabled={v.stockQty <= 0}>
+                  {v.variantName} — {Number(v.sellPrice).toLocaleString('vi-VN')}₫/{v.sellUnit}
+                  {v.stockQty <= 0 ? ' (Hết)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="flex items-center justify-between mb-2">
           <span className="text-base font-bold text-green-700">
-            {Number(product.sellPrice).toLocaleString('vi-VN')} {'\u20AB'}
+            {sellPrice.toLocaleString('vi-VN')} {'\u20AB'}
           </span>
-          <span className="text-xs text-gray-400">/{product.sellUnit || product.unit}</span>
+          <span className="text-xs text-gray-400">/{sellUnit}</span>
         </div>
         {!outOfStock && (
           <div className="flex items-center gap-1 mt-auto">
@@ -61,11 +88,14 @@ function ProductCard({ product, onAddToCart }) {
               <button onClick={() => setQty(q => Math.max(1, q - 1))}
                 className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-sm font-bold">-</button>
               <span className="flex-1 text-center text-sm font-medium py-1">{qty}</span>
-              <button onClick={() => setQty(q => Math.min(available, q + 1))}
+              <button onClick={() => setQty(q => Math.min(stockQty, q + 1))}
                 className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-sm font-bold">+</button>
             </div>
             <button
-              onClick={() => { onAddToCart(product, qty, available); setQty(1) }}
+              onClick={() => {
+                onAddToCart(product, qty, stockQty, selectedVariant)
+                setQty(1)
+              }}
               className="bg-amber-600 hover:bg-amber-700 text-white px-2 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap"
             >
               Thêm
@@ -83,56 +113,63 @@ function ProductCard({ product, onAddToCart }) {
 }
 // CartDrawer
 function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout }) {
-  const total = cart.reduce((s, i) => s + i.product.sellPrice * i.qty, 0)
+  const total = cart.reduce((s, i) => s + (i.sellPrice ?? i.product.sellPrice) * i.qty, 0)
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="flex-1 bg-black/40" onClick={onClose} />
       <div className="w-full max-w-sm bg-white shadow-2xl flex flex-col h-full">
         <div className="flex items-center justify-between px-4 py-3 border-b text-white" style={{background:'linear-gradient(90deg,#92400e,#b45309)'}}>
-          <h2 className="font-bold text-lg">{"Gi\u1ECF h\u00E0ng"} ({cart.length})</h2>
+          <h2 className="font-bold text-lg">Giỏ hàng ({cart.length})</h2>
           <button onClick={onClose} className="text-2xl leading-none">&times;</button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {cart.length === 0 && (
             <div className="text-center py-16 text-gray-400">
-              <div className="text-5xl mb-3">{'\uD83D\uDED2'}</div>
-              <p>{"Gi\u1ECF h\u00E0ng tr\u1ED1ng"}</p>
+              <div className="text-5xl mb-3">🛒</div>
+              <p>Giỏ hàng trống</p>
             </div>
           )}
-          {cart.map(item => (
-            <div key={item.product.id} className="flex items-center gap-3 bg-amber-50 rounded-xl p-3">
-              <div className="w-12 h-12 rounded-lg flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden bg-amber-100">
-                {item.product.imageUrl
-                  ? <img src={item.product.imageUrl} alt={item.product.name} className="w-full h-full object-cover" onError={e=>{e.target.style.display='none'}} />
-                  : '\uD83D\uDECD'}
+          {cart.map(item => {
+            const price = item.sellPrice ?? Number(item.product.sellPrice)
+            const unit  = item.sellUnit ?? item.product.sellUnit ?? item.product.unit
+            const displayName = item.variant
+              ? `${item.product.name} (${item.variant.variantName})`
+              : item.product.name
+            return (
+              <div key={item.cartKey} className="flex items-center gap-3 bg-amber-50 rounded-xl p-3">
+                <div className="w-12 h-12 rounded-lg flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden bg-amber-100">
+                  {item.product.imageUrl
+                    ? <img src={item.product.imageUrl} alt={item.product.name} className="w-full h-full object-cover" onError={e=>{e.target.style.display='none'}} />
+                    : '🛍'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800 truncate">{displayName}</p>
+                  <p className="text-xs text-amber-700 font-semibold">
+                    {price.toLocaleString('vi-VN')} ₫ / {unit}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => onUpdateQty(item.cartKey, item.qty - 1)}
+                    className="w-6 h-6 rounded bg-gray-200 hover:bg-gray-300 text-xs font-bold flex items-center justify-center">-</button>
+                  <span className="w-7 text-center text-sm font-semibold">{item.qty}</span>
+                  <button onClick={() => onUpdateQty(item.cartKey, item.qty + 1)}
+                    className="w-6 h-6 rounded bg-gray-200 hover:bg-gray-300 text-xs font-bold flex items-center justify-center">+</button>
+                </div>
+                <button onClick={() => onRemove(item.cartKey)}
+                  className="text-red-400 hover:text-red-600 text-lg ml-1">&times;</button>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800 truncate">{item.product.name}</p>
-                <p className="text-xs text-amber-700 font-semibold">
-                  {Number(item.product.sellPrice).toLocaleString('vi-VN')} {'\u20AB'} / {item.product.sellUnit || item.product.unit}
-                </p>
-              </div>
-              <div className="flex items-center gap-1">
-                <button onClick={() => onUpdateQty(item.product.id, item.qty - 1)}
-                  className="w-6 h-6 rounded bg-gray-200 hover:bg-gray-300 text-xs font-bold flex items-center justify-center">-</button>
-                <span className="w-7 text-center text-sm font-semibold">{item.qty}</span>
-                <button onClick={() => onUpdateQty(item.product.id, item.qty + 1)}
-                  className="w-6 h-6 rounded bg-gray-200 hover:bg-gray-300 text-xs font-bold flex items-center justify-center">+</button>
-              </div>
-              <button onClick={() => onRemove(item.product.id)}
-                className="text-red-400 hover:text-red-600 text-lg ml-1">&times;</button>
-            </div>
-          ))}
+            )
+          })}
         </div>
         {cart.length > 0 && (
           <div className="border-t p-4 space-y-3 bg-white">
             <div className="flex justify-between text-base font-bold">
-              <span>{"T\u1ED5ng c\u1ED9ng"}:</span>
-              <span className="text-amber-700 text-lg">{Number(total).toLocaleString('vi-VN')} {'\u20AB'}</span>
+              <span>Tổng cộng:</span>
+              <span className="text-amber-700 text-lg">{Number(total).toLocaleString('vi-VN')} ₫</span>
             </div>
             <button onClick={onCheckout}
               className="w-full text-white py-3 rounded-xl font-bold text-base transition" style={{background:'#b45309'}}>
-              {"Thanh to\u00E1n"} &rarr;
+              Thanh toán &rarr;
             </button>
           </div>
         )}
@@ -265,7 +302,7 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
     staleTime: 60_000,
   })
 
-  const total = cart.reduce((s, i) => s + i.product.sellPrice * i.qty, 0)
+  const total = cart.reduce((s, i) => s + (i.sellPrice ?? Number(i.product.sellPrice)) * i.qty, 0)
 
   // Preview discount
   const selectedPromo = activePromos.find(p => String(p.id) === String(selectedPromoId))
@@ -322,7 +359,12 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
       note: [note, `[${method?.label}]`].filter(Boolean).join(' | '),
       paymentMethod,
       promotionId: selectedPromoId ? Number(selectedPromoId) : null,
-      items: cart.map(i => ({ productId: i.product.id, quantity: i.qty })),
+      // [Sprint 0] Gửi variantId cho mỗi item
+      items: cart.map(i => ({
+        productId: i.product.id,
+        quantity: i.qty,
+        variantId: i.variant?.id || null,
+      })),
     }
 
     if (paymentMethod === 'cash') {
@@ -460,14 +502,20 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
           {/* Tóm tắt đơn */}
           <div className="bg-gray-50 rounded-xl p-3 space-y-2">
             <p className="text-sm font-semibold text-gray-700 mb-2">Sản phẩm đặt:</p>
-            {cart.map(i => (
-              <div key={i.product.id} className="flex justify-between text-sm text-gray-600">
-                <span className="truncate flex-1">{i.product.name} x {i.qty}</span>
-                <span className="font-medium ml-2 whitespace-nowrap">
-                  {(i.product.sellPrice * i.qty).toLocaleString('vi-VN')} ₫
-                </span>
-              </div>
-            ))}
+            {cart.map(i => {
+              const price = i.sellPrice ?? Number(i.product.sellPrice)
+              const name = i.variant
+                ? `${i.product.name} (${i.variant.variantName})`
+                : i.product.name
+              return (
+                <div key={i.cartKey} className="flex justify-between text-sm text-gray-600">
+                  <span className="truncate flex-1">{name} x {i.qty}</span>
+                  <span className="font-medium ml-2 whitespace-nowrap">
+                    {(price * i.qty).toLocaleString('vi-VN')} ₫
+                  </span>
+                </div>
+              )
+            })}
             <div className="border-t pt-2 flex justify-between text-sm text-gray-600">
               <span>Tổng tiền hàng:</span>
               <span>{Number(total).toLocaleString('vi-VN')} ₫</span>
@@ -569,33 +617,38 @@ export default function StorefrontPage() {
   const [successInvoice, setSuccessInvoice] = useState(null)  // hóa đơn đã được tạo
   const cartCount = cart.reduce((s, i) => s + i.qty, 0)
 
-  const addToCart = useCallback((product, qty, effectiveQty) => {
-    // effectiveQty = availableQty truyền từ ProductCard (BE đã tính trừ pending)
-    const available = effectiveQty ?? product.availableQty ?? product.stockQty
+  const addToCart = useCallback((product, qty, effectiveQty, selectedVariant) => {
+    // [Sprint 0] key = productId + variantId để phân biệt các variant khác nhau
+    const variantId = selectedVariant?.id || null
+    const cartKey = variantId ? `${product.id}-${variantId}` : String(product.id)
+    const available = effectiveQty ?? selectedVariant?.stockQty ?? product.availableQty ?? product.stockQty
+    const sellPrice = selectedVariant ? Number(selectedVariant.sellPrice) : Number(product.sellPrice)
+    const sellUnit  = selectedVariant?.sellUnit || product.sellUnit || product.unit
+
     setCart(prev => {
-      const existing = prev.find(i => i.product.id === product.id)
+      const existing = prev.find(i => i.cartKey === cartKey)
       const currentInCart = existing?.qty || 0
       if (currentInCart + qty > available) {
-        toast.error(`Chỉ còn ${available} ${product.sellUnit || product.unit} có thể đặt!`)
+        toast.error(`Chỉ còn ${available} ${sellUnit} có thể đặt!`)
         return prev
       }
+      const label = selectedVariant ? `${product.name} (${selectedVariant.variantName})` : product.name
       if (existing) {
-        toast.success('Đã thêm ' + product.name)
-        return prev.map(i => i.product.id === product.id
-          ? { ...i, qty: i.qty + qty } : i)
+        toast.success('Đã thêm ' + label)
+        return prev.map(i => i.cartKey === cartKey ? { ...i, qty: i.qty + qty } : i)
       }
-      toast.success('Đã thêm ' + product.name + ' vào giỏ')
-      return [...prev, { product, qty }]
+      toast.success('Đã thêm ' + label + ' vào giỏ')
+      return [...prev, { cartKey, product, variant: selectedVariant, qty, sellPrice, sellUnit }]
     })
   }, [])
 
-  const updateQty = useCallback((productId, newQty) => {
-    if (newQty <= 0) setCart(prev => prev.filter(i => i.product.id !== productId))
-    else setCart(prev => prev.map(i => i.product.id === productId ? { ...i, qty: newQty } : i))
+  const updateQty = useCallback((cartKey, newQty) => {
+    if (newQty <= 0) setCart(prev => prev.filter(i => i.cartKey !== cartKey))
+    else setCart(prev => prev.map(i => i.cartKey === cartKey ? { ...i, qty: newQty } : i))
   }, [])
 
-  const removeFromCart = useCallback((productId) => {
-    setCart(prev => prev.filter(i => i.product.id !== productId))
+  const removeFromCart = useCallback((cartKey) => {
+    setCart(prev => prev.filter(i => i.cartKey !== cartKey))
   }, [])
 
   // Tiền mặt → invoice tạo ngay

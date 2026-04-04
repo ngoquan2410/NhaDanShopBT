@@ -11,7 +11,16 @@ public record ReceiptItemRequest(
         @NotNull Long productId,
         @NotNull @Min(1) Integer quantity,
         @NotNull @DecimalMin("0.00") BigDecimal unitCost,
-        /** Chiết khấu % nhà cung cấp (0-100), mặc định 0 */
-        @DecimalMin("0.00") @DecimalMax("100.00") BigDecimal discountPercent
-        // VAT đã chuyển sang cấp đơn hàng (InventoryReceiptRequest.vatPercent)
+        @DecimalMin("0.00") @DecimalMax("100.00") BigDecimal discountPercent,
+        String importUnit,
+        @Min(1) Integer piecesOverride,
+
+        /**
+         * ID variant đóng gói (Sprint 0).
+         * null → tự động dùng default variant của productId.
+         * Ví dụ: nhập Muối ABC dạng hủ → variantId = ID của ABC-HU100
+         */
+        Long variantId
 ) {}
+
+

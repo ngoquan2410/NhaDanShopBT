@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+﻿﻿import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { reportService, downloadBlob } from '../../services/reportService'
 import { useSort } from '../../hooks/useSort'
@@ -101,17 +101,17 @@ export default function InventoryReportPage() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm" style={{ minWidth: '850px' }}>
                 <thead>
                   <tr className="bg-gray-50 text-gray-600 border-b">
-                    <SortHeader field="productCode" className="text-left px-3 py-3">Mã SP</SortHeader>
+                    <SortHeader field="productCode" className="text-left px-3 py-3 w-24">Mã SP</SortHeader>
                     <SortHeader field="productName" className="text-left px-3 py-3">Tên sản phẩm</SortHeader>
-                    <SortHeader field="categoryName" className="text-left px-3 py-3">Danh mục</SortHeader>
-                    <SortHeader field="openingStock" className="text-right px-3 py-3">Tồn đầu kỳ</SortHeader>
-                    <SortHeader field="totalReceived" className="text-right px-3 py-3">Nhập kỳ</SortHeader>
-                    <SortHeader field="totalSold" className="text-right px-3 py-3">Xuất kỳ</SortHeader>
-                    <SortHeader field="closingStock" className="text-right px-3 py-3">Tồn cuối kỳ</SortHeader>
-                    <SortHeader field="closingStockValue" className="text-right px-3 py-3">Giá trị tồn</SortHeader>
+                    <SortHeader field="categoryName" className="text-left px-3 py-3 w-32">Danh mục</SortHeader>
+                    <SortHeader field="openingStock" className="text-right px-3 py-3 w-32">Tồn đầu kỳ</SortHeader>
+                    <SortHeader field="totalReceived" className="text-right px-3 py-3 w-28">Nhập kỳ</SortHeader>
+                    <SortHeader field="totalSold" className="text-right px-3 py-3 w-28">Xuất kỳ</SortHeader>
+                    <SortHeader field="closingStock" className="text-right px-3 py-3 w-28">Tồn cuối kỳ</SortHeader>
+                    <SortHeader field="closingStockValue" className="text-right px-3 py-3 w-36">Giá trị tồn</SortHeader>
                   </tr>
                 </thead>
                 <tbody>
@@ -119,18 +119,18 @@ export default function InventoryReportPage() {
                     <tr><td colSpan={8} className="text-center py-8 text-gray-400">Không có dữ liệu</td></tr>
                   ) : sortedRows.map(r => (
                     <tr key={r.productId} className={`border-b hover:bg-gray-50 transition ${r.closingStock <= 0 ? 'bg-red-50' : r.closingStock <= 5 ? 'bg-orange-50' : ''}`}>
-                      <td className="px-3 py-3 font-mono text-xs text-gray-500">{r.productCode}</td>
+                      <td className="px-3 py-3 font-mono text-xs text-gray-500 whitespace-nowrap">{r.productCode}</td>
                       <td className="px-3 py-3 font-medium text-gray-800">{r.productName}</td>
-                      <td className="px-3 py-3 text-gray-500">{r.categoryName}</td>
-                      <td className="px-3 py-3 text-right">{r.openingStock} {r.sellUnit}</td>
-                      <td className="px-3 py-3 text-right text-green-600">+{r.totalReceived}</td>
-                      <td className="px-3 py-3 text-right text-red-600">-{r.totalSold}</td>
-                      <td className="px-3 py-3 text-right font-bold">
+                      <td className="px-3 py-3 text-gray-500 text-xs">{r.categoryName}</td>
+                      <td className="px-3 py-3 text-right whitespace-nowrap">{r.openingStock} {r.sellUnit}</td>
+                      <td className="px-3 py-3 text-right text-green-600 whitespace-nowrap font-medium">+{r.totalReceived}</td>
+                      <td className="px-3 py-3 text-right text-red-600 whitespace-nowrap font-medium">-{r.totalSold}</td>
+                      <td className="px-3 py-3 text-right font-bold whitespace-nowrap">
                         <span className={r.closingStock <= 0 ? 'text-red-700' : r.closingStock <= 5 ? 'text-orange-600' : 'text-gray-800'}>
                           {r.closingStock}
                         </span>
                       </td>
-                      <td className="px-3 py-3 text-right text-blue-700">
+                      <td className="px-3 py-3 text-right text-blue-700 whitespace-nowrap">
                         {Number(r.closingStockValue).toLocaleString('vi-VN')} ₫
                       </td>
                     </tr>

@@ -79,17 +79,13 @@ public class InventoryReceiptController {
      *   file         : file .xlsx (required)
      *   supplierName : tên nhà cung cấp (required)
      *   note         : ghi chú phiếu nhập (optional)
+     *   shippingFee  : phí vận chuyển (optional, default=0)
+     *   vatPercent   : thuế GTGT % (optional, default=0)
      *
-     * Cấu trúc Excel (row 1 = header, từ row 2 = data):
-     *   A: code (mã SP)  B: name (tên SP – fallback nếu không có code)
-     *   C: quantity (số lượng đơn vị NHẬP)
-     *   D: unitCost (giá / 1 đơn vị NHẬP: kg/xâu/hộp/bịch/chai)
-     *   E: note (ghi chú dòng, optional)
-     *
-     * Quy tắc tính tự động:
-     *   - ATOMIC (bich/hop/chai): retailQty = quantity, costPerUnit = unitCost
-     *   - GOP    (kg/xau)       : retailQty = quantity × pieces, costPerUnit = unitCost / pieces
-     *   - Batch expiryDate = ngayNhap + product.expiryDays
+     * Cấu trúc Excel (9 cột A–I, header row 3, data từ row 4):
+     *   A: Mã SP  B: Tên SP  C: Số lượng (đvị nhập)  D: Giá nhập
+     *   E: Giá bán (cập nhật sell_price, optional)
+     *   F: Chiết khấu %  G: Ghi chú  H: Danh mục (SP mới)  I: Đơn vị (SP mới)
      */
     @PostMapping(value = "/import-excel", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)

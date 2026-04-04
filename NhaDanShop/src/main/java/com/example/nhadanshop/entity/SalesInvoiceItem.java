@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 @Entity
 @Table(
         name = "sales_invoice_items",
-        uniqueConstraints = @UniqueConstraint(name = "uq_sales_items", columnNames = {"invoice_id", "product_id"})
+        uniqueConstraints = @UniqueConstraint(name = "uq_invoice_variant", columnNames = {"invoice_id", "variant_id"})
 )
 public class SalesInvoiceItem {
 
@@ -26,6 +26,14 @@ public class SalesInvoiceItem {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;
+
+    /**
+     * Biến thể đóng gói bán cho dòng này (Sprint 0).
+     * Nullable để backward compat — backfill từ V23.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "variant_id")
+    private ProductVariant variant;
 
     @Column(name = "quantity", nullable = false)
     private Integer quantity;

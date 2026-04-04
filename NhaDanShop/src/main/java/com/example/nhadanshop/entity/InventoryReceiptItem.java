@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 @Entity
 @Table(
         name = "inventory_receipt_items",
-        uniqueConstraints = @UniqueConstraint(name = "uq_inventory_items", columnNames = {"receipt_id", "product_id"})
+        uniqueConstraints = @UniqueConstraint(name = "uq_receipt_variant", columnNames = {"receipt_id", "variant_id"})
 )
 public class InventoryReceiptItem {
 
@@ -26,6 +26,14 @@ public class InventoryReceiptItem {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;
+
+    /**
+     * Biến thể đóng gói thực tế của dòng này (Sprint 0).
+     * Nullable để backward compat — backfill từ V23.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "variant_id")
+    private ProductVariant variant;
 
     @Column(name = "quantity", nullable = false)
     private Integer quantity;
@@ -61,4 +69,32 @@ public class InventoryReceiptItem {
     /** Alias sau khi cộng VAT (= finalCost, dùng để phân biệt với finalCost trước VAT) */
     @Column(name = "final_cost_with_vat", nullable = false, precision = 18, scale = 2)
     private BigDecimal finalCostWithVat = BigDecimal.ZERO;
+
+    // ── Snapshot đơn vị nhập — Bước 1 ──────────────────────────────────────
+    // Bất biến sau khi tạo phiếu nhập. Source of truth cho tồn kho + giá vốn.
+
+    /**
+     * Đơn vị nhập thực tế của dòng này: "kg", "xâu", "bịch", "hộp"...
+     * Snapshot tại thời điểm tạo phiếu — KHÔNG thay đổi sau khi tạo.
+     * Lý do: product.importUnit có thể thay đổi → snapshot đảm bảo lịch sử luôn đúng.
+     */
+    @Column(name = "import_unit_used", length = 20)
+    private String importUnitUsed;
+
+    /**
+     * Số ĐV bán lẻ / 1 ĐV nhập — snapshot thực tế của lần nhập này.
+     * VD: lần này kg=10 bịch → pieces_used=10; lần sau kg=9 bịch → pieces_used=9
+     * Snapshot bất biến → tồn kho và giá vốn lịch sử luôn đúng dù NCC đổi đóng gói.
+     */
+    @Column(name = "pieces_used", nullable = false)
+    private Integer piecesUsed = 1;
+
+    /**
+     * Số ĐV bán lẻ thực tế đã cộng vào stockQty = quantity × pieces_used.
+     * ATOMIC: retail_qty_added = quantity (không nhân).
+     * GOP:    retail_qty_added = quantity × pieces_used.
+     * Lưu để tiện audit, không cần tính lại từ quantity × pieces.
+     */
+    @Column(name = "retail_qty_added", nullable = false)
+    private Integer retailQtyAdded = 0;
 }

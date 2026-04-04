@@ -1,4 +1,4 @@
-﻿﻿import { useState, useEffect, useRef } from 'react'
+﻿import { useState, useEffect, useRef } from 'react'
 import { useInvoices, useInvoiceMutations } from '../../hooks/useInvoices'
 import { useProducts } from '../../hooks/useProducts'
 import { useSort } from '../../hooks/useSort'
@@ -85,7 +85,7 @@ function Modal({ title, onClose, children }) {
 function InvoiceForm({ products, onSubmit, loading }) {
   const [customerName, setCustomerName] = useState('')
   const [note, setNote] = useState('')
-  const [items, setItems] = useState([{ productId: '', quantity: 1, discountPercent: 0 }])
+  const [items, setItems] = useState([{ productId: '', variantId: '', quantity: 1, discountPercent: 0 }])
   const [showScanner, setShowScanner] = useState(false)
   const [selectedPromoId, setSelectedPromoId] = useState('')
 
@@ -94,7 +94,7 @@ function InvoiceForm({ products, onSubmit, loading }) {
     queryFn: promotionService.getActive,
   })
 
-  const addItem = () => setItems(i => [...i, { productId: '', quantity: 1, discountPercent: 0 }])
+  const addItem = () => setItems(i => [...i, { productId: '', variantId: '', quantity: 1, discountPercent: 0 }])
   const removeItem = (idx) => setItems(i => i.filter((_, j) => j !== idx))
   const setItem = (idx, key, val) =>
     setItems(i => i.map((it, j) => j === idx ? { ...it, [key]: val } : it))
@@ -119,8 +119,13 @@ function InvoiceForm({ products, onSubmit, loading }) {
   const total = items.reduce((s, it) => {
     const p = getProduct(it.productId)
     if (!p) return s
+    // [Sprint 0] Dùng giá từ variant nếu có
+    const variants = p.variants || []
+    const selectedVariant = variants.find(v => String(v.id) === String(it.variantId))
+      || variants.find(v => v.isDefault)
+    const price = selectedVariant ? Number(selectedVariant.sellPrice) : Number(p.sellPrice)
     const disc = Number(it.discountPercent) || 0
-    const actualPrice = Number(p.sellPrice) * (1 - disc / 100)
+    const actualPrice = price * (1 - disc / 100)
     return s + actualPrice * Number(it.quantity)
   }, 0)
 
@@ -153,6 +158,7 @@ function InvoiceForm({ products, onSubmit, loading }) {
         productId: Number(it.productId),
         quantity: Number(it.quantity),
         discountPercent: Number(it.discountPercent) || 0,
+        variantId: it.variantId ? Number(it.variantId) : null, // [Sprint 0]
       })),
     })
   }
@@ -218,26 +224,54 @@ function InvoiceForm({ products, onSubmit, loading }) {
           </div>
           {items.map((item, idx) => {
             const p = getProduct(item.productId)
+            // [Sprint 0] Lấy variants của SP được chọn; nếu chỉ có 1 default thì ẩn dropdown
+            const variants = p?.variants || []
+            const hasMultiVariant = variants.length > 1
+            // Resolve sellPrice từ variant nếu có
+            const selectedVariant = variants.find(v => String(v.id) === String(item.variantId))
+              || variants.find(v => v.isDefault)
+            const sellPrice = selectedVariant ? Number(selectedVariant.sellPrice) : (p ? Number(p.sellPrice) : 0)
+            const stockQty  = selectedVariant ? selectedVariant.stockQty : (p ? p.stockQty : 0)
+            const sellUnit  = selectedVariant ? selectedVariant.sellUnit : (p?.sellUnit || p?.unit || '')
             const disc = Number(item.discountPercent) || 0
-            const actualPrice = p ? Number(p.sellPrice) * (1 - disc / 100) : 0
-            const lineTotal = p ? Math.round(actualPrice) * Number(item.quantity) : 0
+            const actualPrice = Math.round(sellPrice * (1 - disc / 100))
+            const lineTotal = actualPrice * Number(item.quantity)
             return (
-              <div key={idx} className="flex gap-2 mb-2 items-end">
-                <div className="flex-1">
+              <div key={idx} className="flex gap-2 mb-2 items-end flex-wrap">
+                <div className="flex-1 min-w-[180px]">
                   {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Sản phẩm *</label>}
-                  <select value={item.productId} onChange={e => setItem(idx, 'productId', e.target.value)}
+                  <select value={item.productId} onChange={e => {
+                    const prod = products.find(pr => String(pr.id) === e.target.value)
+                    const defVariant = prod?.variants?.find(v => v.isDefault) || prod?.variants?.[0]
+                    setItem(idx, 'productId', e.target.value)
+                    setItem(idx, 'variantId', defVariant?.id || '')
+                  }}
                     required className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
                     <option value="">-- Chọn sản phẩm --</option>
                     {products.filter(prod => prod.active && prod.stockQty > 0).map(prod => (
                       <option key={prod.id} value={prod.id}>
-                        {prod.code} - {prod.name} (Tồn: {prod.stockQty} {prod.sellUnit || prod.unit})
+                        {prod.code} - {prod.name}
                       </option>
                     ))}
                   </select>
                 </div>
+                {/* [Sprint 0] Variant dropdown — chỉ hiện khi SP có >1 variant */}
+                {p && hasMultiVariant && (
+                  <div className="w-40">
+                    {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Biến thể</label>}
+                    <select value={item.variantId || ''} onChange={e => setItem(idx, 'variantId', e.target.value)}
+                      className="w-full border border-purple-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400">
+                      {variants.map(v => (
+                        <option key={v.id} value={v.id}>
+                          {v.variantCode} ({v.sellUnit}) - {Number(v.sellPrice).toLocaleString('vi-VN')}₫ | Tồn: {v.stockQty}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div className="w-20">
-                  {idx === 0 && <label className="block text-xs text-gray-500 mb-1">SL</label>}
-                  <input type="number" min={1} max={p?.stockQty || 9999} value={item.quantity}
+                  {idx === 0 && <label className="block text-xs text-gray-500 mb-1">SL {sellUnit && <span className="text-gray-400">({sellUnit})</span>}</label>}
+                  <input type="number" min={1} max={stockQty || 9999} value={item.quantity}
                     onChange={e => setItem(idx, 'quantity', e.target.value)}
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
                 </div>
@@ -253,7 +287,7 @@ function InvoiceForm({ products, onSubmit, loading }) {
                     <div>
                       {disc > 0 && (
                         <div className="text-xs text-gray-400 line-through">
-                          {(Number(p.sellPrice) * Number(item.quantity)).toLocaleString('vi-VN')} ₫
+                          {(sellPrice * Number(item.quantity)).toLocaleString('vi-VN')} ₫
                         </div>
                       )}
                       <div className={disc > 0 ? 'text-amber-600 font-medium' : 'text-gray-600'}>
@@ -284,6 +318,35 @@ function InvoiceForm({ products, onSubmit, loading }) {
                 ⚠️ Đơn chưa đủ điều kiện (tối thiểu {Number(selectedPromo.minOrderValue).toLocaleString('vi-VN')} ₫)
               </p>
             )}
+            {selectedPromo && total > 0 && total < Number(selectedPromo.minOrderValue) &&
+              (Number(selectedPromo.minOrderValue) - total) / Number(selectedPromo.minOrderValue) <= 0.2 && (
+              <div className="mt-1 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 text-xs text-amber-800">
+                <p className="font-semibold">🎯 Gần đủ điều kiện KM!</p>
+                <p>Chỉ cần thêm <b className="text-amber-700">{(Number(selectedPromo.minOrderValue) - total).toLocaleString('vi-VN')} ₫</b> nữa để được{' '}
+                  {selectedPromo.type === 'PERCENT_DISCOUNT' ? `giảm ${selectedPromo.discountValue}%` :
+                   selectedPromo.type === 'FIXED_DISCOUNT' ? `giảm ${Number(selectedPromo.discountValue).toLocaleString('vi-VN')} ₫` : 'áp dụng KM'}.
+                </p>
+                <p className="text-amber-600 mt-0.5">💡 Hãy đề nghị khách thêm sản phẩm!</p>
+              </div>
+            )}
+            {/* Nhắc nhở KM đang hoạt động nhưng chưa được chọn */}
+            {!selectedPromoId && (() => {
+              const nearPromos = activePromos.filter(p => {
+                const min = Number(p.minOrderValue)
+                if (min <= 0 || total <= 0) return false
+                const gap = min - total
+                return gap > 0 && gap / min <= 0.2
+              })
+              return nearPromos.length > 0 ? (
+                <div className="mt-1 bg-blue-50 border border-blue-300 rounded-lg px-3 py-2 text-xs text-blue-800 space-y-1">
+                  <p className="font-semibold">🎉 Gần đủ điều kiện nhận khuyến mãi:</p>
+                  {nearPromos.map(p => (
+                    <p key={p.id}>• <b>{p.name}</b>: thêm <b>{(Number(p.minOrderValue) - total).toLocaleString('vi-VN')} ₫</b> nữa</p>
+                  ))}
+                  <p className="text-blue-600">💡 Đề nghị khách thêm sản phẩm để được ưu đãi!</p>
+                </div>
+              ) : null
+            })()}
             {selectedPromo?.appliesTo === 'PRODUCT' && selectedPromo.productIds?.length > 0 && (() => {
               const eligible = items.some(it => selectedPromo.productIds.includes(Number(it.productId)))
               return !eligible ? (

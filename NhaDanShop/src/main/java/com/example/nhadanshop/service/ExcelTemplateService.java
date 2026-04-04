@@ -128,7 +128,7 @@ public class ExcelTemplateService {
                 "HUONG DAN IMPORT SAN PHAM",
                 new String[][]{
                     {"Cot","Mo ta","Vi du"},
-                    {"A: Ma SP","De trong → he thong tu tao theo danh muc.\nNhap tay → phai duy nhat, in hoa VD: BT001","BT001 hoac de trong"},
+                    {"A: Ma SP","BAT BUOC nhap ma san pham. Phai duy nhat, in hoa.\nHe thong KHONG tu dong tao ma.","BT001"},
                     {"B: Ten SP (*)","Ten day du cua san pham, bat buoc","Banh Trang Rong Bien"},
                     {"C: Danh muc (*)","Ten danh muc. Chua co → tu dong tao moi","Banh Trang"},
                     {"D: Don vi (*)","Don vi ban le: bich, hop, goi, chai, hu...","bich"},
@@ -158,7 +158,10 @@ public class ExcelTemplateService {
 
     /**
      * Tạo file Excel template import phiếu nhập kho.
-     * Columns: A-code | B-name | C-quantity | D-unitCost | E-note | F-category(mới) | G-unit(mới)
+     * Columns A-L (12 cột):
+     *   A-code | B-name | C-quantity | D-unitCost | E-sellPrice |
+     *   F-discountPct | G-note | H-category(mới) | I-unit(mới) |
+     *   J-importUnit | K-sellUnit | L-piecesPerImportUnit
      */
     public byte[] buildReceiptTemplate() throws IOException {
         try (XSSFWorkbook wb = new XSSFWorkbook()) {
@@ -166,6 +169,8 @@ public class ExcelTemplateService {
             CellStyle headerStyle  = buildHeaderStyle(wb, new byte[]{(byte)0,(byte)100,(byte)0});
             CellStyle required     = buildHeaderStyle(wb, new byte[]{(byte)180,(byte)50,(byte)30});
             CellStyle optional     = buildHeaderStyle(wb, new byte[]{(byte)70,(byte)130,(byte)180});
+            CellStyle sellStyle    = buildHeaderStyle(wb, new byte[]{(byte)0,(byte)120,(byte)160}); // cyan: giá bán
+            CellStyle unitStyle    = buildHeaderStyle(wb, new byte[]{(byte)120,(byte)80,(byte)0});  // brown: đơn vị
             CellStyle dataStyle    = buildDataStyle(wb);
             CellStyle numberStyle  = buildNumberStyle(wb);
             CellStyle noteStyle    = buildNoteStyle(wb);
@@ -174,36 +179,44 @@ public class ExcelTemplateService {
             CellStyle newSpStyle   = buildHighlightStyle(wb);
 
             XSSFSheet data = wb.createSheet("Du lieu Phieu Nhap");
-            data.setDefaultColumnWidth(18);
+            data.setDefaultColumnWidth(15);
             data.setColumnWidth(1, 32 * 256);  // B: Tên SP
-            data.setColumnWidth(4, 28 * 256);  // E: Ghi chú
-            data.setColumnWidth(5, 20 * 256);  // F: Danh mục
+            data.setColumnWidth(6, 28 * 256);  // G: Ghi chú
+            data.setColumnWidth(7, 22 * 256);  // H: Danh mục
+            data.setColumnWidth(9, 14 * 256);  // J: ĐV nhập
+            data.setColumnWidth(10, 14 * 256); // K: ĐV bán
+            data.setColumnWidth(11, 14 * 256); // L: Số lẻ/ĐV
 
-            // Title
+            // Title row 0
             Row titleRow = data.createRow(0);
             titleRow.setHeightInPoints(28);
             Cell titleCell = titleRow.createCell(0);
-            titleCell.setCellValue("TEMPLATE IMPORT PHIEU NHAP KHO - NHA DAN SHOP");
+            titleCell.setCellValue("TEMPLATE IMPORT PHIEU NHAP KHO - NHA DAN SHOP (12 COT A-L)");
             titleCell.setCellStyle(titleStyle);
-            // Sub-title row 1 (hướng dẫn ngắn)
+
+            // Sub-title row 1
             Row subRow = data.createRow(1);
-            subRow.setHeightInPoints(30);
+            subRow.setHeightInPoints(50);
             Cell subCell = subRow.createCell(0);
             subCell.setCellValue(
-                "Do tim: Ma SP (cot A) → Ten SP (cot B). SP CHUA CO: de trong cot A, nhap Ten+DanhMuc+DonVi → he thong TU DONG TAO SP MOI.\n" +
-                "Cot E=Chiet khau%, F=Ghi chu, G=Danh muc (tao moi), H=Don vi (tao moi). VAT% va Phi ship nhap tren web (ap dung cho toan don).");
+                "Do tim: Ma SP (cot A) → Ten SP (cot B). SP CHUA CO: de trong A, dien B+H+I → HE THONG TU TAO SP MOI.\n" +
+                "E=Gia ban, F=CK%, G=Ghi chu, H=DanhMuc, I=DonVi. " +
+                "J=DV_Nhap (kg/xau/bich), K=DV_Ban (bich/goi), L=SoLe (1kg=10bich → L=10). " +
+                "J/K/L chi ap dung SP MOI hoac SP chua co lo hang. VAT% va PhiShip nhap tren web.");
             subCell.setCellStyle(noteStyle);
-            // NOTE: 8 cột (A..H), merged region thêm ở cuối
 
-            // Header row 2 — 8 cột (đã bỏ cột VAT%)
+            // Header row 2 — 12 cột A..L
             String[] hTexts = {
                 "A: Ma SP", "B: Ten SP (*)", "C: So luong (*)", "D: Gia nhap (*)",
-                "E: Chiet khau %", "F: Ghi chu dong",
-                "G: Danh muc (neu tao moi)", "H: Don vi (neu tao moi)"
+                "E: Gia ban", "F: Chiet khau %", "G: Ghi chu dong",
+                "H: Danh muc (SP moi)", "I: Don vi (SP moi)",
+                "J: DV Nhap kho", "K: DV Ban le", "L: So le/DV"
             };
             CellStyle[] hStyles = {
                 headerStyle, required, required, required,
-                optional, headerStyle, optional, optional
+                sellStyle, optional, headerStyle,
+                optional, optional,
+                unitStyle, unitStyle, unitStyle
             };
 
             Row hRow = data.createRow(2);
@@ -214,19 +227,18 @@ public class ExcelTemplateService {
                 c.setCellStyle(hStyles[i]);
             }
 
-            data.setColumnWidth(1, 32 * 256);   // B: Tên SP
-            data.setColumnWidth(5, 28 * 256);   // F: Ghi chú
-            data.setColumnWidth(6, 22 * 256);   // G: Danh mục
-
-            // ── Dummy data (8 cột, không còn cột VAT%) ──────────────────────
+            // ── Dummy data 12 cột A-L ────────────────────────────────────────
+            // code,name,qty,unitCost,sellPrice,discountPct,note,category(H),unit(I),importUnit(J),sellUnit(K),pieces(L)
             Object[][] rows = {
-                // code, name, qty, unitCost, discountPct, note, category(new), unit(new)
-                {"BT001","Banh Trang Rong Bien",  10, 65000, 0,   "SP co san",         "",           ""},
-                {"BT002","Banh Trang Cuon Tep",    5, 38000, 5,   "CK 5%",             "",           ""},
-                {"M001", "Muoi Bien Khanh Hoa",   20,  5000, 10,  "CK 10%",            "",           ""},
-                {"",     "Com Chay Nam Huong",     3, 45000, 0,   "Tim theo ten",      "",           ""},
-                {"",     "Banh Phong Tom Viet",    8, 12000, 0,   "SP MOI",            "Banh Phong", "goi"},
-                {"",     "Keo Dua Ben Tre",        5, 35000, 8.5, "SP MOI ck",        "Keo Dua",    "hop"},
+                // SP đã có — J,K,L điền nếu SP chưa có lô (hệ thống kiểm tra tự động)
+                {"BT001","Banh Trang Rong Bien", 1, 65000,  90000, 0,   "SP co san - 1kg=10bich", "",           "",    "kg",  "bich", 10},
+                {"BT002","Banh Trang Cuon Tep",  5, 38000,  55000, 5,   "CK 5% - nhap hop",       "",           "",    "",    "",     ""},
+                {"M001", "Muoi Bien Khanh Hoa", 20,  5000,   8000, 10,  "CK 10%",                 "",           "",    "",    "",     ""},
+                // SP tìm theo tên
+                {"",    "Com Chay Nam Huong",    3, 45000,  65000, 0,   "Tim theo ten SP",        "",           "",    "",    "",     ""},
+                // SP mới — bắt buộc điền H,I; nên điền J,K,L nếu muốn cấu hình đơn vị ngay
+                {"",    "Banh Phong Tom Viet",   8, 12000,  18000, 0,   "SP MOI - nhap goi",      "Banh Phong", "goi", "goi", "goi",  1},
+                {"",    "Keo Dua Ben Tre XYZ",   2, 35000,  50000, 8.5, "SP MOI - 1xau=7bich",   "Keo Dua",    "bich","xau", "bich", 7},
             };
 
             int rowNum = 3;
@@ -246,38 +258,71 @@ public class ExcelTemplateService {
             }
 
             Row legendRow = data.createRow(rowNum + 1);
-            Cell l1 = legendRow.createCell(0); l1.setCellValue("Mau xanh = SP da co / Tim theo ten"); l1.setCellStyle(dataStyle);
-            Cell l2 = legendRow.createCell(4); l2.setCellValue("Mau vang = SP MOI tu dong tao");       l2.setCellStyle(newSpStyle);
+            Cell l1 = legendRow.createCell(0);
+            l1.setCellValue("Mau xanh = SP da co / Tim theo ten"); l1.setCellStyle(dataStyle);
+            Cell l2 = legendRow.createCell(7);
+            l2.setCellValue("Mau vang = SP MOI tu dong tao"); l2.setCellStyle(newSpStyle);
+            Cell l3 = legendRow.createCell(9);
+            l3.setCellValue("J/K/L: SP moi hoac SP chua co lo hang"); l3.setCellStyle(dataStyle);
 
-            // Merged regions — chỉ gọi 1 lần, sau khi đã tạo xong rows
-            data.addMergedRegion(new CellRangeAddress(0, 0, 0, 7)); // title: 8 cột (A..H)
-            data.addMergedRegion(new CellRangeAddress(1, 1, 0, 7)); // sub-title
-            data.setAutoFilter(new CellRangeAddress(2, 2, 0, 7));
+            // Merged regions — 12 cột (A..L = 0..11)
+            data.addMergedRegion(new CellRangeAddress(0, 0, 0, 11));
+            data.addMergedRegion(new CellRangeAddress(1, 1, 0, 11));
+            data.setAutoFilter(new CellRangeAddress(2, 2, 0, 11));
             data.createFreezePane(0, 3);
 
             // ── Sheet 2: Hướng dẫn ───────────────────────────────────────────
             XSSFSheet guide = wb.createSheet("Huong dan");
             guide.setColumnWidth(0, 28 * 256);
-            guide.setColumnWidth(1, 55 * 256);
-            guide.setColumnWidth(2, 35 * 256);
+            guide.setColumnWidth(1, 65 * 256);
+            guide.setColumnWidth(2, 28 * 256);
 
             addGuideHeader(guide, wb, sectionStyle, noteStyle, dataStyle,
-                "HUONG DAN IMPORT PHIEU NHAP KHO",
+                "HUONG DAN IMPORT PHIEU NHAP KHO (12 COT A-L)",
                 new String[][]{
                     {"Cot","Mo ta","Vi du"},
-                    {"A: Ma SP","Ma san pham (uu tien). De trong → tim ten SP (cot B)","BT001"},
+                    {"A: Ma SP","Ma san pham (uu tien). De trong → tim theo ten (cot B)","BT001"},
                     {"B: Ten SP (*)","Ten san pham. SP CHUA CO → he thong tu tao moi","Banh Trang Rong Bien"},
-                    {"C: So luong (*)","So luong nhap theo DV NHAP (kg/xau/hop/bich)","10"},
+                    {"C: So luong (*)","So luong nhap theo DV NHAP (kg/xau/hop/bich/chai)","10"},
                     {"D: Gia nhap (*)","Gia tren 1 DV NHAP. He thong tu chia sang gia le","65000"},
-                    {"E: Chiet khau %","% chiet khau NCC (0-100). De trong = 0%.\nGia sau CK = Gia nhap × (1 - CK/100)","5"},
-                    {"F: Ghi chu","Ghi chu rieng tung dong (tuy chon)","Lo nhap thang 3"},
-                    {"G: Danh muc","Chi can nhap khi SP MOI chua co trong he thong","Banh Trang"},
-                    {"H: Don vi","Chi can nhap khi SP MOI. Don vi ban le: bich/goi/hop","bich"},
-                    {"VAT% (TREN WEB)","✅ Nhap % thue GTGT tren FORM WEB khi upload file.\nAp dung cho TOAN DON: vatAmount = tong_sau_CK × vat%\nTu dong chia deu vao gia von tung SP theo ty le.","10"},
-                    {"PHI SHIP (WEB)","Nhap phi van chuyen tren giao dien web.\nHe thong chia theo ty le gia tri sau CK.","-"},
-                    {"CONG THUC GIA VON","GiaVon = discountedCost + ship/DV + VAT/DV\nDay la gia von chinh xac de tinh loi nhuan.","-"},
-                    {"COMBO trong Excel","Nhap ma combo (VD: COMBO001) vao cot A.\nHe thong tu expand thanh cac SP thanh phan,\nchi phi phan bo theo ty le qty thanh phan.","-"},
-                    {"LUU Y","- 1 file = 1 phieu nhap | Nhap NCC + ship + VAT tren web\n- Khong nhap gia 0 hoac SL 0 → bao loi\n- 1 loi bat ky → rollback toan bo file","-"},
+                    {"E: Gia ban","(TUY CHON) Gia ban moi → cap nhat sell_price SP.\nDe trong = giu nguyen gia ban cu.","90000"},
+                    {"F: Chiet khau %","% chiet khau NCC (0-100). De trong = 0%.","5"},
+                    {"G: Ghi chu","Ghi chu tung dong (tuy chon)","Lo nhap thang 3"},
+                    {"H: Danh muc","Chi dien khi SP MOI chua co trong he thong.","Banh Trang"},
+                    {"I: Don vi","Chi dien khi SP MOI. Don vi chung: bich/goi/hop/chai","bich"},
+                    {"J: DV Nhap kho","(TUY CHON) Don vi NHAP tu NCC.\n" +
+                     "ATOMIC (khong chia): bich, hop, chai, goi, hu, lon, tui\n" +
+                     "  → qty ban = qty nhap (khong nhan pieces)\n" +
+                     "GOP (chia ra le): kg, xau, 5xau, thung...\n" +
+                     "  → qty ban = qty nhap x L (so le)\n" +
+                     "Chi ap dung cho SP MOI hoac SP chua co lo hang.","kg"},
+                    {"K: DV Ban le","(TUY CHON) Don vi ban cho khach: bich/goi/hop/chai.\n" +
+                     "Chi ap dung cho SP MOI hoac SP chua co lo hang.","bich"},
+                    {"L: So le/DV nhap","(TUY CHON) So DV ban tu 1 DV nhap.\n" +
+                     "VD: 1kg = 10bich → L=10 | 1xau = 7bich → L=7.\n" +
+                     "Neu J la ATOMIC (bich/hop/chai...) → L bi bo qua, luon = 1.\n" +
+                     "Chi ap dung cho SP MOI hoac SP chua co lo hang.","10"},
+                    {"J/K/L - CANH BAO","NEU SP DA CO LO HANG (da nhap kho truoc): J, K, L bi BO QUA.\n" +
+                     "Ly do: thay doi importUnit/pieces sau khi co lo se lam SAI cong thuc:\n" +
+                     "  sumReceivedQty dung gia tri MOI de tinh lai lich su → ton kho sai.\n" +
+                     "  Muon thay doi: vao Quan ly San pham → Sua truc tiep.","-"},
+                    {"CONG THUC TON KHO","ATOMIC: stockQty += qty_nhap (khong x pieces)\n" +
+                     "GOP: stockQty += qty_nhap x L","-"},
+                    {"CONG THUC GIA VON","ATOMIC: costPerUnit = unitCost\n" +
+                     "GOP: costPerUnit = unitCost / L\n" +
+                     "finalCost = costPerUnit x (1-CK%) + ship/unit + VAT/unit","-"},
+                    {"LOI NHUAN","profit = unitPrice_ban - unitCostSnapshot\n" +
+                     "unitCostSnapshot = FEFO avg cost luc ban (tu batch)\n" +
+                     "Thay doi importUnit/pieces KHONG anh huong loi nhuan lich su.","-"},
+                    {"VAT% (WEB)","Nhap % VAT tren form web khi upload file.\n" +
+                     "vatAmount = tong_sau_CK x vat%. Chia theo ty le gia tri.","10"},
+                    {"PHI SHIP (WEB)","Nhap phi van chuyen tren form web.\n" +
+                     "Chia theo ty le gia tri sau CK.","-"},
+                    {"COMBO","Nhap ma combo (VD: COMBO001) vao cot A.\n" +
+                     "He thong tu expand thanh cac SP thanh phan.","-"},
+                    {"LUU Y CHUNG","1 file = 1 phieu nhap. Nhap NCC + ship + VAT tren web.\n" +
+                     "1 loi bat ky → rollback toan bo, khong luu gi.\n" +
+                     "Cot A (Ma SP): BAT BUOC nhap tay, he thong KHONG tu sinh ma.","-"},
                 }
             );
 

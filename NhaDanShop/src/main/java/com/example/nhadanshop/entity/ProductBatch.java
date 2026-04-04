@@ -38,6 +38,16 @@ public class ProductBatch {
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;
 
+    /**
+     * Biến thể đóng gói của lô này (Sprint 0).
+     * Nullable để backward compat — backfill từ V23.
+     * Sau V23: luôn có giá trị (application layer enforce).
+     * FEFO query dùng variant_id thay vì product_id.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "variant_id")
+    private ProductVariant variant;
+
     /** Phiếu nhập kho tạo ra lô (NULL = nhập thủ công) */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "receipt_id")

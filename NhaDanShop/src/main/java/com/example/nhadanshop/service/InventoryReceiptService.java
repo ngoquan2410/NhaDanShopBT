@@ -31,6 +31,9 @@ public class InventoryReceiptService {
     private final UserRepository userRepo;
     private final InvoiceNumberGenerator numberGen;
     private final ProductComboRepository comboRepo;
+    private final ProductImportUnitRepository importUnitRepo;
+    private final ProductVariantService variantService; // Sprint 0
+    private final ProductVariantRepository variantRepo;  // Sprint 0 — explicit save
 
     @Transactional
     public InventoryReceiptResponse createReceipt(InventoryReceiptRequest req) {
@@ -42,7 +45,7 @@ public class InventoryReceiptService {
         receipt.setReceiptDate(LocalDateTime.now());
 
         BigDecimal shippingFee = safe(req.shippingFee());
-        BigDecimal vatPctOrder = safe(req.vatPercent()); // VAT % toàn đơn
+        BigDecimal vatPctOrder = safe(req.vatPercent());
         receipt.setShippingFee(shippingFee);
 
         String currentUsername = SecurityContextHolder.getContext().getAuthentication().getName();
@@ -57,11 +60,10 @@ public class InventoryReceiptService {
         if (req.comboItems() != null) {
             for (InventoryReceiptRequest.ComboReceiptRequest cr : req.comboItems()) {
                 Product comboProduct = productRepo.findById(cr.comboId())
-                        .orElseThrow(() -> new EntityNotFoundException(
-                                "Không tìm thấy combo ID: " + cr.comboId()));
-                if (!comboProduct.isCombo()) {
+                        .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy combo ID: " + cr.comboId()));
+                if (!comboProduct.isCombo())
                     throw new IllegalArgumentException("ID " + cr.comboId() + " không phải combo");
-                }
+
                 List<ProductComboItem> comboItems = comboRepo.findByComboProduct(comboProduct);
                 int totalComponentQty = comboItems.stream().mapToInt(ProductComboItem::getQuantity).sum();
                 BigDecimal totalComboCost = cr.unitCost().multiply(BigDecimal.valueOf(cr.quantity()));
@@ -73,127 +75,182 @@ public class InventoryReceiptService {
                             : BigDecimal.ZERO;
                     BigDecimal componentCost = totalComboCost.multiply(ratio)
                             .divide(BigDecimal.valueOf(cr.quantity()), 2, RoundingMode.HALF_UP);
-
+                    // Combo component: dùng ATOMIC (pieces=1) vì qty đã là bán lẻ
                     allItems.add(new ReceiptItemRequest(
                             ci.getProduct().getId(),
                             ci.getQuantity() * cr.quantity(),
                             componentCost,
-                            safe(cr.discountPercent())
+                            safe(cr.discountPercent()),
+                            null, 1, null  // importUnit=null, pieces=1 (ATOMIC), variantId=null→default
                     ));
                 }
             }
         }
 
-        if (allItems.isEmpty()) {
+        if (allItems.isEmpty())
             throw new IllegalArgumentException("Phiếu nhập phải có ít nhất 1 sản phẩm hoặc combo");
-        }
 
-        // ── Pass 1: Tính discountedLineTotal từng dòng ───────────────────────
-        // Dùng để phân bổ shippingFee + VAT theo tỷ lệ
+        // ── Pass 1: Resolve pieces + tính discountedLineTotal ──────────────
         List<BigDecimal> discountedLineTotals = new ArrayList<>();
+        List<Integer>    resolvedPiecesList   = new ArrayList<>();
+        List<String>     resolvedImportUnits  = new ArrayList<>();
         BigDecimal totalDiscountedValue = BigDecimal.ZERO;
 
         for (ReceiptItemRequest itemReq : allItems) {
+            Product product = productRepo.findById(itemReq.productId())
+                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy SP ID: " + itemReq.productId()));
+
+            // ── Resolve pieces: Excel/Request → product_import_units lookup → product default ──
+            int pieces;
+            String importUnitUsed;
+
+            if (itemReq.importUnit() != null && !itemReq.importUnit().isBlank()) {
+                // Có chỉ định ĐV nhập → lookup bảng product_import_units
+                String reqUnit = itemReq.importUnit().trim();
+                var piu = importUnitRepo.findByProductIdAndImportUnitIgnoreCase(product.getId(), reqUnit);
+                if (piu.isPresent()) {
+                    // Ưu tiên: nếu request có pieces override → dùng override; else dùng gợi ý từ DB
+                    pieces = (itemReq.piecesOverride() != null && itemReq.piecesOverride() > 0)
+                            ? itemReq.piecesOverride()
+                            : piu.get().getPiecesPerUnit();
+                } else {
+                    // ĐV chưa đăng ký → dùng pieces từ request (hoặc fallback legacy)
+                    pieces = (itemReq.piecesOverride() != null && itemReq.piecesOverride() > 0)
+                            ? itemReq.piecesOverride()
+                            : UnitConverter.effectivePieces(reqUnit, product.getPiecesPerImportUnit());
+                }
+                importUnitUsed = reqUnit;
+            } else {
+                // Không chỉ định ĐV → dùng default của SP
+                var defaultPiu = importUnitRepo.findByProductIdAndIsDefaultTrue(product.getId());
+                if (defaultPiu.isPresent()) {
+                    pieces = (itemReq.piecesOverride() != null && itemReq.piecesOverride() > 0)
+                            ? itemReq.piecesOverride()
+                            : defaultPiu.get().getPiecesPerUnit();
+                    importUnitUsed = defaultPiu.get().getImportUnit();
+                } else {
+                    // Fallback legacy
+                    pieces = UnitConverter.effectivePieces(product.getImportUnit(), product.getPiecesPerImportUnit());
+                    importUnitUsed = product.getImportUnit() != null ? product.getImportUnit() : "bich";
+                }
+            }
+
+            resolvedPiecesList.add(pieces);
+            resolvedImportUnits.add(importUnitUsed);
+
+            // ── discountedLine = cơ sở để phân bổ ship + VAT theo tỷ lệ ────
+            // Dùng unitCost × quantity (tiền thực trả NCC sau CK) — KHÔNG dùng
+            // costPerRetail × retailQty vì làm tròn chia/nhân pieces gây sai số.
+            // Tổng VAT = totalDiscountedValue × vatPct% → chia theo tỷ lệ cho từng dòng.
+            // Giống hệt cách phân bổ phí ship → luôn nhất quán.
             BigDecimal disc = safe(itemReq.discountPercent());
-            BigDecimal discountedUnit = itemReq.unitCost()
-                    .multiply(BigDecimal.ONE.subtract(
-                            disc.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP)));
-            BigDecimal discountedLine = discountedUnit.multiply(BigDecimal.valueOf(itemReq.quantity()));
+            BigDecimal discountFactor = BigDecimal.ONE.subtract(
+                    disc.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP));
+            BigDecimal discountedLine = itemReq.unitCost()
+                    .multiply(discountFactor)
+                    .multiply(BigDecimal.valueOf(itemReq.quantity()))
+                    .setScale(4, RoundingMode.HALF_UP);
             discountedLineTotals.add(discountedLine);
             totalDiscountedValue = totalDiscountedValue.add(discountedLine);
         }
 
-        // ── Tính tổng VAT toàn đơn = totalDiscountedValue × vatPct% ─────────
-        // Sau đó chia theo tỷ lệ discountedLine cho từng dòng
         BigDecimal totalVatAmount = totalDiscountedValue
                 .multiply(vatPctOrder.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP))
                 .setScale(2, RoundingMode.HALF_UP);
 
-        // ── Pass 2: Tạo items, batch, cập nhật giá vốn ───────────────────────
+        // ── Pass 2: Tạo items, batch, cập nhật tồn kho ───────────────────────
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<InventoryReceiptItem> items = new ArrayList<>();
 
         for (int i = 0; i < allItems.size(); i++) {
             ReceiptItemRequest itemReq = allItems.get(i);
+            int pieces = resolvedPiecesList.get(i);
+            String importUnitUsed = resolvedImportUnits.get(i);
 
             Product product = productRepo.findById(itemReq.productId())
-                    .orElseThrow(() -> new EntityNotFoundException(
-                            "Không tìm thấy sản phẩm ID: " + itemReq.productId()));
+                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy SP ID: " + itemReq.productId()));
 
-            int addedRetailQty = UnitConverter.toRetailQty(
-                    product.getImportUnit(), product.getPiecesPerImportUnit(), itemReq.quantity());
+            // ── [BƯỚC 1] Dùng pieces từ snapshot (mới), không từ product ──
+            int addedRetailQty = UnitConverter.toRetailQty(pieces, itemReq.quantity());
+            BigDecimal costPerRetail = UnitConverter.costPerRetailUnit(itemReq.unitCost(), pieces);
 
             BigDecimal disc = safe(itemReq.discountPercent());
-            BigDecimal discountedUnitCost = itemReq.unitCost()
-                    .multiply(BigDecimal.ONE.subtract(
-                            disc.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP)))
+            BigDecimal discountedUnitCost = costPerRetail
+                    .multiply(BigDecimal.ONE.subtract(disc.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP)))
                     .setScale(2, RoundingMode.HALF_UP);
 
             BigDecimal discountedLine = discountedLineTotals.get(i);
 
-            // ── Phân bổ shippingFee theo tỷ lệ ──────────────────────────────
+            // Phân bổ shipping
             BigDecimal shippingAllocatedLine = BigDecimal.ZERO;
             if (totalDiscountedValue.compareTo(BigDecimal.ZERO) > 0) {
-                shippingAllocatedLine = shippingFee
-                        .multiply(discountedLine)
+                shippingAllocatedLine = shippingFee.multiply(discountedLine)
                         .divide(totalDiscountedValue, 2, RoundingMode.HALF_UP);
             }
             BigDecimal shippingPerUnit = addedRetailQty > 0
                     ? shippingAllocatedLine.divide(BigDecimal.valueOf(addedRetailQty), 4, RoundingMode.HALF_UP)
                     : BigDecimal.ZERO;
 
-            // ── Phân bổ VAT toàn đơn theo tỷ lệ discountedLine ─────────────
-            // vatLine = totalVatAmount × (discountedLine / totalDiscountedValue)
+            // Phân bổ VAT
             BigDecimal vatAllocatedLine = BigDecimal.ZERO;
             if (totalDiscountedValue.compareTo(BigDecimal.ZERO) > 0) {
-                vatAllocatedLine = totalVatAmount
-                        .multiply(discountedLine)
+                vatAllocatedLine = totalVatAmount.multiply(discountedLine)
                         .divide(totalDiscountedValue, 2, RoundingMode.HALF_UP);
             }
             BigDecimal vatPerUnit = addedRetailQty > 0
                     ? vatAllocatedLine.divide(BigDecimal.valueOf(addedRetailQty), 4, RoundingMode.HALF_UP)
                     : BigDecimal.ZERO;
 
-            // ── Giá vốn cuối = discountedUnit + ship/unit + vat/unit ─────────
-            BigDecimal finalCostBeforeVat = discountedUnitCost.add(shippingPerUnit)
-                    .setScale(2, RoundingMode.HALF_UP);
-            BigDecimal finalCostWithVat = finalCostBeforeVat.add(vatPerUnit)
-                    .setScale(2, RoundingMode.HALF_UP);
+            BigDecimal finalCostBeforeVat = discountedUnitCost.add(shippingPerUnit).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal finalCostWithVat   = finalCostBeforeVat.add(vatPerUnit).setScale(2, RoundingMode.HALF_UP);
 
-            // Cập nhật product
+            // [Sprint 0] Resolve variant — null variantId → default variant
+            ProductVariant variant = variantService.resolveVariant(itemReq.variantId(), product.getId());
+
+            // Cập nhật product + variant
             product.setCostPrice(finalCostWithVat);
             product.setStockQty(product.getStockQty() + addedRetailQty);
             product.setUpdatedAt(LocalDateTime.now());
             productRepo.save(product);
 
-            // Tạo Batch
-            LocalDate expiryDate = (product.getExpiryDays() != null && product.getExpiryDays() > 0)
-                    ? LocalDate.now().plusDays(product.getExpiryDays())
-                    : LocalDate.now().plusYears(10);
-            String batchCode = buildBatchCode(saved.getReceiptNo(), product.getCode());
+            // Cập nhật variant.costPrice + variant.stockQty (explicit save)
+            variant.setCostPrice(finalCostWithVat);
+            variant.setStockQty(variant.getStockQty() + addedRetailQty);
+            variant.setUpdatedAt(LocalDateTime.now());
+            variantRepo.save(variant);
+
+            // Tạo Batch — gắn variant
+            LocalDate expiryDate = (variant.getExpiryDays() != null && variant.getExpiryDays() > 0)
+                    ? LocalDate.now().plusDays(variant.getExpiryDays())
+                    : (product.getExpiryDays() != null && product.getExpiryDays() > 0)
+                        ? LocalDate.now().plusDays(product.getExpiryDays())
+                        : LocalDate.now().plusYears(10);
+            String batchCode = buildBatchCode(saved.getReceiptNo(), variant.getVariantCode());
             ProductBatch batch = new ProductBatch();
-            batch.setProduct(product);
-            batch.setReceipt(saved);
-            batch.setBatchCode(batchCode);
-            batch.setExpiryDate(expiryDate);
-            batch.setImportQty(addedRetailQty);
-            batch.setRemainingQty(addedRetailQty);
+            batch.setProduct(product); batch.setVariant(variant); batch.setReceipt(saved);
+            batch.setBatchCode(batchCode); batch.setExpiryDate(expiryDate);
+            batch.setImportQty(addedRetailQty); batch.setRemainingQty(addedRetailQty);
             batch.setCostPrice(finalCostWithVat);
             batchRepo.save(batch);
 
-            // Tạo ReceiptItem
+            // Tạo ReceiptItem — set snapshot + variant
             InventoryReceiptItem item = new InventoryReceiptItem();
             item.setReceipt(saved);
             item.setProduct(product);
+            item.setVariant(variant); // [Sprint 0]
             item.setQuantity(itemReq.quantity());
             item.setUnitCost(itemReq.unitCost());
             item.setDiscountPercent(disc);
             item.setDiscountedCost(discountedUnitCost);
-            item.setVatPercent(vatPctOrder);           // VAT % toàn đơn — lưu để tham khảo
+            item.setVatPercent(vatPctOrder);
             item.setVatAllocated(vatPerUnit);
             item.setShippingAllocated(shippingPerUnit);
             item.setFinalCost(finalCostBeforeVat);
             item.setFinalCostWithVat(finalCostWithVat);
+            // ── [BƯỚC 1] Ghi snapshot bất biến ──
+            item.setImportUnitUsed(importUnitUsed);
+            item.setPiecesUsed(pieces);
+            item.setRetailQtyAdded(addedRetailQty);
 
             totalAmount = totalAmount.add(itemReq.unitCost().multiply(BigDecimal.valueOf(itemReq.quantity())));
             items.add(item);
@@ -230,7 +287,5 @@ public class InventoryReceiptService {
         return base + "-" + suffix;
     }
 
-    private static BigDecimal safe(BigDecimal v) {
-        return v != null ? v : BigDecimal.ZERO;
-    }
+    private static BigDecimal safe(BigDecimal v) { return v != null ? v : BigDecimal.ZERO; }
 }

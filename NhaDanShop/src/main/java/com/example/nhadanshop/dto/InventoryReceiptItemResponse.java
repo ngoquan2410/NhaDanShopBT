@@ -15,7 +15,17 @@ public record InventoryReceiptItemResponse(
         BigDecimal vatPercent,
         BigDecimal vatAllocated,
         BigDecimal shippingAllocated,
-        BigDecimal finalCost,           // sau CK + ship (trước VAT)
-        BigDecimal finalCostWithVat,    // giá vốn cuối = sau CK + ship + VAT
-        BigDecimal lineTotal
+        BigDecimal finalCost,
+        BigDecimal finalCostWithVat,
+        BigDecimal lineTotal,
+        String importUnitUsed,
+        Integer piecesUsed,
+        Integer retailQtyAdded,
+        // Sprint 0 — variant fields
+        Long variantId,
+        String variantCode,
+        String variantName,
+        String sellUnit
 ) {}
+
+

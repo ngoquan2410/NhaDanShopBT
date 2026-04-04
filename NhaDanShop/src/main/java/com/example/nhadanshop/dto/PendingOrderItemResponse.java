@@ -1,8 +1,6 @@
 package com.example.nhadanshop.dto;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.List;
 
 public record PendingOrderItemResponse(
         Long productId,
@@ -10,5 +8,10 @@ public record PendingOrderItemResponse(
         String unit,
         Integer quantity,
         BigDecimal unitPrice,
-        BigDecimal lineTotal
+        BigDecimal lineTotal,
+        // Sprint 0 — variant fields
+        Long variantId,
+        String variantCode,
+        String variantName,
+        String sellUnit
 ) {}

@@ -11,5 +11,10 @@ public record InvoiceItemRequest(
         @NotNull Long productId,
         @NotNull @Min(1) Integer quantity,
         /** Chiết khấu % trên dòng này (0–100), null = 0 */
-        @DecimalMin("0") @DecimalMax("100") BigDecimal discountPercent
+        @DecimalMin("0") @DecimalMax("100") BigDecimal discountPercent,
+        /**
+         * ID variant đóng gói (Sprint 0).
+         * null → tự động dùng default variant của productId.
+         */
+        Long variantId
 ) {}

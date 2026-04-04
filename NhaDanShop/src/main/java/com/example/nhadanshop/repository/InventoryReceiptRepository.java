@@ -36,23 +36,23 @@ public interface InventoryReceiptRepository extends JpaRepository<InventoryRecei
     /**
      * Tổng số lượng nhập kho đã quy đổi sang đơn vị BÁN LẺ.
      *
-     * Quy ước atomic (không chia, pieces=1): bịch, hộp, chai
-     * Quy ước gộp   (nhân pieces):          kg, xâu, 5 xâu...
+     * [BƯỚC 1 FIX] Dùng item.piecesUsed (snapshot bất biến) thay vì
+     * product.piecesPerImportUnit (có thể thay đổi theo thời gian).
+     *
+     * Logic: pieces_used <= 1 = ATOMIC → qty bán lẻ = qty nhập
+     *        pieces_used > 1  = GOP   → qty bán lẻ = qty nhập × pieces_used
      *
      * Trả về Object[]: [productId, totalRetailQty]
      */
     @Query("""
             SELECT item.product.id,
-                   COALESCE(SUM(item.quantity *
+                   COALESCE(SUM(
                        CASE
-                           WHEN LOWER(item.product.importUnit) IN
-                               ('bich','bịch','hop','hộp','chai')
-                           THEN 1
-                           WHEN item.product.piecesPerImportUnit IS NOT NULL
-                                AND item.product.piecesPerImportUnit > 1
-                           THEN item.product.piecesPerImportUnit
-                           ELSE 1
-                       END), 0)
+                           WHEN item.piecesUsed IS NULL OR item.piecesUsed <= 1
+                           THEN item.quantity
+                           ELSE item.quantity * item.piecesUsed
+                       END
+                   ), 0)
             FROM InventoryReceiptItem item
             WHERE item.receipt.receiptDate BETWEEN :from AND :to
             GROUP BY item.product.id

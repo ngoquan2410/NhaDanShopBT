@@ -95,8 +95,35 @@ public class Product {
                orphanRemoval = true, fetch = FetchType.LAZY)
     private List<ProductComboItem> comboItems = new ArrayList<>();
 
+    /**
+     * Các đơn vị nhập kho đã đăng ký cho SP này (chỉ SINGLE).
+     */
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL,
+               orphanRemoval = true, fetch = FetchType.LAZY)
+    @OrderBy("isDefault DESC, importUnit ASC")
+    private List<ProductImportUnit> importUnits = new ArrayList<>();
+
+    /**
+     * Các biến thể đóng gói của SP này (Sprint 0).
+     * VD: Muối ABC → [ABC-HU100: hủ 100g, ABC-GOI50: gói 50g]
+     * Mỗi variant là 1 đơn vị giao dịch độc lập.
+     * COMBO product không có variants (xử lý riêng).
+     */
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL,
+               orphanRemoval = true, fetch = FetchType.LAZY)
+    @OrderBy("isDefault DESC, variantCode ASC")
+    private List<ProductVariant> variants = new ArrayList<>();
+
     /** Tiện ích: kiểm tra có phải combo không */
     public boolean isCombo() {
         return ProductType.COMBO.equals(productType);
+    }
+
+    /** Lấy default variant (nullable) */
+    public ProductVariant getDefaultVariant() {
+        return variants.stream()
+                .filter(v -> Boolean.TRUE.equals(v.getIsDefault()))
+                .findFirst()
+                .orElse(null);
     }
 }
