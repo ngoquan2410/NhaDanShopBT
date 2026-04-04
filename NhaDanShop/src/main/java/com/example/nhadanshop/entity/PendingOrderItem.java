@@ -24,6 +24,14 @@ public class PendingOrderItem {
     @JoinColumn(name = "product_id")
     private Product product;
 
+    /**
+     * Biến thể đóng gói được đặt (Sprint 0).
+     * Nullable để backward compat — backfill từ V23.
+     */
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "variant_id")
+    private ProductVariant variant;
+
     @Column(nullable = false)
     private Integer quantity;
 

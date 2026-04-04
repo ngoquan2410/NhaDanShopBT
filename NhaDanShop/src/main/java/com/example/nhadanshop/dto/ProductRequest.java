@@ -18,8 +18,8 @@ import java.math.BigDecimal;
  *   BT Cuon TC (nhập hộp):    importUnit="hop",  piecesPerImportUnit=1  ← hộp là atomic
  */
 public record ProductRequest(
-        /** Mã sản phẩm. Nếu null/blank → hệ thống tự generate theo category (VD: BT001, BT002). */
-        @Size(max = 50) String code,
+        /** Mã sản phẩm — BẮT BUỘC nhập, không được để trống. Hệ thống không tự generate. */
+        @NotBlank(message = "Mã sản phẩm không được để trống") @Size(max = 50) String code,
         @NotBlank @Size(max = 150) String name,
         @NotNull Long categoryId,
         @NotBlank @Size(max = 20) String unit,

@@ -23,26 +23,15 @@ import java.util.stream.Collectors;
 /**
  * Service nhập phiếu nhập kho từ file Excel.
  *
- * Cấu trúc file Excel (row 1 = header, dữ liệu từ row 2):
- * ┌────────────┬────────────┬───────────────┬───────────────────┬───────────────┐
- * │ A: code   │ B: name   │ C: quantity   │ D: unitCost       │ E: note(opt)  │
- * │ (mã SP)   │ (tên SP)  │ (SL đơn vị   │ (giá/1 đơn vị     │ (ghi chú dòng)│
- * │           │ (lookup)  │  NHẬP: kg/xâu│  NHẬP: kg/xâu/hộp│               │
- * └────────────┴────────────┴───────────────┴───────────────────┴───────────────┘
+ * Cấu trúc file Excel (row 1-2 = title, row 3 = header, dữ liệu từ row 4):
+ * ┌──────┬──────┬─────────┬────────────┬──────────┬────────┬────────┬──────────────┬────────┐
+ * │ A    │ B    │ C       │ D          │ E        │ F      │ G      │ H            │ I      │
+ * │ Mã SP│ Tên  │ SL nhập │ Giá nhập   │ Giá bán  │ CK %   │ Ghi chú│ Danh mục mới │ Đvị mới│
+ * └──────┴──────┴─────────┴────────────┴──────────┴────────┴────────┴──────────────┴────────┘
  *
- * ❌ KHÔNG điền:
- *  - quantity theo đơn vị bán lẻ (bịch) — dùng đơn vị nhập (kg/xâu/hộp/chai/bịch)
- *  - unitCost theo bịch — dùng giá theo đơn vị nhập
- *
- * Ví dụ đúng từ hình:
- *  BT006 | BT Rong bien | 1 | 65000 | (1 kg, 65000/kg → hệ thống tự tính +10 bịch)
- *  BT019 | BT Cuon tep  | 2 | 38000 | (2 hộp = ATOMIC → +2 hộp)
- *  CC010 | Com Chay c.. | 5 | 125000| (5 xâu, 125000/xâu, pieces=5 → +25 bịch)
- *
- * Tìm sản phẩm theo: code (cột A) hoặc name (cột B), ưu tiên code.
- *
- * Một file Excel = Một phiếu nhập kho.
- * Metadata phiếu (supplierName, note) nhập qua param API.
+ * Cột E (Giá bán): Nếu điền → cập nhật sell_price của sản phẩm.
+ *                  Nếu để trống → giữ nguyên giá bán hiện tại.
+ * Cột H, I: Chỉ dùng khi tạo sản phẩm mới (cột A trống hoặc không tìm thấy).
  */
 @Slf4j
 @Service
@@ -57,17 +46,24 @@ public class ExcelReceiptImportService {
     private final InvoiceNumberGenerator numberGenerator;
     private final CategoryRepository categoryRepository;
     private final ProductService productService;
-    private final ProductComboRepository comboItemRepo;  // repo ProductComboItem (KiotViet model)
+    private final ProductComboRepository comboItemRepo;
+    private final ProductImportUnitRepository importUnitRepo;
+    private final ProductVariantService variantService;   // Sprint 0
+    private final ProductVariantRepository variantRepo;   // Sprint 0
 
-    // Column indices (9 cột → 8 sau khi bỏ VAT)
-    private static final int COL_CODE     = 0; // A: Mã SP
-    private static final int COL_NAME     = 1; // B: Tên SP
-    private static final int COL_QUANTITY = 2; // C: Số lượng
-    private static final int COL_COST     = 3; // D: Giá nhập
-    private static final int COL_DISCOUNT = 4; // E: Chiết khấu %
-    private static final int COL_NOTE     = 5; // F: Ghi chú (VAT đã chuyển lên cấp đơn hàng)
-    private static final int COL_CATEGORY = 6; // G: Danh mục (SP mới)
-    private static final int COL_UNIT     = 7; // H: Đơn vị (SP mới)
+    // Column indices — 12 cột A..L
+    private static final int COL_CODE      = 0;  // A: Mã SP
+    private static final int COL_NAME      = 1;  // B: Tên SP
+    private static final int COL_QUANTITY  = 2;  // C: Số lượng
+    private static final int COL_COST      = 3;  // D: Giá nhập
+    private static final int COL_SELL      = 4;  // E: Giá bán  (→ sell_price)
+    private static final int COL_DISCOUNT  = 5;  // F: Chiết khấu %
+    private static final int COL_NOTE      = 6;  // G: Ghi chú
+    private static final int COL_CATEGORY  = 7;  // H: Danh mục (SP mới)
+    private static final int COL_UNIT      = 8;  // I: Đơn vị (SP mới)
+    private static final int COL_IMPORT_UNIT  = 9;  // J: ĐV nhập kho  (→ import_unit)
+    private static final int COL_SELL_UNIT    = 10; // K: ĐV bán lẻ    (→ sell_unit)
+    private static final int COL_PIECES       = 11; // L: Số lẻ/ĐV nhập (→ pieces_per_import_unit)
 
     /**
      * Kết quả import phiếu nhập từ Excel.
@@ -135,6 +131,9 @@ public class ExcelReceiptImportService {
             }
 
             int dataRowCount = 0;
+            // Track unit+pieces đã thấy trong file này — phát hiện conflict ngay Pass 1
+            // Key = mã SP (code) hoặc tên SP (name), Value = "unit|pieces|lineNum"
+            Map<String, String> pass1UnitTracker = new LinkedHashMap<>();
             for (int rowIdx = startRow; rowIdx <= sheet.getLastRowNum(); rowIdx++) {
                 Row row = sheet.getRow(rowIdx);
                 if (row == null || isRowEmpty(row) || isLegendRow(row)) continue;
@@ -146,10 +145,14 @@ public class ExcelReceiptImportService {
                 String name = getCellString(row, COL_NAME);
                 Integer qty = getCellInt(row, COL_QUANTITY);
                 BigDecimal cost = getCellDecimal(row, COL_COST);
+                BigDecimal sellPrice = getCellDecimal(row, COL_SELL); // null = không cập nhật
                 BigDecimal discountPct = getCellDecimal(row, COL_DISCOUNT);
                 if (discountPct == null) discountPct = BigDecimal.ZERO;
-                // VAT không còn per-dòng — đã chuyển sang field vatPercent toàn đơn
                 String lineNote = getCellString(row, COL_NOTE);
+                // 3 cột mới — quy đổi đơn vị
+                String excelImportUnit = getCellString(row, COL_IMPORT_UNIT);
+                String excelSellUnit   = getCellString(row, COL_SELL_UNIT);
+                Integer excelPieces    = getCellIntOptional(row, COL_PIECES);
 
                 // ── Validate giá trị bắt buộc ───────────────────────────────
                 if ((code == null || code.isBlank()) && (name == null || name.isBlank())) {
@@ -167,7 +170,7 @@ public class ExcelReceiptImportService {
                     continue;
                 }
                 if (discountPct.compareTo(BigDecimal.ZERO) < 0 || discountPct.compareTo(BigDecimal.valueOf(100)) > 0) {
-                    errors.add("❌ Dòng " + lineNum + ": Chiết khấu % (cột E) phải trong khoảng 0–100, hiện là: " + discountPct);
+                    errors.add("❌ Dòng " + lineNum + ": Chiết khấu % (cột F) phải trong khoảng 0–100, hiện là: " + discountPct);
                     continue;
                 }
 
@@ -190,9 +193,72 @@ public class ExcelReceiptImportService {
                         warnings.add("ℹ️ Dòng " + lineNum + ": '" + product.getCode()
                                 + "' là COMBO → sẽ expand thành " + product.getComboItems().size() + " sản phẩm thành phần");
                     }
+
+                    // ── Xử lý importUnit / pieces cho SP đã tồn tại ──────────
+                    // Chỉ cập nhật khi SP chưa có lô hàng nào (stockQty == 0)
+                    // Nếu đã có lô → cập nhật importUnit/pieces sẽ làm sai
+                    // toRetailQty() tính ngược lịch sử nhập trong báo cáo tồn kho
+                    String resolvedImportUnit = null;
+                    String resolvedSellUnit   = null;
+                    Integer resolvedPieces    = null;
+                    boolean hasUnits = (excelImportUnit != null && !excelImportUnit.isBlank())
+                            || (excelSellUnit != null && !excelSellUnit.isBlank())
+                            || excelPieces != null;
+                    if (hasUnits) {
+                        boolean hasBatches = batchRepository.existsByProductId(product.getId());
+                        if (hasBatches) {
+                            warnings.add("⚠️ Dòng " + lineNum + ": SP '" + product.getCode()
+                                + "' đã có lô hàng tồn kho → KHÔNG cập nhật importUnit/sellUnit/pieces "
+                                + "để tránh sai lệch báo cáo tồn kho lịch sử. "
+                                + "Nếu muốn thay đổi, hãy chỉnh sửa trực tiếp trong trang Sản phẩm.");
+                        } else {
+                            // SP chưa có lô → an toàn cập nhật
+                            resolvedImportUnit = (excelImportUnit != null && !excelImportUnit.isBlank()) ? excelImportUnit.trim() : null;
+                            resolvedSellUnit   = (excelSellUnit   != null && !excelSellUnit.isBlank())   ? excelSellUnit.trim()   : null;
+                            resolvedPieces     = (excelPieces != null && excelPieces > 0) ? excelPieces : null;
+                            warnings.add("ℹ️ Dòng " + lineNum + ": SP '" + product.getCode()
+                                + "' chưa có lô → sẽ cập nhật đơn vị: importUnit="
+                                + resolvedImportUnit + " sellUnit=" + resolvedSellUnit + " pieces=" + resolvedPieces);
+                        }
+                    }
+
                     validatedRows.add(new ValidatedRow(
                             product, null, null, null, null,
-                            qty, cost, discountPct, isCombo, lineNum, lineNote));
+                            qty, cost, sellPrice, discountPct, isCombo, lineNum, lineNote,
+                            resolvedImportUnit, resolvedSellUnit, resolvedPieces));
+
+                    // ── Pass 1: Phát hiện conflict đơn vị quy đổi ────────────
+                    // Nếu cùng mã SP xuất hiện 2 lần với cách quy đổi khác nhau
+                    // (VD: 1kg→10hủ và 1kg→20gói) → đây là 2 loại sản phẩm
+                    // khác nhau, phải dùng 2 mã SP riêng biệt.
+                    if (!isCombo) {
+                        // Lấy effective pieces để so sánh (ưu tiên excelPieces, fallback product default)
+                        int effectivePieces = (excelPieces != null && excelPieces > 0)
+                                ? excelPieces
+                                : (product.getPiecesPerImportUnit() != null ? product.getPiecesPerImportUnit() : 1);
+                        String effectiveUnit = (excelImportUnit != null && !excelImportUnit.isBlank())
+                                ? excelImportUnit.trim().toLowerCase()
+                                : (product.getImportUnit() != null ? product.getImportUnit().toLowerCase() : "");
+                        String trackerKey   = product.getCode();
+                        String trackerValue = effectiveUnit + "|" + effectivePieces;
+
+                        if (pass1UnitTracker.containsKey(trackerKey)) {
+                            String prevValue = pass1UnitTracker.get(trackerKey);
+                            if (!trackerValue.equalsIgnoreCase(prevValue)) {
+                                String[] prev = prevValue.split("\\|");
+                                errors.add("❌ Dòng " + lineNum
+                                    + ": SP '" + product.getCode() + " - " + product.getName()
+                                    + "' xuất hiện 2 lần với cách quy đổi KHÁC NHAU:"
+                                    + " lần trước [" + prev[0] + " → " + (prev.length > 1 ? prev[1] : "1") + " lẻ/ĐV],"
+                                    + " lần này [" + effectiveUnit + " → " + effectivePieces + " lẻ/ĐV]."
+                                    + " → Không thể gộp: 2 loại đóng gói cho ra ĐV bán khác nhau."
+                                    + " Hãy dùng 2 mã SP riêng (VD: " + product.getCode() + "-A và " + product.getCode() + "-B).");
+                            }
+                            // Cùng unit+pieces: cho phép gộp, không cần thêm vào tracker
+                        } else {
+                            pass1UnitTracker.put(trackerKey, trackerValue);
+                        }
+                    }
                 } else {
                     // SP chưa tồn tại → cần auto-create
                     if (name == null || name.isBlank()) {
@@ -229,9 +295,15 @@ public class ExcelReceiptImportService {
                             ? code.trim().toUpperCase()
                             : null; // sẽ generate sau trong Pass 2
 
+                    // Đơn vị quy đổi cho SP mới — đọc từ cột J, K, L
+                    String newImportUnit = (excelImportUnit != null && !excelImportUnit.isBlank()) ? excelImportUnit.trim() : null;
+                    String newSellUnit   = (excelSellUnit   != null && !excelSellUnit.isBlank())   ? excelSellUnit.trim()   : null;
+                    Integer newPieces    = (excelPieces != null && excelPieces > 0)               ? excelPieces            : null;
+
                     validatedRows.add(new ValidatedRow(
                             null, name.trim(), categoryName.trim(), unit.trim(), generatedCode,
-                            qty, cost, discountPct, false, lineNum, lineNote));
+                            qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
+                            newImportUnit, newSellUnit, newPieces));
                 }
             }
 
@@ -267,6 +339,10 @@ public class ExcelReceiptImportService {
         BigDecimal totalAmount = BigDecimal.ZERO;
         Map<Long, InventoryReceiptItem> itemMap = new LinkedHashMap<>();
         Map<Long, BigDecimal> discountedLineTotals = new LinkedHashMap<>();
+        // ── Track unit+pieces của lần đầu gặp SP để phát hiện conflict ──────
+        // Key = productId, Value = "resolvedImportUnit|pieces"
+        Map<Long, String> unitSnapshotPerProduct = new LinkedHashMap<>();
+        List<String> pass2Errors = new ArrayList<>();
 
         for (ValidatedRow vr : validatedRows) {
             Product product;
@@ -295,15 +371,68 @@ public class ExcelReceiptImportService {
                 np.setUnit(vr.newUnit());
                 np.setSellUnit(vr.newUnit());
                 np.setCostPrice(vr.cost());
-                np.setSellPrice(vr.cost());
+                // Giá bán: lấy từ excel nếu có, ngược lại để bằng giá nhập
+                np.setSellPrice(vr.sellPrice() != null && vr.sellPrice().compareTo(BigDecimal.ZERO) > 0
+                        ? vr.sellPrice() : vr.cost());
                 np.setStockQty(0);
                 np.setActive(true);
-                np.setPiecesPerImportUnit(1);
+                // ── Đơn vị quy đổi từ cột J, K, L (SP mới) ──────────────────
+                if (vr.importUnit() != null) np.setImportUnit(vr.importUnit());
+                if (vr.sellUnit() != null)   np.setSellUnit(vr.sellUnit());
+                np.setPiecesPerImportUnit(vr.piecesPerImportUnit() != null ? vr.piecesPerImportUnit() : 1);
                 np.setCreatedAt(LocalDateTime.now());
                 np.setUpdatedAt(LocalDateTime.now());
-                product = productRepository.save(np);
+                // saveAndFlush: đảm bảo Hibernate assign đúng ID mới trước khi tạo variant
+                product = productRepository.saveAndFlush(np);
                 newProducts++;
-                warnings.add("Dòng " + vr.lineNum() + ": Tạo SP mới '" + resolvedCode + "' - " + vr.newProductName());
+
+                // [Sprint 0] Tự tạo default variant cho SP mới (sau saveAndFlush đã có ID chính xác)
+                variantService.createDefaultVariantFromProduct(product);
+
+                // [BƯỚC 2] Tạo bản ghi product_import_units cho SP mới
+                if (vr.importUnit() != null && !vr.importUnit().isBlank()) {
+                    ProductImportUnit piu = new ProductImportUnit();
+                    piu.setProduct(product);
+                    piu.setImportUnit(vr.importUnit().trim());
+                    piu.setSellUnit(vr.sellUnit() != null ? vr.sellUnit().trim()
+                            : (np.getSellUnit() != null ? np.getSellUnit() : np.getUnit()));
+                    piu.setPiecesPerUnit(np.getPiecesPerImportUnit() != null ? np.getPiecesPerImportUnit() : 1);
+                    piu.setIsDefault(true);
+                    piu.setNote("1 " + vr.importUnit().trim() + " = " + piu.getPiecesPerUnit()
+                            + " " + piu.getSellUnit());
+                    importUnitRepo.save(piu);
+                } else if (np.getImportUnit() != null) {
+                    // Tạo bản ghi mặc định từ product.importUnit
+                    ProductImportUnit piu = new ProductImportUnit();
+                    piu.setProduct(product);
+                    piu.setImportUnit(np.getImportUnit());
+                    piu.setSellUnit(np.getSellUnit() != null ? np.getSellUnit() : np.getUnit());
+                    piu.setPiecesPerUnit(np.getPiecesPerImportUnit() != null ? np.getPiecesPerImportUnit() : 1);
+                    piu.setIsDefault(true);
+                    importUnitRepo.save(piu);
+                }
+
+                warnings.add("Dòng " + vr.lineNum() + ": Tạo SP mới '" + resolvedCode + "' - " + vr.newProductName()
+                    + (vr.importUnit() != null ? " [ĐVnhập=" + vr.importUnit() + ", pieces=" + np.getPiecesPerImportUnit() + "]" : ""));
+            }
+
+            // ── Cập nhật giá bán nếu excel có giá bán mới (SP đã tồn tại) ─────
+            if (vr.product() != null && vr.sellPrice() != null && vr.sellPrice().compareTo(BigDecimal.ZERO) > 0) {
+                product.setSellPrice(vr.sellPrice());
+                product.setUpdatedAt(LocalDateTime.now());
+                productRepository.save(product);
+                warnings.add("Dòng " + vr.lineNum() + ": Cập nhật giá bán SP '"
+                        + product.getCode() + "' → " + vr.sellPrice().toPlainString() + " ₫");
+            }
+
+            // ── Cập nhật importUnit / sellUnit / piecesPerImportUnit (SP đã tồn tại, chưa có lô) ──
+            // ValidatedRow chỉ chứa giá trị non-null khi đã check an toàn ở Pass 1
+            if (vr.product() != null && (vr.importUnit() != null || vr.sellUnit() != null || vr.piecesPerImportUnit() != null)) {
+                if (vr.importUnit() != null)        product.setImportUnit(vr.importUnit());
+                if (vr.sellUnit() != null)          product.setSellUnit(vr.sellUnit());
+                if (vr.piecesPerImportUnit() != null) product.setPiecesPerImportUnit(vr.piecesPerImportUnit());
+                product.setUpdatedAt(LocalDateTime.now());
+                productRepository.save(product);
             }
 
             // ── Nếu là COMBO → expand thành các thành phần ──────────────────
@@ -337,24 +466,102 @@ public class ExcelReceiptImportService {
             }
 
             // ── SP đơn lẻ bình thường ────────────────────────────────────────
-            String importUnit = product.getImportUnit();
-            int pieces = product.getPiecesPerImportUnit() != null ? product.getPiecesPerImportUnit() : 1;
-            int addedRetailQty = UnitConverter.toRetailQty(importUnit, pieces, vr.qty());
+            // [BƯỚC 1+2] Resolve pieces theo thứ tự ưu tiên:
+            //   1. Cột J+L trong Excel (vr.importUnit + vr.piecesPerImportUnit)
+            //   2. Lookup product_import_units theo ĐV nhập từ Excel (Bước 2)
+            //   3. Default của SP trong product_import_units (is_default=TRUE)
+            //   4. Fallback legacy: product.importUnit + product.piecesPerImportUnit
+            String resolvedImportUnit;
+            int pieces;
 
-            BigDecimal costPerRetailUnit = UnitConverter.isAtomicUnit(importUnit) ? vr.cost()
-                    : vr.cost().divide(BigDecimal.valueOf(pieces), 2, RoundingMode.HALF_UP);
+            if (vr.importUnit() != null && !vr.importUnit().isBlank()) {
+                // Excel điền cột J → lookup Bước 2
+                String excelUnit = vr.importUnit().trim();
+                var piu = importUnitRepo.findByProductIdAndImportUnitIgnoreCase(product.getId(), excelUnit);
+                if (piu.isPresent()) {
+                    // Ưu tiên pieces từ cột L nếu có, ngược lại dùng gợi ý từ DB
+                    pieces = (vr.piecesPerImportUnit() != null && vr.piecesPerImportUnit() > 0)
+                            ? vr.piecesPerImportUnit()
+                            : piu.get().getPiecesPerUnit();
+                    if (vr.piecesPerImportUnit() != null && vr.piecesPerImportUnit() > 0
+                            && !vr.piecesPerImportUnit().equals(piu.get().getPiecesPerUnit())) {
+                        warnings.add("Dòng " + vr.lineNum() + ": SP '" + product.getCode()
+                            + "' ĐV '" + excelUnit + "' gợi ý " + piu.get().getPiecesPerUnit()
+                            + " lẻ/ĐV nhưng Excel ghi đè " + pieces + " → dùng " + pieces + " (snapshot)");
+                    }
+                } else {
+                    // ĐV chưa đăng ký → dùng pieces từ cột L hoặc fallback legacy
+                    pieces = (vr.piecesPerImportUnit() != null && vr.piecesPerImportUnit() > 0)
+                            ? vr.piecesPerImportUnit()
+                            : UnitConverter.effectivePieces(excelUnit, product.getPiecesPerImportUnit());
+                    warnings.add("Dòng " + vr.lineNum() + ": SP '" + product.getCode()
+                        + "' ĐV '" + excelUnit + "' chưa đăng ký trong product_import_units"
+                        + " → dùng pieces=" + pieces + ". Vào trang SP để đăng ký chính thức.");
+                }
+                resolvedImportUnit = excelUnit;
+            } else {
+                // Excel không điền ĐV → dùng default của SP
+                var defaultPiu = importUnitRepo.findByProductIdAndIsDefaultTrue(product.getId());
+                if (defaultPiu.isPresent()) {
+                    pieces = (vr.piecesPerImportUnit() != null && vr.piecesPerImportUnit() > 0)
+                            ? vr.piecesPerImportUnit()
+                            : defaultPiu.get().getPiecesPerUnit();
+                    resolvedImportUnit = defaultPiu.get().getImportUnit();
+                } else {
+                    // Fallback legacy hoàn toàn
+                    pieces = UnitConverter.effectivePieces(product.getImportUnit(), product.getPiecesPerImportUnit());
+                    resolvedImportUnit = product.getImportUnit() != null ? product.getImportUnit() : "bich";
+                }
+            }
+
+            // [BƯỚC 1] Dùng API mới của UnitConverter — pieces là source of truth
+            int addedRetailQty = UnitConverter.toRetailQty(pieces, vr.qty());
+            BigDecimal costPerUnit = UnitConverter.costPerRetailUnit(vr.cost(), pieces);
+
             BigDecimal discountFactor = BigDecimal.ONE.subtract(
                     vr.discountPct().divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP));
-            BigDecimal discountedCostPerUnit = costPerRetailUnit.multiply(discountFactor)
+            BigDecimal discountedCostPerUnit = costPerUnit.multiply(discountFactor)
                     .setScale(2, RoundingMode.HALF_UP);
-            BigDecimal discountedLineTotal = discountedCostPerUnit.multiply(BigDecimal.valueOf(addedRetailQty));
+
+            // ── discountedLineTotal dùng để phân bổ ship/VAT ────────────────
+            // Tính từ unitCost × qty (giá nhập gốc × số lượng nhập) để tránh mất
+            // phần lẻ khi chia pieces rồi nhân lại. Đây là số tiền thực trả NCC.
+            // ship/VAT = totalFee × (discountedLineTotal / sum(discountedLineTotal))
+            // → mỗi SP chịu phần ship/VAT tương ứng với tỷ trọng tiền hàng của nó.
+            BigDecimal discountedLineTotal = vr.cost()
+                    .multiply(discountFactor)
+                    .multiply(BigDecimal.valueOf(vr.qty()))
+                    .setScale(4, RoundingMode.HALF_UP);
             totalAmount = totalAmount.add(vr.cost().multiply(BigDecimal.valueOf(vr.qty())));
 
             if (itemMap.containsKey(product.getId())) {
-                InventoryReceiptItem existing = itemMap.get(product.getId());
-                existing.setQuantity(existing.getQuantity() + vr.qty());
-                discountedLineTotals.merge(product.getId(), discountedLineTotal, BigDecimal::add);
-                warnings.add("Dòng " + vr.lineNum() + ": SP '" + product.getCode() + "' trùng → gộp số lượng");
+                // ── SP đã có trong phiếu này → kiểm tra conflict ─────────────
+                String firstSnapshot = unitSnapshotPerProduct.get(product.getId());
+                String thisSnapshot  = resolvedImportUnit + "|" + pieces;
+
+                if (!thisSnapshot.equalsIgnoreCase(firstSnapshot)) {
+                    // Khác unit hoặc khác pieces → KHÔNG THỂ GỘP
+                    // Đây là 2 loại đóng gói khác nhau (VD: hủ 100g vs gói 50g)
+                    // → phải dùng 2 mã SP riêng biệt
+                    String[] firstParts = firstSnapshot.split("\\|");
+                    String firstUnit   = firstParts[0];
+                    int    firstPieces = firstParts.length > 1 ? Integer.parseInt(firstParts[1]) : 1;
+                    pass2Errors.add("❌ Dòng " + vr.lineNum()
+                        + ": SP '" + product.getCode() + " - " + product.getName()
+                        + "' xuất hiện 2 lần với cách quy đổi KHÁC NHAU:\n"
+                        + "    • Lần trước: " + firstUnit + " → " + firstPieces + " " + (product.getSellUnit() != null ? product.getSellUnit() : "lẻ") + "/ĐV\n"
+                        + "    • Lần này:   " + resolvedImportUnit + " → " + pieces + " " + (product.getSellUnit() != null ? product.getSellUnit() : "lẻ") + "/ĐV\n"
+                        + "    → Không thể gộp: 2 loại đóng gói cho ra đơn vị bán khác nhau.\n"
+                        + "    → Giải pháp: Tạo 2 mã SP riêng (VD: " + product.getCode() + "-A và " + product.getCode() + "-B).");
+                } else {
+                    // Cùng unit + cùng pieces → GỘP an toàn
+                    InventoryReceiptItem existing = itemMap.get(product.getId());
+                    existing.setQuantity(existing.getQuantity() + vr.qty());
+                    existing.setRetailQtyAdded(existing.getRetailQtyAdded() + addedRetailQty);
+                    discountedLineTotals.merge(product.getId(), discountedLineTotal, BigDecimal::add);
+                    warnings.add("ℹ️ Dòng " + vr.lineNum() + ": SP '" + product.getCode()
+                        + "' trùng — cùng ĐV [" + resolvedImportUnit + "×" + pieces + "] → gộp số lượng");
+                }
             } else {
                 InventoryReceiptItem item = new InventoryReceiptItem();
                 item.setReceipt(savedReceipt);
@@ -363,30 +570,61 @@ public class ExcelReceiptImportService {
                 item.setUnitCost(vr.cost());
                 item.setDiscountPercent(vr.discountPct());
                 item.setDiscountedCost(discountedCostPerUnit);
-                item.setVatPercent(vatPercent);   // VAT toàn đơn lưu tham khảo
+                item.setVatPercent(vatPercent);
                 item.setVatAllocated(BigDecimal.ZERO);
                 item.setShippingAllocated(BigDecimal.ZERO);
                 item.setFinalCost(discountedCostPerUnit);
                 item.setFinalCostWithVat(discountedCostPerUnit);
+                // [BƯỚC 1] Snapshot bất biến — source of truth cho tồn kho + báo cáo
+                item.setImportUnitUsed(resolvedImportUnit);
+                item.setPiecesUsed(pieces);
+                item.setRetailQtyAdded(addedRetailQty);
                 itemMap.put(product.getId(), item);
                 discountedLineTotals.put(product.getId(), discountedLineTotal);
+                // Ghi lại unit+pieces để phát hiện conflict nếu SP xuất hiện lần 2
+                unitSnapshotPerProduct.put(product.getId(), resolvedImportUnit + "|" + pieces);
             }
 
-            // Tạo Batch tạm
+            // [Sprint 0] Resolve default variant — auto-create nếu chưa có
+            ProductVariant variant = variantRepo.findByProductIdAndIsDefaultTrue(product.getId())
+                    .orElseGet(() -> variantService.createDefaultVariantFromProduct(product));
+
+            // Gắn variant vào receipt item
+            InventoryReceiptItem currentItem = itemMap.get(product.getId());
+            if (currentItem != null && currentItem.getVariant() == null) {
+                currentItem.setVariant(variant);
+            }
+
+            // Tạo Batch tạm — import_qty = retailQty đã quy đổi đúng
             LocalDate expiryDate = (product.getExpiryDays() != null && product.getExpiryDays() > 0)
                     ? LocalDate.now().plusDays(product.getExpiryDays()) : LocalDate.now().plusYears(10);
             String batchCode = buildUniqueBatchCode(savedReceipt.getReceiptNo(), product.getCode());
             ProductBatch batch = new ProductBatch();
-            batch.setProduct(product); batch.setReceipt(savedReceipt);
+            batch.setProduct(product);
+            batch.setVariant(variant); // [Sprint 0]
+            batch.setReceipt(savedReceipt);
             batch.setBatchCode(batchCode); batch.setExpiryDate(expiryDate);
             batch.setImportQty(addedRetailQty); batch.setRemainingQty(addedRetailQty);
             batch.setCostPrice(discountedCostPerUnit);
             batchRepository.save(batch);
 
+            // [Sprint 0] Cập nhật variant.stockQty
+            variant.setStockQty(variant.getStockQty() + addedRetailQty);
+            variant.setUpdatedAt(LocalDateTime.now());
+            variantRepo.save(variant);
+
             product.setStockQty(product.getStockQty() + addedRetailQty);
             product.setUpdatedAt(LocalDateTime.now());
             productRepository.save(product);
             successItems++;
+        }
+
+        // ── Nếu có lỗi conflict đơn vị → rollback toàn bộ phiếu ────────────
+        // Phải throw SAU vòng lặp (không throw bên trong) để có đủ thông tin
+        // về tất cả các dòng bị conflict trước khi báo lỗi.
+        if (!pass2Errors.isEmpty()) {
+            log.warn("Pass 2 phát hiện {} conflict đơn vị quy đổi — rollback", pass2Errors.size());
+            throw new ExcelImportValidationException(pass2Errors);
         }
 
         // ── Phân bổ shippingFee + VAT toàn đơn → finalCostWithVat ───────────
@@ -403,9 +641,12 @@ public class ExcelReceiptImportService {
             InventoryReceiptItem item = entry.getValue();
             BigDecimal discountedLineTotal = discountedLineTotals.getOrDefault(productId, BigDecimal.ZERO);
 
+            // [BƯỚC 1] Dùng retailQtyAdded từ snapshot — không tính lại từ product.*
+            int retailQty = item.getRetailQtyAdded() != null && item.getRetailQtyAdded() > 0
+                    ? item.getRetailQtyAdded()
+                    : item.getQuantity(); // fallback nếu snapshot chưa set
+
             Product product = productRepository.findById(productId).orElseThrow();
-            int pieces = product.getPiecesPerImportUnit() != null ? product.getPiecesPerImportUnit() : 1;
-            int retailQty = UnitConverter.toRetailQty(product.getImportUnit(), pieces, item.getQuantity());
 
             // Phân bổ ship
             BigDecimal shippingForLine = BigDecimal.ZERO;
@@ -441,10 +682,23 @@ public class ExcelReceiptImportService {
             product.setUpdatedAt(LocalDateTime.now());
             productRepository.save(product);
 
-            batchRepository.findByReceiptAndProduct(savedReceipt, product).forEach(b -> {
-                b.setCostPrice(finalCostWithVat);
-                batchRepository.save(b);
-            });
+            // [Sprint 0] Cập nhật variant.costPrice sau khi có finalCostWithVat
+            if (item.getVariant() != null) {
+                item.getVariant().setCostPrice(finalCostWithVat);
+                item.getVariant().setUpdatedAt(LocalDateTime.now());
+                variantRepo.save(item.getVariant());
+                // Cập nhật batch theo variant_id
+                Long vid = item.getVariant().getId();
+                batchRepository.findByReceiptIdAndVariantId(savedReceipt.getId(), vid).forEach(b -> {
+                    b.setCostPrice(finalCostWithVat);
+                    batchRepository.save(b);
+                });
+            } else {
+                batchRepository.findByReceiptAndProduct(savedReceipt, product).forEach(b -> {
+                    b.setCostPrice(finalCostWithVat);
+                    batchRepository.save(b);
+                });
+            }
         }
 
         savedReceipt.setTotalAmount(totalAmount);
@@ -470,12 +724,13 @@ public class ExcelReceiptImportService {
                              Map<Long, InventoryReceiptItem> itemMap,
                              Map<Long, BigDecimal> discountedLineTotals,
                              List<String> warnings) {
-        String importUnit = product.getImportUnit();
-        int pieces = product.getPiecesPerImportUnit() != null ? product.getPiecesPerImportUnit() : 1;
-        int addedRetailQty = UnitConverter.toRetailQty(importUnit, pieces, qty);
+        // Combo components: dùng default pieces từ product (combo expand không có ĐV riêng)
+        int pieces = UnitConverter.effectivePieces(product.getImportUnit(), product.getPiecesPerImportUnit());
+        String importUnitUsed = product.getImportUnit() != null ? product.getImportUnit() : "bich";
 
-        BigDecimal costPerRetailUnit = UnitConverter.isAtomicUnit(importUnit) ? unitCost
-                : unitCost.divide(BigDecimal.valueOf(pieces), 2, RoundingMode.HALF_UP);
+        int addedRetailQty = UnitConverter.toRetailQty(pieces, qty);
+        BigDecimal costPerRetailUnit = UnitConverter.costPerRetailUnit(unitCost, pieces);
+
         BigDecimal discountFactor = BigDecimal.ONE.subtract(
                 discountPct.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP));
         BigDecimal discountedCostPerUnit = costPerRetailUnit.multiply(discountFactor)
@@ -485,6 +740,8 @@ public class ExcelReceiptImportService {
         if (itemMap.containsKey(product.getId())) {
             InventoryReceiptItem existing = itemMap.get(product.getId());
             existing.setQuantity(existing.getQuantity() + qty);
+            if (existing.getRetailQtyAdded() != null)
+                existing.setRetailQtyAdded(existing.getRetailQtyAdded() + addedRetailQty);
             discountedLineTotals.merge(product.getId(), discountedLineTotal, BigDecimal::add);
             warnings.add("SP '" + product.getCode() + "' xuất hiện nhiều lần → gộp số lượng");
         } else {
@@ -495,25 +752,47 @@ public class ExcelReceiptImportService {
             item.setUnitCost(unitCost);
             item.setDiscountPercent(discountPct);
             item.setDiscountedCost(discountedCostPerUnit);
-            item.setVatPercent(BigDecimal.ZERO);      // sẽ cập nhật sau khi biết vatPercent toàn đơn
+            item.setVatPercent(BigDecimal.ZERO);
             item.setVatAllocated(BigDecimal.ZERO);
             item.setShippingAllocated(BigDecimal.ZERO);
             item.setFinalCost(discountedCostPerUnit);
             item.setFinalCostWithVat(discountedCostPerUnit);
+            // Snapshot cho combo component
+            item.setImportUnitUsed(importUnitUsed);
+            item.setPiecesUsed(pieces);
+            item.setRetailQtyAdded(addedRetailQty);
             itemMap.put(product.getId(), item);
             discountedLineTotals.put(product.getId(), discountedLineTotal);
         }
 
-        // Batch tạm
         LocalDate expiryDate = (product.getExpiryDays() != null && product.getExpiryDays() > 0)
                 ? LocalDate.now().plusDays(product.getExpiryDays()) : LocalDate.now().plusYears(10);
         String batchCode = buildUniqueBatchCode(receipt.getReceiptNo(), product.getCode());
+
+        // [Sprint 0] Resolve default variant — auto-create nếu chưa có
+        ProductVariant variant = variantRepo.findByProductIdAndIsDefaultTrue(product.getId())
+                .orElseGet(() -> variantService.createDefaultVariantFromProduct(product));
+
         ProductBatch batch = new ProductBatch();
-        batch.setProduct(product); batch.setReceipt(receipt);
+        batch.setProduct(product);
+        batch.setVariant(variant); // [Sprint 0]
+        batch.setReceipt(receipt);
         batch.setBatchCode(batchCode); batch.setExpiryDate(expiryDate);
         batch.setImportQty(addedRetailQty); batch.setRemainingQty(addedRetailQty);
         batch.setCostPrice(discountedCostPerUnit);
         batchRepository.save(batch);
+
+        // [Sprint 0] Cập nhật variant.stockQty + costPrice
+        variant.setStockQty(variant.getStockQty() + addedRetailQty);
+        variant.setCostPrice(discountedCostPerUnit);
+        variant.setUpdatedAt(LocalDateTime.now());
+        variantRepo.save(variant);
+
+        // Gắn variant vào receipt item nếu chưa có
+        InventoryReceiptItem existing2 = itemMap.get(product.getId());
+        if (existing2 != null && existing2.getVariant() == null) {
+            existing2.setVariant(variant);
+        }
 
         product.setStockQty(product.getStockQty() + addedRetailQty);
         product.setUpdatedAt(LocalDateTime.now());
@@ -652,6 +931,11 @@ public class ExcelReceiptImportService {
         } catch (NumberFormatException e) { return null; }
     }
 
+    /** Alias cho cột optional (pieces, v.v.) — trả về null nếu trống/lỗi */
+    private Integer getCellIntOptional(Row row, int col) {
+        return getCellInt(row, col);
+    }
+
     /** Kết quả tìm SP: ambiguous=true khi nhiều SP khớp tên, cần admin nhập mã */
     private record FindResult(Optional<Product> product, boolean isAmbiguous) {
         static FindResult found(Product p) { return new FindResult(Optional.of(p), false); }
@@ -729,6 +1013,9 @@ public class ExcelReceiptImportService {
     /**
      * Dữ liệu 1 dòng Excel đã được validate — dùng trong Pass 1 → Pass 2.
      * product = null nghĩa là SP chưa tồn tại, cần tạo mới trong Pass 2.
+     *
+     * importUnit / sellUnit / pieces: chỉ áp dụng cho SP mới HOẶC SP cũ chưa có lô hàng nào.
+     * Nếu SP cũ đã có lô → bỏ qua để tránh làm sai tính toán tồn kho lịch sử.
      */
     private record ValidatedRow(
             Product product,           // SP tìm được (null nếu cần auto-create)
@@ -738,9 +1025,14 @@ public class ExcelReceiptImportService {
             String newCode,
             int qty,
             BigDecimal cost,
+            BigDecimal sellPrice,      // Giá bán mới (null = không cập nhật)
             BigDecimal discountPct,
-            boolean isCombo,           // true nếu product.productType=COMBO → expand
+            boolean isCombo,
             int lineNum,
-            String lineNote
+            String lineNote,
+            // 3 trường mới — quy đổi đơn vị
+            String importUnit,         // null = không cập nhật (SP cũ đã có lô)
+            String sellUnit,           // null = không cập nhật
+            Integer piecesPerImportUnit // null = không cập nhật
     ) {}
 }

@@ -1,4 +1,4 @@
-﻿﻿import { useState, useRef } from 'react'
+﻿import { useState, useRef } from 'react'
 import { useReceipts, useReceiptMutations } from '../../hooks/useReceipts'
 import { useProducts } from '../../hooks/useProducts'
 import { useSort } from '../../hooks/useSort'
@@ -26,10 +26,11 @@ function ReceiptForm({ products, onSubmit, loading }) {
   const [supplierName, setSupplierName] = useState('')
   const [note, setNote] = useState('')
   const [shippingFee, setShippingFee] = useState(0)
-  const [vatPercent, setVatPercent]   = useState(0)   // VAT% toàn đơn
-  const [items, setItems] = useState([{ productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
+  const [vatPercent, setVatPercent] = useState(0)
+  // [Sprint 0] thêm variantId vào mỗi item
+  const [items, setItems] = useState([{ productId: '', variantId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
 
-  const addItem = () => setItems(i => [...i, { productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
+  const addItem = () => setItems(i => [...i, { productId: '', variantId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
   const removeItem = (idx) => setItems(i => i.filter((_, j) => j !== idx))
   const setItem = (idx, key, val) =>
     setItems(i => i.map((it, j) => j === idx ? { ...it, [key]: val } : it))
@@ -37,15 +38,15 @@ function ReceiptForm({ products, onSubmit, loading }) {
   const handleSubmit = (e) => {
     e.preventDefault()
     onSubmit({
-      supplierName,
-      note,
+      supplierName, note,
       shippingFee: Number(shippingFee),
-      vatPercent:  Number(vatPercent) || 0,
+      vatPercent: Number(vatPercent) || 0,
       items: items.map(it => ({
         productId: Number(it.productId),
         quantity: Number(it.quantity),
         unitCost: Number(it.unitCost),
         discountPercent: Number(it.discountPercent) || 0,
+        variantId: it.variantId ? Number(it.variantId) : null, // [Sprint 0]
       })),
     })
   }
@@ -108,54 +109,69 @@ function ReceiptForm({ products, onSubmit, loading }) {
           <button type="button" onClick={addItem}
             className="text-green-600 hover:text-green-700 text-sm font-medium">+ Thêm dòng</button>
         </div>
-        {items.map((item, idx) => (
-          <div key={idx} className="flex gap-2 mb-2 items-end">
-            <div className="flex-1">
-              {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Sản phẩm *</label>}
-              <select
-                value={item.productId}
-                onChange={e => setItem(idx, 'productId', e.target.value)}
-                required
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-              >
-                <option value="">-- Chọn sản phẩm --</option>
-                {products.map(p => (
-                  <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="w-24">
-              {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Số lượng</label>}
-              <input type="number" min={1} value={item.quantity}
-                onChange={e => setItem(idx, 'quantity', e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-            </div>
-            <div className="w-32">
-              {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Giá nhập (₫)</label>}
-              <input type="number" min={0} step={100} value={item.unitCost}
-                onChange={e => setItem(idx, 'unitCost', e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-            </div>
-            <div className="w-24">
-              {idx === 0 && <label className="block text-xs text-gray-500 mb-1">CK % 🏷️</label>}
-              <div className="relative">
-                <input type="number" min={0} max={100} step={0.1} value={item.discountPercent}
-                  onChange={e => setItem(idx, 'discountPercent', e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 pr-6"
-                  placeholder="0" />
-                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
+        {items.map((item, idx) => {
+          // [Sprint 0] Lấy variants của SP được chọn
+          const p = products.find(pr => String(pr.id) === String(item.productId))
+          const variants = p?.variants || []
+          const hasMultiVariant = variants.length > 1
+          return (
+            <div key={idx} className="flex gap-2 mb-2 items-end flex-wrap">
+              <div className="flex-1 min-w-[180px]">
+                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">San pham *</label>}
+                <select value={item.productId} onChange={e => {
+                  const prod = products.find(pr => String(pr.id) === e.target.value)
+                  const defVariant = prod?.variants?.find(v => v.isDefault) || prod?.variants?.[0]
+                  setItem(idx, 'productId', e.target.value)
+                  setItem(idx, 'variantId', defVariant?.id || '')
+                }} required className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                  <option value="">-- Chon san pham --</option>
+                  {products.filter(pr => pr.productType !== 'COMBO').map(p => (
+                    <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
+                  ))}
+                </select>
               </div>
+              {/* [Sprint 0] Chi hien khi SP co >1 variant */}
+              {p && hasMultiVariant && (
+                <div className="w-44">
+                  {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Bien the</label>}
+                  <select value={item.variantId || ''} onChange={e => setItem(idx, 'variantId', e.target.value)}
+                    className="w-full border border-purple-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400">
+                    {variants.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.variantCode} ({v.sellUnit}){v.isDefault ? ' *' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="w-24">
+                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">So luong</label>}
+                <input type="number" min={1} value={item.quantity} onChange={e => setItem(idx, 'quantity', e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              </div>
+              <div className="w-32">
+                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Gia nhap (d)</label>}
+                <input type="number" min={0} step={100} value={item.unitCost} onChange={e => setItem(idx, 'unitCost', e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              </div>
+              <div className="w-24">
+                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">CK %</label>}
+                <div className="relative">
+                  <input type="number" min={0} max={100} step={0.1} value={item.discountPercent} onChange={e => setItem(idx, 'discountPercent', e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 pr-6" placeholder="0" />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
+                </div>
+              </div>
+              <div className="w-28 text-right pb-2">
+                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Sau CK</label>}
+                <span className={`text-xs font-semibold ${Number(item.discountPercent) > 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                  {(Number(item.quantity) * Number(item.unitCost) * (1 - (Number(item.discountPercent) || 0) / 100)).toLocaleString('vi-VN')} d
+                </span>
+              </div>
+              <button type="button" onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 pb-2 text-lg">&times;</button>
             </div>
-            <div className="w-28 text-right pb-2">
-              {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Sau CK</label>}
-              <span className={`text-xs font-semibold ${Number(item.discountPercent) > 0 ? 'text-green-600' : 'text-gray-500'}`}>
-                {(Number(item.quantity) * Number(item.unitCost) * (1 - (Number(item.discountPercent) || 0) / 100)).toLocaleString('vi-VN')} ₫
-              </span>
-            </div>
-            <button type="button" onClick={() => removeItem(idx)}
-              className="text-red-500 hover:text-red-700 pb-2 text-lg">&times;</button>
-          </div>
-        ))}
+          )
+        })}
 
         {/* Summary */}
         <div className="mt-4 bg-green-50 rounded-lg p-3 space-y-1.5 text-sm">

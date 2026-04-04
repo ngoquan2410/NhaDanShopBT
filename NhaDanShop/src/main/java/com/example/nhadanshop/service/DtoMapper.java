@@ -4,6 +4,8 @@ import com.example.nhadanshop.dto.*;
 import com.example.nhadanshop.entity.*;
 
 import java.math.BigDecimal;
+import java.util.Collections;
+import java.util.List;
 import java.util.stream.Collectors;
 
 /** Utility class chuyển đổi Entity → Response DTO */
@@ -11,6 +13,7 @@ public final class DtoMapper {
 
     private DtoMapper() {}
 
+    // ── Category ───────────────────────────────────────────────────────────────
     public static CategoryResponse toResponse(Category c) {
         return new CategoryResponse(
                 c.getId(), c.getName(), c.getDescription(), c.getActive(),
@@ -18,11 +21,15 @@ public final class DtoMapper {
         );
     }
 
+    // ── Product ───────────────────────────────────────────────────────────────
     public static ProductResponse toResponse(Product p) {
         return toResponse(p, p.getStockQty()); // availableQty = stockQty nếu không biết pending
     }
 
     public static ProductResponse toResponse(Product p, int availableQty) {
+        List<ProductVariantResponse> variants = p.getVariants() == null
+                ? Collections.emptyList()
+                : p.getVariants().stream().map(DtoMapper::toResponse).collect(Collectors.toList());
         return new ProductResponse(
                 p.getId(), p.getCode(), p.getName(), p.getUnit(),
                 p.getCostPrice(), p.getSellPrice(), p.getStockQty(), availableQty, p.getActive(),
@@ -32,10 +39,68 @@ public final class DtoMapper {
                 p.getPiecesPerImportUnit(), p.getConversionNote(),
                 p.getImageUrl(),
                 p.getProductType() != null ? p.getProductType().name() : "SINGLE",
-                p.getCreatedAt(), p.getUpdatedAt()
+                p.getCreatedAt(), p.getUpdatedAt(),
+                variants
         );
     }
 
+    // ── ProductVariant ────────────────────────────────────────────────────────
+    public static ProductVariantResponse toResponse(ProductVariant v) {
+        return new ProductVariantResponse(
+                v.getId(),
+                v.getProduct().getId(),
+                v.getProduct().getCode(),
+                v.getProduct().getName(),
+                v.getVariantCode(),
+                v.getVariantName(),
+                v.getSellUnit(),
+                v.getImportUnit(),
+                v.getPiecesPerUnit(),
+                v.getSellPrice(),
+                v.getCostPrice(),
+                v.getStockQty(),
+                v.getMinStockQty(),
+                v.isLowStock(),
+                v.getExpiryDays(),
+                v.getActive(),
+                v.getIsDefault(),
+                v.getImageUrl(),
+                v.getConversionNote(),
+                v.getCreatedAt(),
+                v.getUpdatedAt()
+        );
+    }
+
+    // ── SalesInvoice ──────────────────────────────────────────────────────────
+    public static SalesInvoiceResponse toResponse(SalesInvoice inv) {
+        BigDecimal discountAmount = inv.getDiscountAmount() != null ? inv.getDiscountAmount() : BigDecimal.ZERO;
+        BigDecimal finalAmount    = inv.getTotalAmount().subtract(discountAmount);
+
+        // Lợi nhuận gộp = Σ[(unitPrice - unitCostSnapshot) × qty] - discountKM
+        // unitPrice đã là giá sau CK dòng (lineDiscountPercent), costSnapshot là giá vốn FEFO
+        BigDecimal grossProfit = inv.getItems().stream()
+                .map(i -> i.getUnitPrice()
+                        .subtract(i.getUnitCostSnapshot())
+                        .multiply(BigDecimal.valueOf(i.getQuantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // Trừ thêm discount KM cấp đơn hàng
+        BigDecimal totalProfit = grossProfit.subtract(discountAmount);
+
+        return new SalesInvoiceResponse(
+                inv.getId(), inv.getInvoiceNo(), inv.getInvoiceDate(),
+                inv.getCustomerName(), inv.getNote(),
+                inv.getTotalAmount(),
+                discountAmount,
+                finalAmount,
+                inv.getPromotionName(),
+                totalProfit,
+                inv.getCreatedBy() != null ? inv.getCreatedBy().getUsername() : null,
+                inv.getItems().stream().map(DtoMapper::toResponse).collect(Collectors.toList()),
+                inv.getCreatedAt(), inv.getUpdatedAt()
+        );
+    }
+
+    // ── SalesInvoiceItem (cập nhật để kèm variant fields) ────────────────────
     public static SalesInvoiceItemResponse toResponse(SalesInvoiceItem item) {
         BigDecimal lineTotal = item.getUnitPrice()
                 .multiply(BigDecimal.valueOf(item.getQuantity()));
@@ -46,6 +111,8 @@ public final class DtoMapper {
                 ? item.getOriginalUnitPrice() : item.getUnitPrice();
         BigDecimal lineDsc = item.getLineDiscountPercent() != null
                 ? item.getLineDiscountPercent() : BigDecimal.ZERO;
+        // variant fields (nullable — backward compat)
+        ProductVariant v = item.getVariant();
         return new SalesInvoiceItemResponse(
                 item.getId(),
                 item.getProduct().getId(),
@@ -53,65 +120,18 @@ public final class DtoMapper {
                 item.getProduct().getName(),
                 item.getProduct().getUnit(),
                 item.getQuantity(),
-                origPrice,
-                lineDsc,
+                origPrice, lineDsc,
                 item.getUnitPrice(),
                 item.getUnitCostSnapshot(),
-                lineTotal,
-                profit
+                lineTotal, profit,
+                v != null ? v.getId()          : null,
+                v != null ? v.getVariantCode() : item.getProduct().getCode(),
+                v != null ? v.getVariantName() : item.getProduct().getName(),
+                v != null ? v.getSellUnit()    : item.getProduct().getSellUnit()
         );
     }
 
-    public static SalesInvoiceResponse toResponse(SalesInvoice inv) {
-        BigDecimal totalProfit = inv.getItems().stream()
-                .map(i -> i.getUnitPrice()
-                        .subtract(i.getUnitCostSnapshot())
-                        .multiply(BigDecimal.valueOf(i.getQuantity())))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        BigDecimal discountAmount = inv.getDiscountAmount() != null ? inv.getDiscountAmount() : BigDecimal.ZERO;
-        BigDecimal finalAmount = inv.getTotalAmount().subtract(discountAmount);
-        // Profit should also deduct the promotion discount
-        BigDecimal adjustedProfit = totalProfit.subtract(discountAmount);
-
-        return new SalesInvoiceResponse(
-                inv.getId(), inv.getInvoiceNo(), inv.getInvoiceDate(),
-                inv.getCustomerName(), inv.getNote(),
-                inv.getTotalAmount(),
-                discountAmount,
-                finalAmount,
-                inv.getPromotionName(),
-                adjustedProfit,
-                inv.getCreatedBy() != null ? inv.getCreatedBy().getUsername() : null,
-                inv.getItems().stream().map(DtoMapper::toResponse).collect(Collectors.toList()),
-                inv.getCreatedAt(), inv.getUpdatedAt()
-        );
-    }
-
-    public static InventoryReceiptItemResponse toResponse(InventoryReceiptItem item) {
-        BigDecimal lineTotal = item.getUnitCost()
-                .multiply(BigDecimal.valueOf(item.getQuantity()));
-        BigDecimal vat   = item.getVatPercent()        != null ? item.getVatPercent()        : BigDecimal.ZERO;
-        BigDecimal vatAl = item.getVatAllocated()       != null ? item.getVatAllocated()       : BigDecimal.ZERO;
-        BigDecimal fcVat = item.getFinalCostWithVat()   != null ? item.getFinalCostWithVat()   : item.getFinalCost();
-        return new InventoryReceiptItemResponse(
-                item.getId(),
-                item.getProduct().getId(),
-                item.getProduct().getCode(),
-                item.getProduct().getName(),
-                item.getProduct().getUnit(),
-                item.getQuantity(),
-                item.getUnitCost(),
-                item.getDiscountPercent(),
-                item.getDiscountedCost(),
-                vat, vatAl,
-                item.getShippingAllocated(),
-                item.getFinalCost(),
-                fcVat,
-                lineTotal
-        );
-    }
-
+    // ── InventoryReceipt ──────────────────────────────────────────────────────
     public static InventoryReceiptResponse toResponse(InventoryReceipt r) {
         return new InventoryReceiptResponse(
                 r.getId(), r.getReceiptNo(), r.getReceiptDate(),
@@ -124,6 +144,39 @@ public final class DtoMapper {
         );
     }
 
+    // ── InventoryReceiptItem (cập nhật để kèm variant fields) ────────────────
+    public static InventoryReceiptItemResponse toResponse(InventoryReceiptItem item) {
+        BigDecimal lineTotal = item.getUnitCost()
+                .multiply(BigDecimal.valueOf(item.getQuantity()));
+        BigDecimal vat   = item.getVatPercent()      != null ? item.getVatPercent()      : BigDecimal.ZERO;
+        BigDecimal vatAl = item.getVatAllocated()     != null ? item.getVatAllocated()     : BigDecimal.ZERO;
+        BigDecimal fcVat = item.getFinalCostWithVat() != null ? item.getFinalCostWithVat() : item.getFinalCost();
+        ProductVariant v = item.getVariant();
+        return new InventoryReceiptItemResponse(
+                item.getId(),
+                item.getProduct().getId(),
+                item.getProduct().getCode(),
+                item.getProduct().getName(),
+                item.getProduct().getUnit(),
+                item.getQuantity(),
+                item.getUnitCost(),
+                item.getDiscountPercent(),
+                item.getDiscountedCost(),
+                vat, vatAl,
+                item.getShippingAllocated(),
+                item.getFinalCost(), fcVat,
+                lineTotal,
+                item.getImportUnitUsed(),
+                item.getPiecesUsed()     != null ? item.getPiecesUsed()     : 1,
+                item.getRetailQtyAdded() != null ? item.getRetailQtyAdded() : item.getQuantity(),
+                v != null ? v.getId()          : null,
+                v != null ? v.getVariantCode() : item.getProduct().getCode(),
+                v != null ? v.getVariantName() : item.getProduct().getName(),
+                v != null ? v.getSellUnit()    : item.getProduct().getSellUnit()
+        );
+    }
+
+    // ── User ─────────────────────────────────────────────────────────────────
     public static UserResponse toResponse(User u) {
         return new UserResponse(
                 u.getId(), u.getUsername(), u.getFullName(), u.getActive(),

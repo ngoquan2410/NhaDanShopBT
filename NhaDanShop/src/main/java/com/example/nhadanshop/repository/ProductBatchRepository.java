@@ -66,6 +66,12 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
     boolean existsByBatchCode(String batchCode);
 
     /**
+     * Kiểm tra sản phẩm đã có ít nhất 1 lô hàng nào chưa (kể cả lô hết hàng).
+     * Dùng để quyết định có an toàn cập nhật importUnit/pieces không.
+     */
+    boolean existsByProductId(Long productId);
+
+    /**
      * FEFO với PESSIMISTIC WRITE LOCK (SELECT ... FOR UPDATE).
      * Dùng khi deduct stock để tránh race condition.
      * Chỉ 1 transaction được đọc+sửa tại 1 thời điểm.
@@ -78,4 +84,57 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             ORDER BY b.expiryDate ASC
             """)
     List<ProductBatch> findByProductIdForUpdateFEFO(@Param("productId") Long productId);
+
+    // ── Variant-based queries (Sprint 0) ──────────────────────────────────────
+
+    /** Lô theo variant còn hàng, sắp xếp FEFO */
+    List<ProductBatch> findByVariantIdAndRemainingQtyGreaterThanOrderByExpiryDateAsc(
+            Long variantId, int minQty);
+
+    /** Tổng tồn kho theo lô của 1 variant */
+    @Query("""
+            SELECT COALESCE(SUM(b.remainingQty), 0)
+            FROM ProductBatch b
+            WHERE b.variant.id = :variantId
+              AND b.remainingQty > 0
+            """)
+    int sumRemainingQtyByVariantId(@Param("variantId") Long variantId);
+
+    /** Kiểm tra variant đã có lô nào chưa */
+    boolean existsByVariantId(Long variantId);
+
+    /**
+     * FEFO với PESSIMISTIC WRITE LOCK theo variant_id.
+     * Ưu tiên dùng khi variant_id có giá trị.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT b FROM ProductBatch b
+            WHERE b.variant.id = :variantId
+              AND b.remainingQty > 0
+            ORDER BY b.expiryDate ASC
+            """)
+    List<ProductBatch> findByVariantIdForUpdateFEFO(@Param("variantId") Long variantId);
+
+    /** Lô của 1 phiếu nhập + 1 variant cụ thể (dùng khi cập nhật finalCost sau phân bổ ship) */
+    @Query("""
+            SELECT b FROM ProductBatch b
+            WHERE b.receipt.id = :receiptId
+              AND b.variant.id = :variantId
+            """)
+    List<ProductBatch> findByReceiptIdAndVariantId(
+            @Param("receiptId") Long receiptId, @Param("variantId") Long variantId);
+
+    /**
+     * Giá trị tồn kho theo lô cho tất cả variants:
+     * [variantId, SUM(remainingQty * costPrice)]
+     */
+    @Query("""
+            SELECT b.variant.id, SUM(b.remainingQty * b.costPrice)
+            FROM ProductBatch b
+            WHERE b.variant IS NOT NULL
+              AND b.remainingQty > 0
+            GROUP BY b.variant.id
+            """)
+    List<Object[]> sumBatchValueByVariant();
 }

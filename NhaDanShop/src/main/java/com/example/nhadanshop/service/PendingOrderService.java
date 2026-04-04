@@ -25,6 +25,7 @@ public class PendingOrderService {
     private final ProductRepository productRepo;
     private final UserRepository userRepo;
     private final InvoiceService invoiceService;
+    private final ProductVariantService variantService; // Sprint 0
 
     // ── Order number generator (format: ORD-YYYYMMDD-XXXXX) ──────────────────
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -65,20 +66,23 @@ public class PendingOrderService {
                 throw new IllegalArgumentException(
                         "Sản phẩm '" + product.getName() + "' đã ngừng kinh doanh");
             }
-            // Kiểm tra tồn kho tại thời điểm đặt hàng
-            if (product.getStockQty() < itemReq.quantity()) {
+            // [Sprint 0] Resolve variant — null → default variant
+            var variant = variantService.resolveVariant(itemReq.variantId(), product.getId());
+            // Kiểm tra tồn kho theo variant
+            if (variant.getStockQty() < itemReq.quantity()) {
                 throw new IllegalArgumentException(
-                        "Sản phẩm '" + product.getName() + "' không đủ hàng. " +
-                        "Tồn kho: " + product.getStockQty() + ", yêu cầu: " + itemReq.quantity());
+                        "Sản phẩm '" + product.getName() + "' [" + variant.getVariantCode() + "] không đủ hàng. " +
+                        "Tồn kho: " + variant.getStockQty() + ", yêu cầu: " + itemReq.quantity());
             }
 
             PendingOrderItem item = new PendingOrderItem();
             item.setPendingOrder(order);
             item.setProduct(product);
+            item.setVariant(variant); // [Sprint 0]
             item.setQuantity(itemReq.quantity());
-            item.setUnitPrice(product.getSellPrice());
+            item.setUnitPrice(variant.getSellPrice());
 
-            total = total.add(product.getSellPrice()
+            total = total.add(variant.getSellPrice()
                     .multiply(BigDecimal.valueOf(itemReq.quantity())));
             order.getItems().add(item);
         }
@@ -117,9 +121,13 @@ public class PendingOrderService {
         SalesInvoiceRequest invoiceReq = new SalesInvoiceRequest(
                 order.getCustomerName(),
                 "[" + order.getPaymentMethod() + "] " + (order.getNote() != null ? order.getNote() : ""),
-                null, // promotionId — pending orders không áp dụng KM tự động
+                null,
                 order.getItems().stream()
-                        .map(i -> new InvoiceItemRequest(i.getProduct().getId(), i.getQuantity(), null))
+                        .map(i -> new InvoiceItemRequest(
+                                i.getProduct().getId(),
+                                i.getQuantity(),
+                                null,
+                                i.getVariant() != null ? i.getVariant().getId() : null)) // [Sprint 0]
                         .toList()
         );
         SalesInvoiceResponse invoice = invoiceService.createInvoice(invoiceReq);
@@ -173,15 +181,24 @@ public class PendingOrderService {
     // ── Mapper ───────────────────────────────────────────────────────────────
     private PendingOrderResponse toResponse(PendingOrder order) {
         List<PendingOrderItemResponse> items = order.getItems().stream()
-                .map(i -> new PendingOrderItemResponse(
-                        i.getProduct().getId(),
-                        i.getProduct().getName(),
-                        i.getProduct().getSellUnit() != null
-                                ? i.getProduct().getSellUnit() : i.getProduct().getUnit(),
-                        i.getQuantity(),
-                        i.getUnitPrice(),
-                        i.getUnitPrice().multiply(BigDecimal.valueOf(i.getQuantity()))
-                )).toList();
+                .map(i -> {
+                    var v = i.getVariant();
+                    String unit = v != null ? v.getSellUnit()
+                            : (i.getProduct().getSellUnit() != null
+                                ? i.getProduct().getSellUnit() : i.getProduct().getUnit());
+                    return new PendingOrderItemResponse(
+                            i.getProduct().getId(),
+                            i.getProduct().getName(),
+                            unit,
+                            i.getQuantity(),
+                            i.getUnitPrice(),
+                            i.getUnitPrice().multiply(BigDecimal.valueOf(i.getQuantity())),
+                            v != null ? v.getId()          : null,
+                            v != null ? v.getVariantCode() : i.getProduct().getCode(),
+                            v != null ? v.getVariantName() : i.getProduct().getName(),
+                            v != null ? v.getSellUnit()    : null
+                    );
+                }).toList();
 
         return new PendingOrderResponse(
                 order.getId(),

@@ -34,6 +34,8 @@ public class ProductService {
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
     private final PendingOrderRepository pendingOrderRepository;
+    @org.springframework.context.annotation.Lazy
+    private final ProductVariantService variantService; // Sprint 0 — @Lazy tránh circular dep
 
     /** Build map productId → pending reserved qty (chỉ PENDING còn hạn) */
     private Map<Long, Integer> buildPendingMap() {
@@ -109,7 +111,8 @@ public class ProductService {
                 "Sản phẩm '" + req.name().trim() + "' đã tồn tại trong danh mục '" + category.getName() + "'");
         }
 
-        String code = resolveCode(req.code(), category);
+        // Code bắt buộc nhập — không auto generate
+        String code = req.code().trim().toUpperCase();
 
         if (productRepository.existsByCode(code)) {
             throw new IllegalStateException("Mã sản phẩm '" + code + "' đã tồn tại");
@@ -136,7 +139,15 @@ public class ProductService {
         p.setCreatedAt(LocalDateTime.now());
         p.setUpdatedAt(LocalDateTime.now());
 
-        return DtoMapper.toResponse(productRepository.save(p));
+        // saveAndFlush: đảm bảo Hibernate flush + assign đúng ID trước khi tạo variant
+        Product saved = productRepository.saveAndFlush(p);
+
+        // [Sprint 0] Tự tạo default variant cho SP mới (chỉ SINGLE)
+        if (!saved.isCombo()) {
+            variantService.createDefaultVariantFromProduct(saved);
+        }
+
+        return DtoMapper.toResponse(saved);
     }
 
     @Transactional
@@ -199,7 +210,14 @@ public class ProductService {
                     continue;
                 }
 
-                String code = resolveCode(req.code(), category);
+                String code = (req.code() != null && !req.code().isBlank())
+                        ? req.code().trim().toUpperCase()
+                        : null;
+
+                if (code == null || code.isBlank()) {
+                    errors.add((req.name()) + " - mã sản phẩm (code) không được để trống");
+                    continue;
+                }
 
                 if (productRepository.existsByCode(code)) {
                     skipped.add(code + " (" + req.name() + ") - mã đã tồn tại");

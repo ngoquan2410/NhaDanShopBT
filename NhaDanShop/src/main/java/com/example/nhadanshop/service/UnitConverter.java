@@ -1,80 +1,101 @@
 package com.example.nhadanshop.service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Set;
 
 /**
- * Quy tắc quy đổi đơn vị nhập → đơn vị bán lẻ (bịch).
+ * Quy tắc quy đổi đơn vị nhập → đơn vị bán lẻ.
  *
- * ======= QUY ƯỚC KINH DOANH =======
- * ATOMIC (đơn vị cuối, không chia):
- *   "bịch" (bich)  → 1 bịch nhập = 1 bịch bán
- *   "hộp"  (hop)   → 1 hộp nhập  = 1 hộp bán  (hộp = đơn vị đóng gói cuối)
- *   "chai"         → 1 chai nhập = 1 chai bán
+ * ======= THIẾT KẾ MỚI (sau Bước 1 + Bước 2) =======
  *
- * GỘP (cần chia ra bịch):
- *   "kg"           → 1 kg  = 10 bịch (piecesPerImportUnit = 10)
- *   "xâu" (xau)   → 1 xâu = 5-7 bịch (piecesPerImportUnit = 5..7)
- *   "5 xâu"       → nhập theo cụm xâu, piecesPerImportUnit xác định số bịch
+ * Trước đây: ATOMIC được hardcode = {"bịch","hộp","chai"}
+ *   → Không linh hoạt, không mở rộng được
  *
- * Lưu ý: "hộp" ở đây là hộp đóng gói BÁN, không phải thùng hàng.
- * Mỗi hộp = 1 đơn vị bán, không chia nhỏ hơn.
- * ===================================
+ * Bây giờ: ATOMIC = pieces_per_unit <= 1
+ *   → Bất kỳ đơn vị nào có pieces=1 đều là ATOMIC
+ *   → Không phụ thuộc tên đơn vị
+ *   → VD: "gói"(1), "hũ"(1), "lon"(1) đều ATOMIC dù không trong set cũ
+ *   → VD: "thùng"(24), "kg"(10), "xâu"(7) đều GOP
+ *
+ * Source of truth:
+ *   - pieces đến từ inventory_receipt_items.pieces_used (snapshot bất biến)
+ *   - KHÔNG dùng product.pieces_per_import_unit trực tiếp nữa
+ *
+ * ===================================================
  */
 public final class UnitConverter {
 
     private UnitConverter() {}
 
-    /**
-     * Danh sách đơn vị ATOMIC — không thể chia nhỏ hơn.
-     * 1 đơn vị nhập = 1 đơn vị bán lẻ.
-     */
-    private static final Set<String> ATOMIC_UNITS = Set.of(
-            "bich", "bịch",   // bịch lẻ
-            "hop",  "hộp",    // hộp đóng gói
-            "chai"            // chai
+    // Giữ lại set cũ để tương thích ngược với code legacy chưa migration
+    @Deprecated
+    private static final Set<String> LEGACY_ATOMIC_UNITS = Set.of(
+            "bich", "bịch", "hop", "hộp", "chai",
+            "goi", "gói", "hu", "hũ", "lon", "lọn", "tui", "túi"
     );
 
     /**
-     * Kiểm tra importUnit có phải đơn vị cuối cùng (atomic) không.
+     * [MỚI - Bước 1] Tính retail qty dùng pieces snapshot.
+     * pieces <= 1 = ATOMIC, pieces > 1 = GOP.
+     *
+     * @param pieces    snapshot pieces_used từ receipt_item (hoặc gợi ý từ product_import_units)
+     * @param importQty số lượng nhập theo ĐV nhập
+     * @return số ĐV bán lẻ thực tế
      */
+    public static int toRetailQty(int pieces, int importQty) {
+        return (pieces <= 1) ? importQty : importQty * pieces;
+    }
+
+    /**
+     * [MỚI - Bước 1] Tính giá vốn / 1 ĐV bán lẻ từ giá nhập.
+     * ATOMIC: costPerRetail = unitCost (không chia)
+     * GOP:    costPerRetail = unitCost / pieces
+     *
+     * @param unitCost  giá nhập / 1 ĐV nhập
+     * @param pieces    snapshot pieces_used
+     * @return giá vốn / 1 ĐV bán lẻ
+     */
+    public static BigDecimal costPerRetailUnit(BigDecimal unitCost, int pieces) {
+        if (pieces <= 1) return unitCost;
+        return unitCost.divide(BigDecimal.valueOf(pieces), 4, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * [LEGACY - Tương thích ngược] Dùng importUnit string + pieces.
+     * Fallback về set cũ nếu pieces null/0.
+     *
+     * @deprecated Dùng {@link #toRetailQty(int, int)} với pieces từ snapshot thay thế.
+     */
+    @Deprecated
+    public static int toRetailQty(String importUnit, Integer piecesPerImportUnit, int importQty) {
+        int pieces = effectivePieces(importUnit, piecesPerImportUnit);
+        return toRetailQty(pieces, importQty);
+    }
+
+    /**
+     * [LEGACY - Tương thích ngược] Kiểm tra ATOMIC theo tên ĐV (fallback).
+     * Ưu tiên pieces=1. Nếu pieces null → check tên trong legacy set.
+     *
+     * @deprecated Dùng pieces <= 1 trực tiếp thay thế.
+     */
+    @Deprecated
     public static boolean isAtomicUnit(String importUnit) {
         if (importUnit == null || importUnit.isBlank()) return false;
-        return ATOMIC_UNITS.contains(importUnit.trim().toLowerCase());
+        return LEGACY_ATOMIC_UNITS.contains(importUnit.trim().toLowerCase());
     }
 
     /**
-     * Tính số đơn vị bán lẻ từ số lượng nhập.
+     * [LEGACY - Tương thích ngược] Tính effective pieces từ importUnit + piecesPerImportUnit.
+     * Nếu importUnit là ATOMIC (legacy set) → trả về 1 bất kể pieces.
      *
-     * @param importUnit          đơn vị nhập (kg, xâu, bịch, hộp, chai...)
-     * @param piecesPerImportUnit số bịch quy đổi từ 1 đơn vị nhập (chỉ dùng khi không atomic)
-     * @param importQty           số lượng nhập (theo importUnit)
-     * @return số đơn vị bán lẻ thực tế
-     *
-     * Ví dụ:
-     *   toRetailQty("bich", 1,  10) = 10   (10 bịch nhập = 10 bịch bán)
-     *   toRetailQty("hop",  2,  5)  = 5    (5 hộp nhập = 5 hộp bán, BỎ QUA pieces=2)
-     *   toRetailQty("chai", 1,  10) = 10   (10 chai nhập = 10 chai bán)
-     *   toRetailQty("kg",   10, 1)  = 10   (1 kg nhập = 10 bịch bán)
-     *   toRetailQty("xau",  7,  2)  = 14   (2 xâu nhập = 14 bịch bán)
+     * @deprecated Dùng pieces từ snapshot (ProductImportUnit.piecesPerUnit) thay thế.
      */
-    public static int toRetailQty(String importUnit, Integer piecesPerImportUnit, int importQty) {
-        if (isAtomicUnit(importUnit)) {
-            // Đơn vị cuối: 1 bịch/hộp/chai nhập = 1 đơn vị bán, không nhân
-            return importQty;
-        }
-        // Đơn vị gộp (kg, xâu...): nhân theo quy đổi
-        int pieces = (piecesPerImportUnit != null && piecesPerImportUnit > 1)
-                ? piecesPerImportUnit : 1;
-        return importQty * pieces;
-    }
-
-    /**
-     * Lấy effective pieces (dùng trong tính toán report).
-     * Nếu importUnit là atomic → trả về 1.
-     */
+    @Deprecated
     public static int effectivePieces(String importUnit, Integer piecesPerImportUnit) {
-        if (isAtomicUnit(importUnit)) return 1;
-        return (piecesPerImportUnit != null && piecesPerImportUnit > 1)
-                ? piecesPerImportUnit : 1;
+        if (importUnit != null && LEGACY_ATOMIC_UNITS.contains(importUnit.trim().toLowerCase())) {
+            return 1;
+        }
+        return (piecesPerImportUnit != null && piecesPerImportUnit > 1) ? piecesPerImportUnit : 1;
     }
 }

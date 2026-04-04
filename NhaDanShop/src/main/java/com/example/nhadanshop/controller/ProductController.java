@@ -1,28 +1,16 @@
 package com.example.nhadanshop.controller;
 
-import com.example.nhadanshop.dto.ExcelImportResult;
-import com.example.nhadanshop.dto.StockCheckRequest;
-import com.example.nhadanshop.dto.StockCheckResponse;
-import com.example.nhadanshop.dto.ExpiryWarningResponse;
-import com.example.nhadanshop.dto.ProductRequest;
-import com.example.nhadanshop.dto.ProductResponse;
+import com.example.nhadanshop.dto.*;
 import com.example.nhadanshop.entity.Category;
 import com.example.nhadanshop.repository.CategoryRepository;
-import com.example.nhadanshop.service.ExcelImportService;
-import com.example.nhadanshop.service.ExcelTemplateService;
-import com.example.nhadanshop.service.ExpiryWarningService;
-import com.example.nhadanshop.service.ProductService;
+import com.example.nhadanshop.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -39,6 +27,7 @@ public class ProductController {
     private final ExpiryWarningService expiryWarningService;
     private final CategoryRepository categoryRepository;
     private final ExcelTemplateService excelTemplateService;
+    private final ProductVariantService variantService; // Sprint 0
 
     @GetMapping
     public List<ProductResponse> all() {
@@ -158,4 +147,36 @@ public class ProductController {
     public List<ExpiryWarningResponse> expiredProducts() {
         return expiryWarningService.getExpiredProducts();
     }
+
+    // ── Variant endpoints (Sprint 0) ──────────────────────────────────────────
+
+    @GetMapping("/{id}/variants")
+    public List<ProductVariantResponse> getVariants(@PathVariable Long id) {
+        return variantService.getVariantsByProduct(id);
+    }
+
+    @PostMapping("/{id}/variants")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ProductVariantResponse createVariant(@PathVariable Long id,
+                                                @Valid @RequestBody ProductVariantRequest req) {
+        return variantService.createVariant(id, req);
+    }
+
+    @PutMapping("/{id}/variants/{vid}")
+    public ProductVariantResponse updateVariant(@PathVariable Long id, @PathVariable Long vid,
+                                                @Valid @RequestBody ProductVariantRequest req) {
+        return variantService.updateVariant(vid, req);
+    }
+
+    @DeleteMapping("/{id}/variants/{vid}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteVariant(@PathVariable Long id, @PathVariable Long vid) {
+        variantService.deleteVariant(vid);
+    }
+
+    @GetMapping("/low-stock-variants")
+    public List<ProductVariantResponse> getLowStockVariants() {
+        return variantService.getLowStockVariants();
+    }
 }
+

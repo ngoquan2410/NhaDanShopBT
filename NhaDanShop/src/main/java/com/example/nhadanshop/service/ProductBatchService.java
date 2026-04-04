@@ -96,13 +96,26 @@ public class ProductBatchService {
     @Transactional
     public BigDecimal deductStockFEFOAndComputeCost(Long productId, int qtyNeeded) {
         if (qtyNeeded <= 0) return BigDecimal.ZERO;
-
-        // PESSIMISTIC WRITE LOCK: DB khoá các row lại, request khác phải chờ
         List<ProductBatch> batches = batchRepo.findByProductIdForUpdateFEFO(productId);
+        return deductFromBatches(batches, qtyNeeded, "productId=" + productId);
+    }
 
+    /**
+     * [Sprint 0] FEFO theo variant_id — dùng khi có variant.
+     * Ưu tiên dùng overload này thay vì theo productId để đảm bảo
+     * đúng đơn vị bán lẻ (hủ vs gói không lẫn lộn).
+     */
+    @Transactional
+    public BigDecimal deductStockFEFOAndComputeCost(Long productId, Long variantId, int qtyNeeded) {
+        if (variantId == null) return deductStockFEFOAndComputeCost(productId, qtyNeeded);
+        if (qtyNeeded <= 0) return BigDecimal.ZERO;
+        List<ProductBatch> batches = batchRepo.findByVariantIdForUpdateFEFO(variantId);
+        return deductFromBatches(batches, qtyNeeded, "variantId=" + variantId);
+    }
+
+    private BigDecimal deductFromBatches(List<ProductBatch> batches, int qtyNeeded, String ctx) {
         BigDecimal totalCost = BigDecimal.ZERO;
         int remaining = qtyNeeded;
-
         for (ProductBatch batch : batches) {
             if (remaining <= 0) break;
             int deduct = Math.min(batch.getRemainingQty(), remaining);
@@ -110,48 +123,45 @@ public class ProductBatchService {
             batch.setRemainingQty(batch.getRemainingQty() - deduct);
             remaining -= deduct;
             batchRepo.save(batch);
-            log.debug("FEFO deduct+cost: batch={} productId={} deduct={} batchRemaining={} costPrice={}",
-                    batch.getBatchCode(), productId, deduct, batch.getRemainingQty(), batch.getCostPrice());
+            log.debug("FEFO deduct: batch={} {} deduct={} remaining={} cost={}",
+                    batch.getBatchCode(), ctx, deduct, batch.getRemainingQty(), batch.getCostPrice());
         }
-
-        if (remaining > 0) {
-            throw new IllegalStateException(
-                    "Lỗi đồng bộ lô hàng: productId=" + productId +
+        if (remaining > 0)
+            throw new IllegalStateException("Lỗi đồng bộ lô hàng: " + ctx +
                     " còn thiếu " + remaining + " đơn vị. Kiểm tra lại tồn kho.");
-        }
-
-        // Weighted average = tổng(qty × cost) / tổng qty deducted
         return totalCost.divide(BigDecimal.valueOf(qtyNeeded), 2, RoundingMode.HALF_UP);
     }
 
     /**
-     * Hoàn lại tồn kho khi hủy hóa đơn.
-     *
-     * FIX BUG #2 — Restore sai lô:
-     *   Code cũ hoàn vào lô XA NHẤT (reduce lấy phần tử cuối).
-     *   Nhưng FEFO bán từ lô GẦN NHẤT trước → phải hoàn về lô GẦN NHẤT.
-     *   Nếu hoàn sai lô, lần bán tiếp theo FEFO sẽ tính costSnapshot sai.
+     * Hoàn lại tồn kho khi hủy hóa đơn (theo productId — backward compat).
      */
     @Transactional
     public void restoreStockOnCancel(Long productId, int qty) {
-        List<ProductBatch> batches = batchRepo.findByProductIdOrderByExpiryDateAsc(productId);
+        restoreStockOnCancel(productId, null, qty);
+    }
+
+    /**
+     * [Sprint 0] Hoàn tồn kho theo variant_id.
+     * Ưu tiên dùng overload này khi có variantId.
+     */
+    @Transactional
+    public void restoreStockOnCancel(Long productId, Long variantId, int qty) {
+        List<ProductBatch> batches = variantId != null
+                ? batchRepo.findByVariantIdAndRemainingQtyGreaterThanOrderByExpiryDateAsc(variantId, -1)
+                : batchRepo.findByProductIdOrderByExpiryDateAsc(productId);
 
         if (batches.isEmpty()) {
-            log.warn("Không tìm thấy lô để hoàn hàng: productId={} qty={}", productId, qty);
+            log.warn("Không tìm thấy lô để hoàn hàng: productId={} variantId={} qty={}", productId, variantId, qty);
             return;
         }
-
-        // Hoàn về lô GẦN HẾT HẠN NHẤT (expiryDate ASC → phần tử đầu tiên)
-        // vì đó là lô FEFO đã bán trước → hoàn đúng lô
         ProductBatch target = batches.stream()
                 .filter(b -> !b.isExpired())
-                .findFirst()                          // ← lô gần nhất, KHÔNG phải xa nhất
-                .orElse(batches.get(0));              // fallback nếu tất cả đã expired
-
+                .findFirst()
+                .orElse(batches.get(0));
         target.setRemainingQty(target.getRemainingQty() + qty);
         batchRepo.save(target);
-        log.debug("Restore stock: batch={} productId={} qty=+{} newRemaining={}",
-                target.getBatchCode(), productId, qty, target.getRemainingQty());
+        log.debug("Restore stock: batch={} variantId={} qty=+{} newRemaining={}",
+                target.getBatchCode(), variantId, qty, target.getRemainingQty());
     }
 
     // ─── Mapper ───────────────────────────────────────────────────────────────

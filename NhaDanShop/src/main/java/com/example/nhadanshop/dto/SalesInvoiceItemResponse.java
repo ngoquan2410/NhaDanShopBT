@@ -14,5 +14,10 @@ public record SalesInvoiceItemResponse(
         BigDecimal unitPrice,           // giá thực tế sau CK dòng
         BigDecimal unitCostSnapshot,
         BigDecimal lineTotal,           // = unitPrice × quantity
-        BigDecimal profit               // = (unitPrice - costSnapshot) × quantity
+        BigDecimal profit,               // = (unitPrice - costSnapshot) × quantity
+        // Sprint 0 — variant fields
+        Long variantId,
+        String variantCode,
+        String variantName,
+        String sellUnit       // đơn vị bán lẻ của variant
 ) {}
