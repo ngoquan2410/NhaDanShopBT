@@ -75,12 +75,14 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
      * FEFO với PESSIMISTIC WRITE LOCK (SELECT ... FOR UPDATE).
      * Dùng khi deduct stock để tránh race condition.
      * Chỉ 1 transaction được đọc+sửa tại 1 thời điểm.
+     * ⚠️ Chỉ lấy batch CÒN HẠN (expiryDate > CURRENT_DATE) — không bán hàng hết hạn.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             SELECT b FROM ProductBatch b
             WHERE b.product.id = :productId
               AND b.remainingQty > 0
+              AND b.expiryDate > CURRENT_DATE
             ORDER BY b.expiryDate ASC
             """)
     List<ProductBatch> findByProductIdForUpdateFEFO(@Param("productId") Long productId);
@@ -106,12 +108,14 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
     /**
      * FEFO với PESSIMISTIC WRITE LOCK theo variant_id.
      * Ưu tiên dùng khi variant_id có giá trị.
+     * ⚠️ Chỉ lấy batch CÒN HẠN (expiryDate > CURRENT_DATE) — không bán hàng hết hạn.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             SELECT b FROM ProductBatch b
             WHERE b.variant.id = :variantId
               AND b.remainingQty > 0
+              AND b.expiryDate > CURRENT_DATE
             ORDER BY b.expiryDate ASC
             """)
     List<ProductBatch> findByVariantIdForUpdateFEFO(@Param("variantId") Long variantId);
@@ -137,4 +141,21 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             GROUP BY b.variant.id
             """)
     List<Object[]> sumBatchValueByVariant();
+
+    /**
+     * Giá vốn bình quân theo variant từ batch CÒN HÀNG VÀ CÒN HẠN:
+     * [variantId, avgCostPrice = SUM(remainingQty*costPrice)/SUM(remainingQty)]
+     * Dùng để tính closingValue = closingStock * avgCostPrice (phụ thuộc kỳ báo cáo).
+     * ⚠️ Chỉ tính batch chưa hết hạn — loại hàng hết hạn ra khỏi giá trị tồn kho.
+     */
+    @Query("""
+            SELECT b.variant.id,
+                   SUM(b.remainingQty * b.costPrice) / NULLIF(SUM(b.remainingQty), 0)
+            FROM ProductBatch b
+            WHERE b.variant IS NOT NULL
+              AND b.remainingQty > 0
+              AND b.expiryDate > CURRENT_DATE
+            GROUP BY b.variant.id
+            """)
+    List<Object[]> avgCostPriceByVariant();
 }

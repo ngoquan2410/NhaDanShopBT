@@ -1,4 +1,4 @@
-﻿﻿import { useState, useMemo, useCallback, useEffect } from 'react'
+﻿﻿﻿import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProducts } from '../../hooks/useProducts'
 import { useCategories } from '../../hooks/useCategories'
@@ -7,10 +7,108 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { invoiceService } from '../../services/invoiceService'
 import { promotionService } from '../../services/promotionService'
 import { productService } from '../../services/productService'
+import { comboService } from '../../services/comboService'
 import { pendingOrderService, ORDER_STATUS } from '../../services/pendingOrderService'
 import { usePendingOrderMutations, usePendingOrderById } from '../../hooks/usePendingOrders'
 import toast from 'react-hot-toast'
-// ProductCard — dùng product.availableQty (BE tính trừ pending) để hiển thị và giới hạn
+
+// ── ComboCard — Combo không cần chọn variant, hiển thị giá combo trực tiếp ───
+function ComboCard({ combo, onAddToCart }) {
+  const [qty, setQty] = useState(1)
+  const stockQty   = combo.stockQty ?? 0
+  const sellPrice  = Number(combo.sellPrice) || 0
+  const outOfStock = stockQty <= 0
+  const saving     = (Number(combo.totalComponentRetailPrice) || 0) - sellPrice
+
+  return (
+    <div className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-200 hover:-translate-y-1 overflow-hidden border border-purple-100 flex flex-col">
+      {/* Ảnh / placeholder */}
+      <div className="bg-gradient-to-br from-purple-50 to-purple-100 h-36 flex items-center justify-center overflow-hidden relative">
+        {combo.imageUrl
+          ? <img src={combo.imageUrl} alt={combo.name} className="w-full h-full object-cover"
+              onError={e => { e.target.style.display='none'; if(e.target.nextSibling) e.target.nextSibling.style.display='flex' }} />
+          : null}
+        <div className="absolute inset-0 flex flex-col items-center justify-center select-none"
+          style={{ display: combo.imageUrl ? 'none' : 'flex' }}>
+          <span className="text-4xl">📦</span>
+          <span className="text-xs text-purple-400 font-medium mt-1">COMBO</span>
+        </div>
+        {/* Badge tiết kiệm */}
+        {saving > 0 && (
+          <div className="absolute top-2 right-2 bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
+            -{Math.round(saving / (Number(combo.totalComponentRetailPrice)||1) * 100)}%
+          </div>
+        )}
+      </div>
+
+      <div className="p-3 flex flex-col flex-1">
+        <div className="flex items-center gap-1 mb-1">
+          <span className="font-mono text-xs text-purple-500">{combo.code}</span>
+          <span className="text-xs bg-purple-100 text-purple-600 px-1 rounded">COMBO</span>
+        </div>
+        <h3 className="font-semibold text-gray-800 text-sm leading-tight flex-1">{combo.name}</h3>
+        {combo.description && (
+          <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{combo.description}</p>
+        )}
+
+        {/* Thành phần pills */}
+        <div className="flex flex-wrap gap-1 mt-1.5 mb-2">
+          {(combo.items || []).slice(0, 3).map((it, i) => (
+            <span key={i} className="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-1.5 py-0.5 rounded-full">
+              {it.productCode} ×{it.quantity}
+            </span>
+          ))}
+          {(combo.items || []).length > 3 && (
+            <span className="text-xs text-gray-400">+{combo.items.length - 3}</span>
+          )}
+        </div>
+
+        {/* Tồn kho */}
+        <div className="mb-2">
+          {outOfStock
+            ? <span className="bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded-full">Hết hàng</span>
+            : stockQty <= 5
+              ? <span className="bg-orange-100 text-orange-700 text-xs px-1.5 py-0.5 rounded-full">Còn {stockQty} combo</span>
+              : <span className="text-xs text-gray-400">Còn {stockQty} combo</span>}
+        </div>
+
+        {/* Giá */}
+        <div className="flex items-end gap-2 mb-2">
+          <span className="text-base font-bold text-purple-700">{sellPrice.toLocaleString('vi-VN')} ₫</span>
+          {Number(combo.totalComponentRetailPrice) > sellPrice && (
+            <span className="text-xs text-gray-400 line-through">
+              {Number(combo.totalComponentRetailPrice).toLocaleString('vi-VN')} ₫
+            </span>
+          )}
+        </div>
+
+        {!outOfStock && (
+          <div className="flex items-center gap-1 mt-auto">
+            <div className="flex items-center border rounded-lg overflow-hidden flex-1">
+              <button onClick={() => setQty(q => Math.max(1, q - 1))}
+                className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-sm font-bold">-</button>
+              <span className="flex-1 text-center text-sm font-medium py-1">{qty}</span>
+              <button onClick={() => setQty(q => Math.min(stockQty, q + 1))}
+                className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-sm font-bold">+</button>
+            </div>
+            <button
+              onClick={() => { onAddToCart(combo, qty); setQty(1) }}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-2 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap">
+              Thêm
+            </button>
+          </div>
+        )}
+        {outOfStock && (
+          <button disabled className="mt-auto w-full bg-gray-200 text-gray-400 py-1.5 rounded-lg text-xs font-semibold cursor-not-allowed">
+            Hết hàng
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── ProductCard — SP đơn, giữ nguyên variant selector ────────────────────────
 function ProductCard({ product, onAddToCart }) {
   const [qty, setQty] = useState(1)
   // [Sprint 0] Variants support
@@ -23,13 +121,10 @@ function ProductCard({ product, onAddToCart }) {
     || variants.find(v => v.isDefault)
     || null
 
-  // Dùng variant data nếu có, fallback sang product
-  const sellPrice = selectedVariant ? Number(selectedVariant.sellPrice) : Number(product.sellPrice)
-  const sellUnit  = selectedVariant ? selectedVariant.sellUnit : (product.sellUnit || product.unit)
-  const available = selectedVariant
-    ? Math.max(0, selectedVariant.stockQty - (product.stockQty - (selectedVariant.stockQty || 0)))
-    : (product.availableQty ?? product.stockQty)
-  const stockQty  = selectedVariant ? selectedVariant.stockQty : (product.availableQty ?? product.stockQty)
+  // Dùng variant data — product không còn sellPrice/stockQty
+  const sellPrice = selectedVariant ? Number(selectedVariant.sellPrice) : 0
+  const sellUnit  = selectedVariant ? selectedVariant.sellUnit : 'cai'
+  const stockQty  = selectedVariant ? selectedVariant.stockQty : 0
   const outOfStock = stockQty <= 0
 
   return (
@@ -113,7 +208,7 @@ function ProductCard({ product, onAddToCart }) {
 }
 // CartDrawer
 function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout }) {
-  const total = cart.reduce((s, i) => s + (i.sellPrice ?? i.product.sellPrice) * i.qty, 0)
+  const total = cart.reduce((s, i) => s + (i.sellPrice ?? 0) * i.qty, 0)
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="flex-1 bg-black/40" onClick={onClose} />
@@ -130,21 +225,26 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout }) {
             </div>
           )}
           {cart.map(item => {
-            const price = item.sellPrice ?? Number(item.product.sellPrice)
-            const unit  = item.sellUnit ?? item.product.sellUnit ?? item.product.unit
-            const displayName = item.variant
-              ? `${item.product.name} (${item.variant.variantName})`
-              : item.product.name
+            const price = item.sellPrice ?? 0
+            const unit  = item.sellUnit ?? 'cai'
+            const displayName = item.isCombo
+              ? item.product.name
+              : item.variant
+                ? `${item.product.name} (${item.variant.variantName})`
+                : item.product.name
             return (
-              <div key={item.cartKey} className="flex items-center gap-3 bg-amber-50 rounded-xl p-3">
-                <div className="w-12 h-12 rounded-lg flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden bg-amber-100">
+              <div key={item.cartKey} className={`flex items-center gap-3 rounded-xl p-3 ${item.isCombo ? 'bg-purple-50' : 'bg-amber-50'}`}>
+                <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden ${item.isCombo ? 'bg-purple-100' : 'bg-amber-100'}`}>
                   {item.product.imageUrl
                     ? <img src={item.product.imageUrl} alt={item.product.name} className="w-full h-full object-cover" onError={e=>{e.target.style.display='none'}} />
-                    : '🛍'}
+                    : item.isCombo ? '📦' : '🛍'}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">{displayName}</p>
-                  <p className="text-xs text-amber-700 font-semibold">
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {item.isCombo && <span className="text-xs bg-purple-200 text-purple-700 px-1 rounded font-medium">COMBO</span>}
+                    <p className="text-sm font-medium text-gray-800 truncate">{displayName}</p>
+                  </div>
+                  <p className={`text-xs font-semibold ${item.isCombo ? 'text-purple-700' : 'text-amber-700'}`}>
                     {price.toLocaleString('vi-VN')} ₫ / {unit}
                   </p>
                 </div>
@@ -302,7 +402,7 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
     staleTime: 60_000,
   })
 
-  const total = cart.reduce((s, i) => s + (i.sellPrice ?? Number(i.product.sellPrice)) * i.qty, 0)
+  const total = cart.reduce((s, i) => s + (i.sellPrice ?? 0) * i.qty, 0)
 
   // Preview discount
   const selectedPromo = activePromos.find(p => String(p.id) === String(selectedPromoId))
@@ -359,12 +459,11 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
       note: [note, `[${method?.label}]`].filter(Boolean).join(' | '),
       paymentMethod,
       promotionId: selectedPromoId ? Number(selectedPromoId) : null,
-      // [Sprint 0] Gửi variantId cho mỗi item
-      items: cart.map(i => ({
-        productId: i.product.id,
-        quantity: i.qty,
-        variantId: i.variant?.id || null,
-      })),
+      // [Sprint 0 + Combo] Mỗi item: nếu là combo dùng comboId, SP đơn dùng productId + variantId
+      items: cart.map(i => i.isCombo
+        ? { productId: i.comboId, quantity: i.qty, variantId: null, comboId: i.comboId }
+        : { productId: i.product.id, quantity: i.qty, variantId: i.variant?.id || null, comboId: null }
+      ),
     }
 
     if (paymentMethod === 'cash') {
@@ -503,13 +602,15 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
           <div className="bg-gray-50 rounded-xl p-3 space-y-2">
             <p className="text-sm font-semibold text-gray-700 mb-2">Sản phẩm đặt:</p>
             {cart.map(i => {
-              const price = i.sellPrice ?? Number(i.product.sellPrice)
-              const name = i.variant
-                ? `${i.product.name} (${i.variant.variantName})`
-                : i.product.name
+              const price = i.sellPrice ?? 0
+              const name = i.isCombo
+                ? `[COMBO] ${i.product.name}`
+                : i.variant
+                  ? `${i.product.name} (${i.variant.variantName})`
+                  : i.product.name
               return (
                 <div key={i.cartKey} className="flex justify-between text-sm text-gray-600">
-                  <span className="truncate flex-1">{name} x {i.qty}</span>
+                  <span className="truncate flex-1">{name} × {i.qty}</span>
                   <span className="font-medium ml-2 whitespace-nowrap">
                     {(price * i.qty).toLocaleString('vi-VN')} ₫
                   </span>
@@ -607,23 +708,28 @@ function OrderSuccessModal({ invoice, onClose }) {
 export default function StorefrontPage() {
   const { data: products = [], isLoading } = useProducts()
   const { data: categories = [] } = useCategories()
+  const { data: combos = [] } = useQuery({
+    queryKey: ['combos-active'],
+    queryFn:  comboService.getActive,
+    staleTime: 60_000,
+  })
   const [selectedCat, setSelectedCat] = useState('all')
   const [search, setSearch] = useState('')
-  const [tab, setTab] = useState('all')
+  const [tab, setTab] = useState('all')  // 'all' | 'hot' | 'combo'
   const [cart, setCart] = useState([])
   const [showCart, setShowCart] = useState(false)
   const [showCheckout, setShowCheckout] = useState(false)
-  const [pendingOrderId, setPendingOrderId] = useState(null)  // đang chờ admin xác nhận
-  const [successInvoice, setSuccessInvoice] = useState(null)  // hóa đơn đã được tạo
+  const [pendingOrderId, setPendingOrderId] = useState(null)
+  const [successInvoice, setSuccessInvoice] = useState(null)
   const cartCount = cart.reduce((s, i) => s + i.qty, 0)
 
+  // Thêm SP đơn vào giỏ (giữ nguyên)
   const addToCart = useCallback((product, qty, effectiveQty, selectedVariant) => {
-    // [Sprint 0] key = productId + variantId để phân biệt các variant khác nhau
     const variantId = selectedVariant?.id || null
     const cartKey = variantId ? `${product.id}-${variantId}` : String(product.id)
-    const available = effectiveQty ?? selectedVariant?.stockQty ?? product.availableQty ?? product.stockQty
-    const sellPrice = selectedVariant ? Number(selectedVariant.sellPrice) : Number(product.sellPrice)
-    const sellUnit  = selectedVariant?.sellUnit || product.sellUnit || product.unit
+    const available = effectiveQty ?? selectedVariant?.stockQty ?? 0
+    const sellPrice = selectedVariant ? Number(selectedVariant.sellPrice) : 0
+    const sellUnit  = selectedVariant?.sellUnit || 'cai'
 
     setCart(prev => {
       const existing = prev.find(i => i.cartKey === cartKey)
@@ -638,7 +744,39 @@ export default function StorefrontPage() {
         return prev.map(i => i.cartKey === cartKey ? { ...i, qty: i.qty + qty } : i)
       }
       toast.success('Đã thêm ' + label + ' vào giỏ')
-      return [...prev, { cartKey, product, variant: selectedVariant, qty, sellPrice, sellUnit }]
+      return [...prev, { cartKey, product, variant: selectedVariant, qty, sellPrice, sellUnit, isCombo: false }]
+    })
+  }, [])
+
+  // Thêm COMBO vào giỏ — không cần variant, dùng comboId
+  const addComboToCart = useCallback((combo, qty) => {
+    const cartKey = `combo-${combo.id}`
+    const available = combo.stockQty ?? 0
+    const sellPrice = Number(combo.sellPrice) || 0
+
+    setCart(prev => {
+      const existing = prev.find(i => i.cartKey === cartKey)
+      const currentInCart = existing?.qty || 0
+      if (currentInCart + qty > available) {
+        toast.error(`Chỉ còn ${available} combo có thể đặt!`)
+        return prev
+      }
+      if (existing) {
+        toast.success('Đã thêm ' + combo.name)
+        return prev.map(i => i.cartKey === cartKey ? { ...i, qty: i.qty + qty } : i)
+      }
+      toast.success('Đã thêm ' + combo.name + ' vào giỏ')
+      return [...prev, {
+        cartKey,
+        product: { id: combo.id, name: combo.name, code: combo.code, imageUrl: combo.imageUrl },
+        combo,        // lưu toàn bộ combo object
+        variant: null,
+        qty,
+        sellPrice,
+        sellUnit: 'combo',
+        isCombo: true,
+        comboId: combo.id,
+      }]
     })
   }, [])
 
@@ -651,33 +789,26 @@ export default function StorefrontPage() {
     setCart(prev => prev.filter(i => i.cartKey !== cartKey))
   }, [])
 
-  // Tiền mặt → invoice tạo ngay
   const handleCashSuccess = (invoice) => {
-    setCart([])
-    setShowCheckout(false)
-    setShowCart(false)
-    setSuccessInvoice(invoice)
+    setCart([]); setShowCheckout(false); setShowCart(false); setSuccessInvoice(invoice)
   }
-
-  // Online → pending order được tạo, chờ admin xác nhận
   const handlePendingCreated = (pending) => {
-    setCart([])
-    setShowCheckout(false)
-    setShowCart(false)
-    setPendingOrderId(pending.id)
+    setCart([]); setShowCheckout(false); setShowCart(false); setPendingOrderId(pending.id)
   }
-
-  // Admin đã xác nhận → invoice được tạo, hiển thị thành công
   const handlePendingConfirmed = (invoice) => {
-    setPendingOrderId(null)
-    setSuccessInvoice(invoice)
+    setPendingOrderId(null); setSuccessInvoice(invoice)
   }
 
-  const activeProducts = useMemo(() => products.filter(p => p.active), [products])
-  const hotProducts = useMemo(() =>
-    [...activeProducts].filter(p => p.stockQty > 0).sort((a, b) => b.stockQty - a.stockQty).slice(0, 12),
+  const activeProducts = useMemo(() => products.filter(p => p.active && p.productType !== 'COMBO'), [products])
+  const hotProducts    = useMemo(() =>
+    [...activeProducts].filter(p => (p.variants?.find(v=>v.isDefault)?.stockQty ?? 0) > 0)
+      .sort((a,b) => (b.variants?.find(v=>v.isDefault)?.stockQty??0) - (a.variants?.find(v=>v.isDefault)?.stockQty??0))
+      .slice(0,12),
     [activeProducts])
+  const activeCombos = useMemo(() => combos.filter(c => c.active && c.stockQty > 0), [combos])
+
   const filteredProducts = useMemo(() => {
+    if (tab === 'combo') return []  // combo tab dùng filteredCombos riêng
     let list = tab === 'hot' ? hotProducts : activeProducts
     if (selectedCat !== 'all') list = list.filter(p => String(p.categoryId) === selectedCat)
     if (search.trim()) {
@@ -689,72 +820,122 @@ export default function StorefrontPage() {
     }
     return list
   }, [activeProducts, hotProducts, selectedCat, search, tab])
+
+  const filteredCombos = useMemo(() => {
+    if (!search.trim()) return activeCombos
+    const s = search.toLowerCase()
+    return activeCombos.filter(c =>
+      c.name.toLowerCase().includes(s) ||
+      c.code.toLowerCase().includes(s) ||
+      (c.description || '').toLowerCase().includes(s))
+  }, [activeCombos, search])
+
   return (
     <div className="space-y-6">
       {/* Hero */}
       <div className="rounded-2xl p-8 text-white" style={{background:'linear-gradient(135deg,#92400e 0%,#b45309 60%,#d97706 100%)'}}>
-        <h1 className="text-3xl font-bold mb-2">{"Nh\u00E3 \u0110an Shop"}</h1>
-        <p className="text-amber-100 text-lg">{"H\u00E0ng t\u01B0\u01A1i ngon \u2013 Gi\u00E1 c\u1EA3 h\u1EE3p l\u00FD \u2013 Ph\u1EE5c v\u1EE5 t\u1EADn t\u00E2m"}</p>
+        <h1 className="text-3xl font-bold mb-2">Nhã Đan Shop</h1>
+        <p className="text-amber-100 text-lg">Hàng tươi ngon – Giá cả hợp lý – Phục vụ tận tâm</p>
         <div className="mt-4 relative max-w-md">
           <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder={"T\u00ECm ki\u1EBFm s\u1EA3n ph\u1EA9m..."}
+            placeholder="Tìm kiếm sản phẩm, combo..."
             className="w-full rounded-xl px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-300 pr-10" />
-          <span className="absolute right-3 top-3 text-gray-400">{'\uD83D\uDD0D'}</span>
+          <span className="absolute right-3 top-3 text-gray-400">🔍</span>
         </div>
       </div>
+
       {/* Tabs */}
       <div className="flex gap-3">
-        <button onClick={() => setTab('all')}
-          className={`px-5 py-2.5 rounded-xl font-semibold text-sm transition ${tab === 'all' ? 'text-white shadow-md' : 'bg-white text-gray-600 border hover:bg-amber-50'}`}
-          style={tab === 'all' ? {background:'#b45309'} : {}}>
-          {"T\u1EA5t c\u1EA3 s\u1EA3n ph\u1EA9m"}
-        </button>
-        <button onClick={() => setTab('hot')}
-          className={`px-5 py-2.5 rounded-xl font-semibold text-sm transition ${tab === 'hot' ? 'bg-orange-500 text-white shadow-md' : 'bg-white text-gray-600 border hover:bg-gray-50'}`}>
-          {"B\u00E1n ch\u1EA1y nh\u1EA5t"}
-        </button>
-      </div>
-      {/* Category filter */}
-      <div className="flex flex-wrap gap-2">
-        <button onClick={() => setSelectedCat('all')}
-          className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${selectedCat === 'all' ? 'text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}
-          style={selectedCat === 'all' ? {background:'#b45309'} : {}}>
-          {"T\u1EA5t c\u1EA3"}
-        </button>
-        {categories.filter(c => c.active).map(cat => (
-          <button key={cat.id} onClick={() => setSelectedCat(String(cat.id))}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${selectedCat === String(cat.id) ? 'text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}
-            style={selectedCat === String(cat.id) ? {background:'#b45309'} : {}}>
-            {cat.name}
+        {[
+          { key: 'all',   label: 'Tất cả sản phẩm',   active: tab==='all'  },
+          { key: 'hot',   label: '🔥 Bán chạy nhất',   active: tab==='hot'  },
+          { key: 'combo', label: `📦 Combo (${activeCombos.length})`, active: tab==='combo' },
+        ].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            className={`px-5 py-2.5 rounded-xl font-semibold text-sm transition ${t.active ? 'text-white shadow-md' : 'bg-white text-gray-600 border hover:bg-amber-50'}`}
+            style={t.active ? {background: t.key==='combo' ? '#7c3aed' : '#b45309'} : {}}>
+            {t.label}
           </button>
         ))}
       </div>
-      <p className="text-sm text-gray-500">
-        {"Hi\u1EC3n th\u1ECB"} <span className="font-semibold text-gray-700">{filteredProducts.length}</span> {"s\u1EA3n ph\u1EA9m"}
-      </p>
-      {/* Products grid */}
-      {isLoading ? (
-        <div className="text-center py-20 text-gray-400 text-lg">{"Ang t\u1EA3i s\u1EA3n ph\u1EA9m..."}</div>
-      ) : filteredProducts.length === 0 ? (
-        <div className="text-center py-20 text-gray-400">
-          <div className="text-5xl mb-4">{'\uD83D\uDD0D'}</div>
-          <p>{"Kh\u00F4ng t\u00ECm th\u1EA5y s\u1EA3n ph\u1EA9m ph\u00F9 h\u1EE3p"}</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {filteredProducts.map(p => (
-            <ProductCard key={p.id} product={p} onAddToCart={addToCart} />
+
+      {/* Category filter — chỉ hiện khi không ở tab combo */}
+      {tab !== 'combo' && (
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setSelectedCat('all')}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${selectedCat==='all' ? 'text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}
+            style={selectedCat==='all' ? {background:'#b45309'} : {}}>
+            Tất cả
+          </button>
+          {categories.filter(c => c.active).map(cat => (
+            <button key={cat.id} onClick={() => setSelectedCat(String(cat.id))}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${selectedCat===String(cat.id) ? 'text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}
+              style={selectedCat===String(cat.id) ? {background:'#b45309'} : {}}>
+              {cat.name}
+            </button>
           ))}
         </div>
       )}
+
+      {/* ── Tab COMBO ── */}
+      {tab === 'combo' && (
+        <>
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 text-sm text-purple-800 flex items-start gap-3">
+            <span className="text-2xl shrink-0">📦</span>
+            <div>
+              <p className="font-semibold">Mua Combo — Tiết kiệm hơn mua lẻ!</p>
+              <p className="text-xs text-purple-600 mt-0.5">
+                Tồn kho combo tự động cập nhật theo từng thành phần. Thêm vào giỏ và thanh toán bình thường.
+              </p>
+            </div>
+          </div>
+          <p className="text-sm text-gray-500">
+            Hiển thị <span className="font-semibold text-gray-700">{filteredCombos.length}</span> combo đang có hàng
+          </p>
+          {filteredCombos.length === 0
+            ? <div className="text-center py-20 text-gray-400">
+                <div className="text-5xl mb-3">📦</div>
+                <p>Hiện chưa có combo nào đang bán</p>
+              </div>
+            : <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                {filteredCombos.map(combo => (
+                  <ComboCard key={combo.id} combo={combo} onAddToCart={addComboToCart} />
+                ))}
+              </div>
+          }
+        </>
+      )}
+
+      {/* ── Tab SP đơn ── */}
+      {tab !== 'combo' && (
+        <>
+          <p className="text-sm text-gray-500">
+            Hiển thị <span className="font-semibold text-gray-700">{filteredProducts.length}</span> sản phẩm
+          </p>
+          {isLoading
+            ? <div className="text-center py-20 text-gray-400 text-lg">Đang tải sản phẩm...</div>
+            : filteredProducts.length === 0
+              ? <div className="text-center py-20 text-gray-400">
+                  <div className="text-5xl mb-4">🔍</div>
+                  <p>Không tìm thấy sản phẩm phù hợp</p>
+                </div>
+              : <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                  {filteredProducts.map(p => (
+                    <ProductCard key={p.id} product={p} onAddToCart={addToCart} />
+                  ))}
+                </div>
+          }
+        </>
+      )}
+
       {/* Floating Cart */}
       {cartCount > 0 && (
         <button onClick={() => setShowCart(true)}
           className="fixed bottom-6 right-6 text-white rounded-full shadow-2xl p-4 flex items-center gap-2 z-40 transition-all hover:scale-105"
           style={{background:'#b45309'}}>
-          <span className="text-xl">{'\uD83D\uDED2'}</span>
+          <span className="text-xl">🛒</span>
           <span className="font-bold">{cartCount}</span>
-          <span className="text-sm hidden sm:inline">{"gi\u1ECF h\u00E0ng"}</span>
+          <span className="text-sm hidden sm:inline">giỏ hàng</span>
         </button>
       )}
       {showCart && (
@@ -770,7 +951,6 @@ export default function StorefrontPage() {
           onPendingCreated={handlePendingCreated}
         />
       )}
-      {/* Đơn online đang chờ admin xác nhận */}
       {pendingOrderId && (
         <PendingOrderStatusModal
           pendingOrderId={pendingOrderId}
@@ -778,7 +958,6 @@ export default function StorefrontPage() {
           onConfirmed={handlePendingConfirmed}
         />
       )}
-      {/* Hóa đơn đã hoàn tất (tiền mặt hoặc sau khi admin confirm online) */}
       {successInvoice && (
         <OrderSuccessModal invoice={successInvoice} onClose={() => setSuccessInvoice(null)} />
       )}

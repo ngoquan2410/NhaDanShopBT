@@ -21,8 +21,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     boolean existsByCode(String code);
     boolean existsByCodeAndIdNot(String code, Long id);
 
-    List<Product> findByActiveTrueAndExpiryDaysIsNotNull();
-
     Optional<Product> findByNameIgnoreCase(String name);
 
     boolean existsByNameIgnoreCaseAndCategoryId(String name, Long categoryId);

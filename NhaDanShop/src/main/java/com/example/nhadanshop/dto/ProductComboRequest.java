@@ -8,7 +8,7 @@ import java.util.List;
 public record ProductComboRequest(
         @Size(max = 50) String code,          // null → auto-generate
         @NotBlank @Size(max = 200) String name,
-        @Size(max = 20) String unit,
+        @Size(max = 1000) String description,
         @NotNull @DecimalMin("0") BigDecimal sellPrice,
         Boolean active,
         String imageUrl,

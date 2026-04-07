@@ -1,6 +1,5 @@
 package com.example.nhadanshop.dto;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -8,21 +7,11 @@ public record ProductResponse(
         Long id,
         String code,
         String name,
-        String unit,
-        BigDecimal costPrice,
-        BigDecimal sellPrice,
-        Integer stockQty,
-        Integer availableQty,
         Boolean active,
         Long categoryId,
         String categoryName,
-        Integer expiryDays,
-        String importUnit,
-        String sellUnit,
-        Integer piecesPerImportUnit,
-        String conversionNote,
-        String imageUrl,
         String productType,
+        String imageUrl,
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
 

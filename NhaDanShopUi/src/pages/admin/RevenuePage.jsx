@@ -379,7 +379,7 @@ export default function RevenuePage() {
                         <td className="px-3 py-2 font-mono text-blue-600">{p.productCode}</td>
                         <td className="px-3 py-2 font-medium">{p.productName}</td>
                         <td className="px-3 py-2 text-gray-500">{p.categoryName}</td>
-                        <td className="px-3 py-2 text-right">{fmt(p.totalQty)} {p.unit}</td>
+                        <td className="px-3 py-2 text-right">{fmt(p.totalQty)} {p.sellUnit}</td>
                         <td className="px-3 py-2 text-right font-semibold text-blue-700">{fmt(p.totalAmount)}</td>
                         <td className="px-3 py-2 text-right text-gray-500">
                           {grand > 0 ? ((Number(p.totalAmount) / grand) * 100).toFixed(1) + '%' : '0%'}

@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 @Entity
 @Table(
         name = "sales_invoice_items",
-        uniqueConstraints = @UniqueConstraint(name = "uq_invoice_variant", columnNames = {"invoice_id", "variant_id"})
+        indexes = @Index(name = "idx_sii_invoice_variant", columnList = "invoice_id, variant_id")
 )
 public class SalesInvoiceItem {
 
@@ -52,6 +52,21 @@ public class SalesInvoiceItem {
 
     @Column(name = "unit_cost_snapshot", nullable = false, precision = 18, scale = 2)
     private BigDecimal unitCostSnapshot = BigDecimal.ZERO;
+
+    /**
+     * ID của combo cha nếu item này được khai triển từ combo (KiotViet model).
+     * NULL = bán lẻ thông thường.
+     * NOT NULL = item này là thành phần được expand ra từ combo có ID này.
+     */
+    @Column(name = "combo_source_id")
+    private Long comboSourceId;
+
+    /**
+     * Giá bán của combo tại thời điểm giao dịch (snapshot).
+     * Chỉ có giá trị khi comboSourceId != null.
+     */
+    @Column(name = "combo_unit_price", precision = 18, scale = 2)
+    private BigDecimal comboUnitPrice;
 }
 
 

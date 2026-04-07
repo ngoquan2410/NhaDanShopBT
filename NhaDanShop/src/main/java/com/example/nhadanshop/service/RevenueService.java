@@ -94,7 +94,6 @@ public class RevenueService {
             Long totalQty       = r[5] != null ? ((Number) r[5]).longValue() : 0L;
             BigDecimal totalAmt = r[6] != null ? (BigDecimal) r[6] : BigDecimal.ZERO;
 
-            // Rows trống (API product không cần breakdown kỳ — chỉ 1 dòng tổng kỳ)
             List<RevenueRowDto> rows = List.of(
                     new RevenueRowDto(from.format(DAY_FMT) + " → " + to.format(DAY_FMT), totalAmt));
 
@@ -160,7 +159,7 @@ public class RevenueService {
             List<RevenueRowDto> rows = data.stream()
                     .map(p -> new RevenueRowDto(
                             "[" + p.productCode() + "] " + p.productName()
-                            + " (" + p.totalQty() + " " + p.unit() + ")",
+                            + " (" + p.totalQty() + " " + p.sellUnit() + ")",
                             p.totalAmount()))
                     .collect(Collectors.toList());
 

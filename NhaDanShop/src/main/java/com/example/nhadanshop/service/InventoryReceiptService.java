@@ -34,6 +34,7 @@ public class InventoryReceiptService {
     private final ProductImportUnitRepository importUnitRepo;
     private final ProductVariantService variantService; // Sprint 0
     private final ProductVariantRepository variantRepo;  // Sprint 0 — explicit save
+    private final ProductComboService comboService;      // Combo KiotViet — refresh virtual stock
 
     @Transactional
     public InventoryReceiptResponse createReceipt(InventoryReceiptRequest req) {
@@ -114,10 +115,11 @@ public class InventoryReceiptService {
                             ? itemReq.piecesOverride()
                             : piu.get().getPiecesPerUnit();
                 } else {
-                    // ĐV chưa đăng ký → dùng pieces từ request (hoặc fallback legacy)
+                    // ĐV chưa đăng ký → dùng pieces từ request hoặc fallback từ default variant
+                    ProductVariant dvFb = product.getDefaultVariant();
                     pieces = (itemReq.piecesOverride() != null && itemReq.piecesOverride() > 0)
                             ? itemReq.piecesOverride()
-                            : UnitConverter.effectivePieces(reqUnit, product.getPiecesPerImportUnit());
+                            : UnitConverter.effectivePieces(reqUnit, dvFb != null ? dvFb.getPiecesPerUnit() : null);
                 }
                 importUnitUsed = reqUnit;
             } else {
@@ -129,9 +131,10 @@ public class InventoryReceiptService {
                             : defaultPiu.get().getPiecesPerUnit();
                     importUnitUsed = defaultPiu.get().getImportUnit();
                 } else {
-                    // Fallback legacy
-                    pieces = UnitConverter.effectivePieces(product.getImportUnit(), product.getPiecesPerImportUnit());
-                    importUnitUsed = product.getImportUnit() != null ? product.getImportUnit() : "bich";
+                    // Fallback: đọc từ default variant
+                    ProductVariant dv = product.getDefaultVariant();
+                    pieces = dv != null ? UnitConverter.effectivePieces(dv.getImportUnit(), dv.getPiecesPerUnit()) : 1;
+                    importUnitUsed = dv != null && dv.getImportUnit() != null ? dv.getImportUnit() : "cai";
                 }
             }
 
@@ -207,13 +210,7 @@ public class InventoryReceiptService {
             // [Sprint 0] Resolve variant — null variantId → default variant
             ProductVariant variant = variantService.resolveVariant(itemReq.variantId(), product.getId());
 
-            // Cập nhật product + variant
-            product.setCostPrice(finalCostWithVat);
-            product.setStockQty(product.getStockQty() + addedRetailQty);
-            product.setUpdatedAt(LocalDateTime.now());
-            productRepo.save(product);
-
-            // Cập nhật variant.costPrice + variant.stockQty (explicit save)
+            // Cập nhật variant.costPrice + variant.stockQty
             variant.setCostPrice(finalCostWithVat);
             variant.setStockQty(variant.getStockQty() + addedRetailQty);
             variant.setUpdatedAt(LocalDateTime.now());
@@ -222,9 +219,7 @@ public class InventoryReceiptService {
             // Tạo Batch — gắn variant
             LocalDate expiryDate = (variant.getExpiryDays() != null && variant.getExpiryDays() > 0)
                     ? LocalDate.now().plusDays(variant.getExpiryDays())
-                    : (product.getExpiryDays() != null && product.getExpiryDays() > 0)
-                        ? LocalDate.now().plusDays(product.getExpiryDays())
-                        : LocalDate.now().plusYears(10);
+                    : LocalDate.now().plusYears(10);
             String batchCode = buildBatchCode(saved.getReceiptNo(), variant.getVariantCode());
             ProductBatch batch = new ProductBatch();
             batch.setProduct(product); batch.setVariant(variant); batch.setReceipt(saved);
@@ -252,15 +247,27 @@ public class InventoryReceiptService {
             item.setPiecesUsed(pieces);
             item.setRetailQtyAdded(addedRetailQty);
 
-            totalAmount = totalAmount.add(itemReq.unitCost().multiply(BigDecimal.valueOf(itemReq.quantity())));
+            totalAmount = totalAmount.add(discountedLine);
             items.add(item);
         }
 
-        saved.setTotalAmount(totalAmount);
+        // totalAmount = giá sau CK (tích lũy) + ship + VAT = tổng thực trả
+        BigDecimal grandTotal = totalAmount.add(shippingFee).add(totalVatAmount)
+                .setScale(0, RoundingMode.HALF_UP);
+        saved.setTotalAmount(grandTotal);
         saved.setTotalVat(totalVatAmount);
         saved.getItems().addAll(items);
 
-        return DtoMapper.toResponse(receiptRepo.save(saved));
+        InventoryReceiptResponse result = DtoMapper.toResponse(receiptRepo.save(saved));
+
+        // ── Refresh virtual stock của tất cả combo chứa SP vừa nhập ─────────
+        // Sau khi stockQty của các SP đơn tăng → min(component/qty) thay đổi
+        allItems.stream()
+                .map(ReceiptItemRequest::productId)
+                .distinct()
+                .forEach(comboService::refreshCombosContaining);
+
+        return result;
     }
 
     public InventoryReceiptResponse getReceipt(Long id) {

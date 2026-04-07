@@ -5,6 +5,7 @@ import com.example.nhadanshop.entity.Category;
 import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.repository.CategoryRepository;
 import com.example.nhadanshop.repository.ProductRepository;
+import com.example.nhadanshop.repository.ProductVariantRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
@@ -48,6 +49,7 @@ public class ExcelImportService {
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
     private final ProductService productService;
+    private final ProductVariantRepository variantRepository;
 
     private static final int COL_CODE              = 0;
     private static final int COL_NAME              = 1;
@@ -158,19 +160,33 @@ public class ExcelImportService {
                     product.setCode(code);
                     product.setName(name.trim());
                     product.setCategory(category);
-                    product.setUnit(unit != null && !unit.isBlank() ? unit.trim() : "bich");
-                    product.setCostPrice(costPerUnit);
-                    product.setSellPrice(sellPerUnit);
-                    product.setStockQty(retailQty);
-                    product.setExpiryDays(expiryDays);
-                    product.setImportUnit(importUnit);
-                    product.setSellUnit(sellUnit != null ? sellUnit : "bich");
-                    product.setPiecesPerImportUnit(effectivePieces);
-                    product.setConversionNote(conversionNote);
                     product.setActive(active != null ? active : Boolean.TRUE);
                     product.setCreatedAt(LocalDateTime.now());
                     product.setUpdatedAt(LocalDateTime.now());
-                    productRepository.save(product);
+                    Product saved = productRepository.save(product);
+
+                    // Tạo default variant với đầy đủ thông tin giá/tồn/đơn vị
+                    com.example.nhadanshop.entity.ProductVariant variant =
+                            new com.example.nhadanshop.entity.ProductVariant();
+                    variant.setProduct(saved);
+                    variant.setVariantCode(code);
+                    variant.setVariantName(name.trim());
+                    variant.setSellUnit(sellUnit != null && !sellUnit.isBlank() ? sellUnit.trim()
+                            : (unit != null && !unit.isBlank() ? unit.trim() : "cai"));
+                    variant.setImportUnit(importUnit);
+                    variant.setPiecesPerUnit(effectivePieces);
+                    variant.setSellPrice(sellPerUnit);
+                    variant.setCostPrice(costPerUnit);
+                    variant.setStockQty(retailQty);
+                    variant.setMinStockQty(5);
+                    variant.setExpiryDays(expiryDays);
+                    variant.setConversionNote(conversionNote);
+                    variant.setIsDefault(true);
+                    variant.setActive(active != null ? active : Boolean.TRUE);
+                    variant.setCreatedAt(LocalDateTime.now());
+                    variant.setUpdatedAt(LocalDateTime.now());
+                    variantRepository.save(variant);
+
                     successCount++;
                     log.info("Dòng {}: OK '{}' - '{}'", rowIdx + 1, code, name);
                 } catch (Exception e) {

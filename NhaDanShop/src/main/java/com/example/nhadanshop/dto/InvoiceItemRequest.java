@@ -16,5 +16,12 @@ public record InvoiceItemRequest(
          * ID variant đóng gói (Sprint 0).
          * null → tự động dùng default variant của productId.
          */
-        Long variantId
+        Long variantId,
+        /**
+         * ID combo (KiotViet model).
+         * Khi truyền comboId: hệ thống tự expand combo thành nhiều line items,
+         * mỗi item đều được gán combo_source_id = comboId.
+         * productId/variantId bị bỏ qua khi comboId != null.
+         */
+        Long comboId
 ) {}

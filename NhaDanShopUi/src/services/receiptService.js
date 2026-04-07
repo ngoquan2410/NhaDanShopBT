@@ -10,6 +10,15 @@ export const receiptService = {
   delete: (id) => api.delete(`/api/receipts/${id}`),
 
   // ── Import Excel ──────────────────────────────────────────────────────────
+  /** Preview file Excel — KHÔNG ghi DB, trả về danh sách rows + lỗi */
+  previewExcel: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post('/api/receipts/preview-excel', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
   /** Import phiếu nhập kho từ file .xlsx */
   importExcel: (file, supplierName, note = '', shippingFee = 0, vatPercent = 0) => {
     const formData = new FormData()

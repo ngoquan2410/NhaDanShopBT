@@ -1,9 +1,10 @@
-﻿import { useState, useRef } from 'react'
+﻿﻿﻿import { useState, useRef } from 'react'
 import { useReceipts, useReceiptMutations } from '../../hooks/useReceipts'
 import { useProducts } from '../../hooks/useProducts'
 import { useSort } from '../../hooks/useSort'
 import { receiptService } from '../../services/receiptService'
-import { useQueryClient } from '@tanstack/react-query'
+import { comboService } from '../../services/comboService'
+import { useQueryClient, useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import dayjs from 'dayjs'
 import BarcodeLabelPrinter from '../../components/BarcodeLabelPrinter'
@@ -27,34 +28,63 @@ function ReceiptForm({ products, onSubmit, loading }) {
   const [note, setNote] = useState('')
   const [shippingFee, setShippingFee] = useState(0)
   const [vatPercent, setVatPercent] = useState(0)
-  // [Sprint 0] thêm variantId vào mỗi item
-  const [items, setItems] = useState([{ productId: '', variantId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
+  // SP đơn — không cần variantId, hệ thống tự smart-match theo importUnit/sellUnit/pieces
+  const [items, setItems] = useState([{ productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
+  // Combo — nhập theo combo, hệ thống expand thành phần
+  const [comboItems, setComboItems] = useState([])
 
-  const addItem = () => setItems(i => [...i, { productId: '', variantId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
+  const { data: combos = [] } = useQuery({
+    queryKey: ['combos'],
+    queryFn:  comboService.getAll,
+    staleTime: 60_000,
+  })
+  const activeCombos = combos.filter(c => c.active)
+
+  const addItem = () => setItems(i => [...i, { productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
   const removeItem = (idx) => setItems(i => i.filter((_, j) => j !== idx))
   const setItem = (idx, key, val) =>
     setItems(i => i.map((it, j) => j === idx ? { ...it, [key]: val } : it))
 
+  const addComboItem    = () => setComboItems(c => [...c, { comboId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
+  const removeComboItem = (idx) => setComboItems(c => c.filter((_, j) => j !== idx))
+  const setComboItem    = (idx, key, val) =>
+    setComboItems(c => c.map((it, j) => j === idx ? { ...it, [key]: val } : it))
+
   const handleSubmit = (e) => {
     e.preventDefault()
+    const validItems  = items.filter(it => it.productId)
+    const validCombos = comboItems.filter(it => it.comboId)
+    if (validItems.length === 0 && validCombos.length === 0) {
+      toast.error('Phiếu nhập phải có ít nhất 1 sản phẩm hoặc combo'); return
+    }
     onSubmit({
       supplierName, note,
-      shippingFee: Number(shippingFee),
-      vatPercent: Number(vatPercent) || 0,
-      items: items.map(it => ({
-        productId: Number(it.productId),
-        quantity: Number(it.quantity),
-        unitCost: Number(it.unitCost),
+      shippingFee:  Number(shippingFee),
+      vatPercent:   Number(vatPercent) || 0,
+      items: validItems.map(it => ({
+        productId:       Number(it.productId),
+        quantity:        Number(it.quantity),
+        unitCost:        Number(it.unitCost),
         discountPercent: Number(it.discountPercent) || 0,
-        variantId: it.variantId ? Number(it.variantId) : null, // [Sprint 0]
+        variantId:       null, // hệ thống tự smart-match
+      })),
+      comboItems: validCombos.map(it => ({
+        comboId:         Number(it.comboId),
+        quantity:        Number(it.quantity),
+        unitCost:        Number(it.unitCost),
+        discountPercent: Number(it.discountPercent) || 0,
       })),
     })
   }
 
-  // Tổng tiền gốc trước chiết khấu
+  // Tổng tiền gốc trước chiết khấu (SP đơn + combo)
   const subtotal = items.reduce((s, it) => s + Number(it.quantity) * Number(it.unitCost), 0)
+               + comboItems.reduce((s, it) => s + Number(it.quantity) * Number(it.unitCost), 0)
   // Tổng sau chiết khấu từng dòng
   const totalAfterDiscount = items.reduce((s, it) => {
+    const disc = Number(it.discountPercent) || 0
+    return s + Number(it.quantity) * Number(it.unitCost) * (1 - disc / 100)
+  }, 0) + comboItems.reduce((s, it) => {
     const disc = Number(it.discountPercent) || 0
     return s + Number(it.quantity) * Number(it.unitCost) * (1 - disc / 100)
   }, 0)
@@ -110,40 +140,25 @@ function ReceiptForm({ products, onSubmit, loading }) {
             className="text-green-600 hover:text-green-700 text-sm font-medium">+ Thêm dòng</button>
         </div>
         {items.map((item, idx) => {
-          // [Sprint 0] Lấy variants của SP được chọn
           const p = products.find(pr => String(pr.id) === String(item.productId))
-          const variants = p?.variants || []
-          const hasMultiVariant = variants.length > 1
           return (
             <div key={idx} className="flex gap-2 mb-2 items-end flex-wrap">
               <div className="flex-1 min-w-[180px]">
-                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">San pham *</label>}
-                <select value={item.productId} onChange={e => {
-                  const prod = products.find(pr => String(pr.id) === e.target.value)
-                  const defVariant = prod?.variants?.find(v => v.isDefault) || prod?.variants?.[0]
-                  setItem(idx, 'productId', e.target.value)
-                  setItem(idx, 'variantId', defVariant?.id || '')
-                }} required className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                  <option value="">-- Chon san pham --</option>
-                  {products.filter(pr => pr.productType !== 'COMBO').map(p => (
-                    <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
+                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Sản phẩm *</label>}
+                <select value={item.productId}
+                  onChange={e => setItem(idx, 'productId', e.target.value)}
+                  required className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                  <option value="">-- Chọn sản phẩm --</option>
+                  {products.filter(pr => pr.productType !== 'COMBO').map(pr => (
+                    <option key={pr.id} value={pr.id}>{pr.code} - {pr.name}</option>
                   ))}
                 </select>
+                {p && (
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Variant tự động — điền K/L/M trong Excel để chọn cụ thể
+                  </p>
+                )}
               </div>
-              {/* [Sprint 0] Chi hien khi SP co >1 variant */}
-              {p && hasMultiVariant && (
-                <div className="w-44">
-                  {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Bien the</label>}
-                  <select value={item.variantId || ''} onChange={e => setItem(idx, 'variantId', e.target.value)}
-                    className="w-full border border-purple-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400">
-                    {variants.map(v => (
-                      <option key={v.id} value={v.id}>
-                        {v.variantCode} ({v.sellUnit}){v.isDefault ? ' *' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
               <div className="w-24">
                 {idx === 0 && <label className="block text-xs text-gray-500 mb-1">So luong</label>}
                 <input type="number" min={1} value={item.quantity} onChange={e => setItem(idx, 'quantity', e.target.value)}
@@ -204,6 +219,93 @@ function ReceiptForm({ products, onSubmit, loading }) {
         </div>
       </div>
 
+      {/* ── Section nhập Combo ── */}
+      <div className="border-t pt-4">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h4 className="font-semibold text-gray-700">📦 Nhập theo Combo <span className="text-xs text-gray-400 font-normal">(tuỳ chọn)</span></h4>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Chọn combo → hệ thống tự expand thành phần, phân bổ chi phí theo tỷ lệ qty. Tồn kho ảo tự cập nhật sau khi nhập.
+            </p>
+          </div>
+          {activeCombos.length > 0 && (
+            <button type="button" onClick={addComboItem}
+              className="text-purple-600 hover:text-purple-700 text-sm font-medium">+ Thêm combo</button>
+          )}
+        </div>
+
+        {activeCombos.length === 0 && (
+          <div className="text-xs text-gray-400 bg-gray-50 rounded-lg p-3 border border-dashed">
+            Chưa có combo nào hoạt động. Hãy tạo combo trong tab <strong>Quản lý Combo</strong> trước.
+          </div>
+        )}
+
+        {comboItems.map((ci, idx) => {
+          const selectedCombo = activeCombos.find(c => String(c.id) === String(ci.comboId))
+          const afterDisc = Number(ci.quantity) * Number(ci.unitCost) * (1 - (Number(ci.discountPercent) || 0) / 100)
+          return (
+            <div key={idx} className="mb-3">
+              <div className="flex gap-2 items-end flex-wrap">
+                <div className="flex-1 min-w-[200px]">
+                  {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Combo *</label>}
+                  <select value={ci.comboId} onChange={e => setComboItem(idx, 'comboId', e.target.value)}
+                    required className="w-full border border-purple-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400">
+                    <option value="">-- Chọn combo --</option>
+                    {activeCombos.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.code} - {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-24">
+                  {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Số combo</label>}
+                  <input type="number" min={1} value={ci.quantity}
+                    onChange={e => setComboItem(idx, 'quantity', e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                </div>
+                <div className="w-36">
+                  {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Giá nhập 1 combo (₫)</label>}
+                  <input type="number" min={0} step={1000} value={ci.unitCost}
+                    onChange={e => setComboItem(idx, 'unitCost', e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                </div>
+                <div className="w-20">
+                  {idx === 0 && <label className="block text-xs text-gray-500 mb-1">CK %</label>}
+                  <input type="number" min={0} max={100} step={0.1} value={ci.discountPercent}
+                    onChange={e => setComboItem(idx, 'discountPercent', e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" placeholder="0" />
+                </div>
+                <div className="w-28 text-right pb-2">
+                  {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Sau CK</label>}
+                  <span className="text-xs font-semibold text-purple-600">
+                    {afterDisc.toLocaleString('vi-VN')} ₫
+                  </span>
+                </div>
+                <button type="button" onClick={() => removeComboItem(idx)}
+                  className="text-red-500 hover:text-red-700 pb-2 text-lg">&times;</button>
+              </div>
+              {/* Hiện thành phần của combo đã chọn */}
+              {selectedCombo && (
+                <div className="mt-1 ml-2 flex flex-wrap gap-1">
+                  {(selectedCombo.items || []).map((it, i) => (
+                    <span key={i} className="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-1.5 py-0.5 rounded-full">
+                      {it.productCode} ×{it.quantity * Number(ci.quantity)}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+
+        {comboItems.filter(c => c.comboId).length > 0 && (
+          <div className="mt-1 bg-purple-50 border border-purple-100 rounded-lg p-2 text-xs text-purple-700">
+            💡 Chi phí combo được phân bổ đều vào từng SP thành phần. Phí ship + VAT phân bổ tiếp theo giá trị dòng.
+          </div>
+        )}
+      </div>
+
       <div className="flex justify-end pt-2">
         <button type="submit" disabled={loading}
           className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-60">
@@ -216,295 +318,310 @@ function ReceiptForm({ products, onSubmit, loading }) {
 
 // ── Import Excel Phiếu Nhập ───────────────────────────────────────────────────
 function ImportReceiptExcelForm({ onClose, onSuccess }) {
-  const [file, setFile] = useState(null)
+  // Bước 1: upload → preview; Bước 2: nhập thông tin + xác nhận
+  const [step, setStep]               = useState(1) // 1=upload, 2=preview+confirm
+  const [file, setFile]               = useState(null)
+  const [preview, setPreview]         = useState(null)    // ExcelPreviewResponse
+  const [previewing, setPreviewing]   = useState(false)
+  const [activeTab, setActiveTab]     = useState('SP_DON') // 'SP_DON' | 'COMBO'
   const [supplierName, setSupplierName] = useState('')
-  const [note, setNote] = useState('')
+  const [note, setNote]               = useState('')
   const [shippingFee, setShippingFee] = useState(0)
   const [vatPercent, setVatPercent]   = useState(0)
-  const [loading, setLoading] = useState(false)
+  const [importing, setImporting]     = useState(false)
+  const [result, setResult]           = useState(null)
   const [downloading, setDownloading] = useState(false)
-  const [result, setResult] = useState(null)
-  const [dragging, setDragging] = useState(false)
+  const [dragging, setDragging]       = useState(false)
   const fileRef = useRef(null)
 
   const handleFile = (f) => {
     if (!f) return
     if (!f.name.endsWith('.xlsx')) { toast.error('Chỉ hỗ trợ file .xlsx'); return }
-    setFile(f); setResult(null)
+    setFile(f); setPreview(null); setResult(null); setStep(1)
   }
 
-  const handleDownloadTemplate = async () => {
-    setDownloading(true)
+  const handlePreview = async () => {
+    if (!file) { toast.error('Chưa chọn file'); return }
+    setPreviewing(true); setPreview(null)
     try {
-      await receiptService.downloadTemplate()
-      toast.success('Đã tải template! Xem sheet "Hướng dẫn" trong file.')
-    } catch {
-      toast.error('Lỗi tải template')
-    } finally {
-      setDownloading(false)
-    }
+      const res = await receiptService.previewExcel(file)
+      setPreview(res)
+      setStep(2)
+      // Mặc định active tab theo sheet có dữ liệu
+      const hasCombo  = (res.rows || []).some(r => r.sheet === 'COMBO')
+      const hasSingle = (res.rows || []).some(r => r.sheet === 'SP_DON')
+      setActiveTab(hasSingle ? 'SP_DON' : hasCombo ? 'COMBO' : 'SP_DON')
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || e?.response?.data?.message || 'Lỗi đọc file Excel')
+    } finally { setPreviewing(false) }
   }
-
-  const [validationErrors, setValidationErrors] = useState([])
 
   const handleImport = async () => {
-    if (!file) { toast.error('Chưa chọn file Excel'); return }
-    if (!supplierName.trim()) { toast.error('Vui lòng nhập tên nhà cung cấp'); return }
-    setLoading(true)
-    setValidationErrors([])
-    setResult(null)
+    if (!preview?.canImport) return
+    if (!supplierName.trim()) { toast.error('Nhập tên nhà cung cấp'); return }
+    setImporting(true); setResult(null)
     try {
-      const res = await receiptService.importExcel(file, supplierName.trim(), note.trim(), Number(shippingFee) || 0, Number(vatPercent) || 0)
+      const res = await receiptService.importExcel(file, supplierName.trim(), note.trim(),
+                                                    Number(shippingFee) || 0, Number(vatPercent) || 0)
       setResult(res)
       if (res.successItems > 0) {
-        toast.success(`Tạo phiếu nhập ${res.receiptNo} thành công! (${res.successItems} SP)`)
+        toast.success(`✅ Tạo phiếu nhập ${res.receiptNo} thành công! (${res.successItems} SP)`)
         onSuccess()
-      } else {
-        toast.error('Không có dòng nào thành công — phiếu không được tạo')
       }
     } catch (e) {
-      // HTTP 422 = lỗi validate file — hiển thị danh sách lỗi từng dòng
       if (e?.response?.status === 422) {
-        const data = e.response.data
-        const errs = data?.validationErrors || []
-        setValidationErrors(errs)
-        toast.error(`File có ${errs.length} lỗi — chưa lưu dữ liệu nào. Kiểm tra bên dưới.`, { duration: 5000 })
+        toast.error(`File có lỗi: ${(e.response.data?.validationErrors || []).length} dòng lỗi`, { duration: 5000 })
       } else {
-        toast.error(e?.response?.data?.detail || e?.response?.data?.message || 'Lỗi import Excel')
+        toast.error(e?.response?.data?.detail || 'Lỗi import')
       }
-    } finally {
-      setLoading(false)
-    }
+    } finally { setImporting(false) }
+  }
+
+  const handleDownload = async () => {
+    setDownloading(true)
+    try { await receiptService.downloadTemplate(); toast.success('Đã tải template!') }
+    catch { toast.error('Lỗi tải template') }
+    finally { setDownloading(false) }
+  }
+
+  // Tính tổng chi phí preview (sau CK, chưa tính ship+VAT từ form)
+  const totalGross    = preview?.totalAmount       ? Number(preview.totalAmount)       : 0
+  const totalDisc     = preview?.totalAfterDiscount? Number(preview.totalAfterDiscount): 0
+  const totalVatAmt   = totalDisc * (Number(vatPercent) || 0) / 100
+  const grandTotal    = totalDisc + Number(shippingFee || 0) + totalVatAmt
+
+  const spRows    = (preview?.rows || []).filter(r => r.sheet === 'SP_DON')
+  // Combo qua Excel tạm thời bị vô hiệu hoá — không filter comboRows nữa
+  const hasErrors = (preview?.errorRows || 0) > 0
+
+  const statusBadge = (row) => {
+    if (!row.isValid) return <span className="inline-flex items-center gap-1 text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold">❌ Lỗi</span>
+    if (row.status === 'COMBO_EXPAND') return <span className="inline-flex items-center gap-1 text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-semibold">📦 Combo</span>
+    if (row.status === 'NEW_PRODUCT')  return <span className="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-semibold">✨ Mới</span>
+    if (row.status === 'NEW_VARIANT')  return <span className="inline-flex items-center gap-1 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-semibold">🔀 Variant mới</span>
+    return <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-semibold">✅ OK</span>
   }
 
   return (
-    <div className="space-y-5">
-      {/* Banner download template */}
-      <div className="bg-gradient-to-r from-green-600 to-green-700 rounded-xl p-4 flex items-center justify-between">
-        <div className="text-white">
-          <p className="font-bold text-base">📥 Bước 1: Tải file template</p>
-          <p className="text-green-100 text-xs mt-0.5">Có dummy data mẫu + cột CK%, VAT%, phân bổ phí ship + sheet hướng dẫn</p>
-        </div>
-        <button
-          onClick={handleDownloadTemplate}
-          disabled={downloading}
-          className="bg-white text-green-700 font-bold px-5 py-2.5 rounded-lg hover:bg-green-50 transition flex items-center gap-2 text-sm whitespace-nowrap disabled:opacity-70"
-        >
-          {downloading
-            ? <><span className="w-4 h-4 border-2 border-green-500 border-t-transparent rounded-full animate-spin"/>Đang tải...</>
-            : <>⬇️ Tải Template Excel</>}
-        </button>
-      </div>
-
-      {/* Cấu trúc nhanh */}
-      <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
-        <p className="font-semibold mb-2">📋 Bước 2: Điền dữ liệu (từ dòng 4):</p>
-        <div className="overflow-x-auto">
-          <table className="text-xs w-full border-collapse">
-            <thead>
-              <tr className="bg-green-100">
-                {['A: Mã SP','B: Tên SP *','C: SL *','D: Giá nhập *','E: CK %','F: Ghi chú','G: Danh mục','H: Đơn vị'].map(h => (
-                  <th key={h} className="border border-green-200 px-2 py-1 text-left whitespace-nowrap font-semibold">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="bg-white">
-                {['BT001','Bánh Tráng Rong Biển','5','65000','5','SP có sẵn CK5%','',''].map((v,i) => (
-                  <td key={i} className="border border-green-200 px-2 py-1 text-gray-700">{v}</td>
-                ))}
-              </tr>
-              <tr className="bg-yellow-50">
-                {['','Sản Phẩm Mới XYZ','10','25000','0','SP mới tạo','Danh Mục Mới','gói'].map((v,i) => (
-                  <td key={i} className="border border-green-200 px-2 py-1 text-amber-700 font-medium">{v}</td>
-                ))}
-              </tr>
-              <tr className="bg-blue-50">
-                {['COMBO001','Combo Bánh Tráng','2','300000','5','Nhập combo → expand SP','',''].map((v,i) => (
-                  <td key={i} className="border border-green-200 px-2 py-1 text-blue-700 font-medium">{v}</td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-          <div className="bg-white rounded p-2">
-            <p className="font-semibold text-green-700">✅ SP đã có:</p>
-            <p>Tìm theo Mã (A) → Tên (B)</p>
+    <div className="space-y-4">
+      {/* ── Header download + upload ── */}
+      <div className="flex gap-3">
+        <div className="flex-1 bg-gradient-to-r from-green-600 to-green-700 rounded-xl p-4 flex items-center justify-between">
+          <div className="text-white min-w-0">
+            <p className="font-bold text-sm">📥 Template Excel — 2 sheets</p>
+            <p className="text-green-200 text-xs mt-0.5">Sheet 1: SP Đơn (13 cột A–M) | Sheet 2: Hướng dẫn | Combo nhập qua form thủ công</p>
           </div>
-          <div className="bg-yellow-50 rounded p-2 border border-yellow-200">
-            <p className="font-semibold text-amber-700">✨ SP mới (tự tạo):</p>
-            <p>Để trống cột A + điền cột G, H</p>
-          </div>
-          <div className="bg-blue-50 rounded p-2 border border-blue-200">
-            <p className="font-semibold text-blue-700">📦 Combo:</p>
-            <p>Nhập mã COMBO → expand thành phần</p>
-          </div>
+          <button onClick={handleDownload} disabled={downloading}
+            className="bg-white text-green-700 font-bold px-3 py-2 rounded-lg text-xs shrink-0 disabled:opacity-70">
+            {downloading ? '...' : '⬇️ Tải template'}
+          </button>
         </div>
       </div>
 
-      {/* Thông tin phiếu */}
-      <div>
-        <p className="text-sm font-semibold text-gray-700 mb-2">📝 Bước 3: Nhập thông tin phiếu</p>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Nhà cung cấp *</label>
-            <input value={supplierName} onChange={e => setSupplierName(e.target.value)}
-              placeholder="VD: Nhà Cung Cấp ABC"
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú phiếu</label>
-            <input value={note} onChange={e => setNote(e.target.value)}
-              placeholder="VD: Nhập hàng tháng 3"
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              🚚 Phí vận chuyển (₫)
-              <span className="ml-1 text-xs text-gray-400 font-normal">— chia tỷ lệ vào giá vốn</span>
-            </label>
-            <input type="number" min={0} step={1000} value={shippingFee}
-              onChange={e => setShippingFee(e.target.value)}
-              placeholder="0"
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-            {Number(shippingFee) > 0 && (
-              <p className="text-xs text-blue-600 mt-1">
-                💡 {Number(shippingFee).toLocaleString('vi-VN')} ₫ phân bổ theo tỷ lệ giá trị sau CK
-              </p>
-            )}
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              🧾 Thuế GTGT — VAT %
-              <span className="ml-1 text-xs text-gray-400 font-normal">(toàn đơn, tính trên tổng sau CK)</span>
-            </label>
-            <div className="relative">
-              <input type="number" min={0} max={100} step={0.1} value={vatPercent}
-                onChange={e => setVatPercent(e.target.value)}
-                placeholder="0"
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 pr-6" />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span>
-            </div>
-            {Number(vatPercent) > 0 && (
-              <p className="text-xs text-purple-600 mt-1">
-                🧾 {vatPercent}% VAT phân bổ đều vào giá vốn từng SP
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Upload */}
-      <div>
-        <p className="text-sm font-semibold text-gray-700 mb-2">📤 Bước 4: Upload file Excel</p>
-        <div
-          onDragOver={e => { e.preventDefault(); setDragging(true) }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
-          onClick={() => fileRef.current?.click()}
-          className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
-            ${dragging ? 'border-green-500 bg-green-50' : file ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-green-400 hover:bg-green-50'}`}
-        >
-          <input ref={fileRef} type="file" accept=".xlsx" className="hidden"
-            onChange={e => handleFile(e.target.files?.[0])} />
+      {/* ── Bước 1: Chọn file ── */}
+      <div className={`border-2 rounded-xl transition-colors cursor-pointer ${
+        step === 2 ? 'border-green-400 bg-green-50' : dragging ? 'border-green-500 bg-green-50' : 'border-dashed border-gray-300 hover:border-green-400'}`}
+        onDragOver={e => { e.preventDefault(); setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
+        onClick={() => step === 1 && fileRef.current?.click()}>
+        <input ref={fileRef} type="file" accept=".xlsx" className="hidden"
+          onChange={e => handleFile(e.target.files?.[0])} />
+        <div className="p-5 text-center">
           {file ? (
-            <div className="space-y-1">
-              <div className="text-3xl">📄</div>
-              <p className="font-medium text-green-700">{file.name}</p>
-              <p className="text-xs text-gray-400">{(file.size / 1024).toFixed(1)} KB</p>
-              <button type="button" onClick={e => { e.stopPropagation(); setFile(null); setResult(null) }}
-                className="text-xs text-red-500 hover:text-red-700 underline">Chọn file kh��c</button>
+            <div className="flex items-center justify-center gap-3">
+              <span className="text-3xl">📄</span>
+              <div className="text-left">
+                <p className="font-semibold text-green-700 text-sm">{file.name}</p>
+                <p className="text-xs text-gray-400">{(file.size/1024).toFixed(1)} KB</p>
+              </div>
+              <button type="button" onClick={e => { e.stopPropagation(); setFile(null); setPreview(null); setStep(1) }}
+                className="text-xs text-red-500 underline ml-2">Đổi file</button>
             </div>
           ) : (
-            <div className="space-y-2 text-gray-500">
-              <div className="text-4xl">📊</div>
-              <p className="font-medium text-gray-700">Kéo thả file .xlsx vào đây hoặc click để chọn</p>
-              <p className="text-xs text-gray-400">SP chưa có sẽ được tạo tự động từ file</p>
+            <div className="py-4">
+              <div className="text-4xl mb-2">📊</div>
+              <p className="text-gray-600 text-sm font-medium">Kéo thả hoặc click để chọn file .xlsx</p>
+              <p className="text-xs text-gray-400 mt-1">File có Sheet "SP Don" và/hoặc Sheet "Combo"</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex justify-end gap-3">
-        <button onClick={onClose} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Hủy</button>
-        <button onClick={handleImport} disabled={!file || !supplierName.trim() || loading}
-          className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-60 flex items-center gap-2">
-          {loading
-            ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Đang xử lý...</>
-            : '📥 Tạo phiếu nhập từ Excel'}
+      {/* ── Nút Preview ── */}
+      {step === 1 && (
+        <button onClick={handlePreview} disabled={!file || previewing}
+          className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+          {previewing
+            ? <><span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"/>Đang đọc file...</>
+            : '🔍 Xem trước dữ liệu (Preview)'}
         </button>
-      </div>
-
-      {/* ── Panel lỗi validation (HTTP 422) ────────────────────────────────── */}
-      {validationErrors.length > 0 && (
-        <div className="rounded-xl border-2 border-red-400 bg-red-50 p-5 space-y-3">
-          <div className="flex items-start gap-3">
-            <span className="text-2xl mt-0.5">🚫</span>
-            <div>
-              <h4 className="font-bold text-red-800 text-base">
-                File Excel có {validationErrors.length} lỗi — TOÀN BỘ bị huỷ, không có dòng nào được lưu
-              </h4>
-              <p className="text-sm text-red-600 mt-1">
-                Vui lòng sửa tất cả lỗi bên dưới rồi tải lên lại file Excel.
-              </p>
-            </div>
-          </div>
-          <div className="bg-white border border-red-200 rounded-lg p-3 max-h-72 overflow-y-auto space-y-1.5">
-            {validationErrors.map((err, i) => (
-              <div key={i} className="flex items-start gap-2 text-sm">
-                <span className="text-red-500 font-bold shrink-0">{i + 1}.</span>
-                <span className="text-red-700">{err}</span>
-              </div>
-            ))}
-          </div>
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 space-y-1">
-            <p className="font-semibold">💡 Hướng dẫn sửa lỗi phổ biến:</p>
-            <p>• <b>SP mới + danh mục trống</b>: điền tên danh mục vào cột G, đơn vị vào cột H</p>
-            <p>• <b>Không tìm thấy SP</b>: kiểm tra lại mã SP (cột A) hoặc tên SP (cột B)</p>
-            <p>• <b>SP ngừng KD</b>: vào trang Sản phẩm → kích hoạt lại trước khi nhập</p>
-            <p>• <b>Chiết khấu sai</b>: cột E phải là số từ 0–100 (VD: 5 là 5%, không phải 0.05)</p>
-          </div>
-          <button
-            onClick={() => { setValidationErrors([]); setFile(null) }}
-            className="text-sm text-red-600 hover:text-red-800 underline font-medium"
-          >
-            ✕ Xoá thông báo lỗi và chọn file mới
-          </button>
-        </div>
       )}
 
-      {/* ── Kết quả import thành công ─────────────────────────────────────── */}
-      {result && !validationErrors.length && (
-        <div className={`rounded-xl border p-5 space-y-4 ${result.successItems > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-          <div className="flex items-center justify-between">
-            <h4 className="font-bold text-gray-800">📊 Kết quả Import</h4>
-            {result.receiptNo && (
-              <span className="font-mono text-sm bg-green-200 text-green-800 px-3 py-1 rounded-full font-bold">
-                Phiếu: {result.receiptNo}
-              </span>
+      {/* ── Bước 2: Preview + Form + Xác nhận ── */}
+      {step === 2 && preview && (
+        <div className="space-y-4">
+          {/* Summary bar */}
+          <div className={`rounded-xl p-4 flex flex-wrap gap-4 items-center ${hasErrors ? 'bg-red-50 border-2 border-red-300' : 'bg-green-50 border border-green-200'}`}>
+            <div className="flex-1">
+              <p className={`font-bold text-base ${hasErrors ? 'text-red-700' : 'text-green-700'}`}>
+                {hasErrors ? `❌ ${preview.errorRows} dòng lỗi — cần sửa trước khi tạo phiếu` : `✅ ${preview.validRows} dòng hợp lệ — sẵn sàng tạo phiếu`}
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Tổng: {preview.totalRows} dòng SP Đơn
+                {preview.warnings?.length > 0 && ` | ⚠️ ${preview.warnings.length} cảnh báo`}
+              </p>
+            </div>
+            <button onClick={() => { setStep(1); setPreview(null) }}
+              className="text-xs text-gray-500 border rounded-lg px-3 py-1.5 hover:bg-white">
+              ← Đổi file
+            </button>
+          </div>
+
+          {/* Bảng preview SP Don — không có tab Combo */}
+          <div className="overflow-auto max-h-72 border rounded-xl">
+              <table className="w-full text-xs border-collapse min-w-[700px]">
+                <thead className="sticky top-0 bg-gray-50 z-10">
+                  <tr className="text-gray-600 text-xs">
+                    <th className="px-3 py-2 text-left w-10">Dòng</th>
+                    <th className="px-3 py-2 text-left">Trạng thái</th>
+                    <th className="px-3 py-2 text-left">Mã SP</th>
+                    <th className="px-3 py-2 text-left">Mã Variant</th>
+                    <th className="px-3 py-2 text-left">Tên SP</th>
+                    <th className="px-3 py-2 text-right">SL</th>
+                    <th className="px-3 py-2 text-right">Giá nhập</th>
+                    <th className="px-3 py-2 text-right">CK%</th>
+                    <th className="px-3 py-2 text-right">Thành tiền</th>
+                    <th className="px-3 py-2 text-left">Ghi chú / Lỗi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {spRows.length === 0 ? (
+                    <tr><td colSpan={10} className="text-center py-6 text-gray-400">Sheet "SP Don" không có dữ liệu</td></tr>
+                  ) : spRows.map((row, i) => (
+                    <tr key={i} className={`border-t ${!row.isValid ? 'bg-red-50' : row.isNew ? 'bg-amber-50' : i%2===0 ? 'bg-white' : 'bg-gray-50'}`}>
+                      <td className="px-3 py-1.5 text-gray-400 text-center">{row.lineNumber}</td>
+                      <td className="px-3 py-1.5">{statusBadge(row)}</td>
+                      <td className="px-3 py-1.5 font-mono font-semibold text-gray-800">{row.productCode || <span className="text-gray-400 italic">mới</span>}</td>
+                      <td className="px-3 py-1.5 font-mono text-purple-600">{row.variantCode || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-1.5 text-gray-700 max-w-[150px] truncate">{row.productName || <span className="text-gray-400">—</span>}</td>
+                      <td className="px-3 py-1.5 text-right font-medium">{row.quantity ?? '—'}</td>
+                      <td className="px-3 py-1.5 text-right">{row.unitCost ? Number(row.unitCost).toLocaleString('vi-VN') : '—'}</td>
+                      <td className="px-3 py-1.5 text-right text-orange-600">{row.discountPercent ? `${Number(row.discountPercent)}%` : '—'}</td>
+                      <td className="px-3 py-1.5 text-right font-semibold text-green-700">{row.lineTotal ? Number(row.lineTotal).toLocaleString('vi-VN')+'₫' : '—'}</td>
+                      <td className="px-3 py-1.5">
+                        {row.errorMessage && <p className="text-red-600 font-medium">{row.errorMessage}</p>}
+                        {row.warningMessage && <p className="text-amber-600">{row.warningMessage}</p>}
+                        {!row.errorMessage && !row.warningMessage && <span className="text-gray-400">{row.note || '—'}</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+          </div>
+
+          {/* Warnings */}
+          {preview.warnings?.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 max-h-28 overflow-y-auto">
+              <p className="text-xs font-semibold text-amber-700 mb-1">⚠️ {preview.warnings.length} cảnh báo:</p>
+              {preview.warnings.map((w,i) => <p key={i} className="text-xs text-amber-600">• {w}</p>)}
+            </div>
+          )}
+
+          {/* Form thông tin phiếu — LUÔN hiện để user xem tổng chi phí dù có lỗi */}
+          <div className="border-t pt-4 space-y-3">
+            <p className="text-sm font-bold text-gray-700">📝 Thông tin phiếu nhập</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Nhà cung cấp *</label>
+                <input value={supplierName} onChange={e => setSupplierName(e.target.value)}
+                  placeholder="VD: Nhà Cung Cấp ABC"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Ghi chú phiếu</label>
+                <input value={note} onChange={e => setNote(e.target.value)}
+                  placeholder="VD: Nhập hàng tháng 4"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">🚚 Phí vận chuyển (₫)</label>
+                <input type="number" min={0} step={1000} value={shippingFee}
+                  onChange={e => setShippingFee(e.target.value)} placeholder="0"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">🧾 Thuế GTGT — VAT %</label>
+                <input type="number" min={0} max={100} step={0.1} value={vatPercent}
+                  onChange={e => setVatPercent(e.target.value)} placeholder="0"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              </div>
+            </div>
+
+            {/* Tổng chi phí — luôn tính theo VAT/ship hiện tại, chỉ dựa trên dòng hợp lệ */}
+            <div className={`rounded-xl p-4 space-y-1.5 text-sm border ${hasErrors ? 'bg-gray-50 border-gray-200' : 'bg-green-50 border-green-200'}`}>
+              <p className={`font-bold mb-2 ${hasErrors ? 'text-gray-600' : 'text-green-800'}`}>
+                💰 Tổng chi phí dự kiến {hasErrors && <span className="font-normal text-xs text-gray-400">(chỉ tính dòng hợp lệ)</span>}
+              </p>
+              <div className="flex justify-between text-gray-600">
+                <span>Tiền gốc ({preview.validRows} dòng hợp lệ):</span>
+                <span className="font-medium">{totalGross.toLocaleString('vi-VN')} ₫</span>
+              </div>
+              {totalDisc < totalGross && (
+                <div className="flex justify-between text-green-700">
+                  <span>Sau chiết khấu:</span>
+                  <span className="font-medium">
+                    {totalDisc.toLocaleString('vi-VN')} ₫
+                    <span className="text-xs text-gray-400 ml-1">(-{(totalGross - totalDisc).toLocaleString('vi-VN')} ₫)</span>
+                  </span>
+                </div>
+              )}
+              {Number(shippingFee) > 0 && (
+                <div className="flex justify-between text-blue-600">
+                  <span>+ Phí vận chuyển:</span>
+                  <span>{Number(shippingFee).toLocaleString('vi-VN')} ₫</span>
+                </div>
+              )}
+              {Number(vatPercent) > 0 && (
+                <div className="flex justify-between text-purple-600">
+                  <span>+ VAT {vatPercent}% (trên {totalDisc.toLocaleString('vi-VN')} ₫):</span>
+                  <span>{Math.round(totalVatAmt).toLocaleString('vi-VN')} ₫</span>
+                </div>
+              )}
+              <div className={`flex justify-between font-bold border-t pt-2 text-base ${hasErrors ? 'text-gray-500' : 'text-green-800'}`}>
+                <span>TỔNG THỰC TRẢ:</span>
+                <span className="text-lg">{grandTotal.toLocaleString('vi-VN')} ₫</span>
+              </div>
+              {hasErrors && (
+                <p className="text-xs text-red-500 pt-1">⚠️ Tổng trên chưa chính xác vì còn {preview.errorRows} dòng lỗi chưa được tính</p>
+              )}
+            </div>
+          </div>
+
+          {/* Nút xác nhận */}
+          <div className="flex gap-3 pt-1">
+            <button onClick={onClose} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Hủy</button>
+            {hasErrors ? (
+              <div className="flex-1 bg-red-50 border border-red-300 rounded-xl px-4 py-2.5 text-center">
+                <p className="text-red-600 text-sm font-semibold">🚫 Không thể tạo phiếu — cần sửa {preview.errorRows} dòng lỗi</p>
+                <p className="text-xs text-red-500 mt-0.5">Sửa file Excel rồi upload lại</p>
+              </div>
+            ) : (
+              <button onClick={handleImport}
+                disabled={!supplierName.trim() || importing}
+                className="flex-1 py-2.5 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                {importing
+                  ? <><span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"/>Đang tạo phiếu...</>
+                  : `✅ Tạo phiếu nhập từ Excel (${preview.validRows} dòng hợp lệ)`}
+              </button>
             )}
           </div>
-          <div className="grid grid-cols-4 gap-2">
-            {[
-              { label: 'Tổng dòng', value: result.totalRows, color: 'blue' },
-              { label: '✅ Thành công', value: result.successItems, color: 'green' },
-              { label: '✨ SP mới tạo', value: result.newProducts || 0, color: 'purple' },
-              { label: '⚠️ Cảnh báo', value: result.warnings?.length || 0, color: 'yellow' },
-            ].map(({ label, value, color }) => (
-              <div key={label} className={`bg-${color}-100 rounded-lg p-3 text-center`}>
-                <div className={`text-xl font-bold text-${color}-700`}>{value}</div>
-                <div className={`text-xs text-${color}-600 mt-1`}>{label}</div>
-              </div>
-            ))}
-          </div>
-          {result.warnings?.length > 0 && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-              <p className="text-sm font-semibold text-yellow-700 mb-2">⚠️ SP mới tạo / Gộp dòng trùng:</p>
-              <ul className="space-y-1 max-h-32 overflow-y-auto">
-                {result.warnings.map((w, i) => <li key={i} className="text-xs text-yellow-700">• {w}</li>)}
-              </ul>
+
+          {/* Kết quả */}
+          {result && (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm">
+              <p className="font-bold text-green-800">✅ Tạo phiếu thành công!</p>
+              <p className="text-green-700 mt-1">Phiếu: <b className="font-mono">{result.receiptNo}</b> — {result.successItems} SP — {result.newProducts} SP mới tạo</p>
             </div>
           )}
         </div>
@@ -580,7 +697,7 @@ export default function ReceiptsPage() {
                 <SortHeader field="receiptNo" className="text-left px-4 py-3">Số phiếu</SortHeader>
                 <SortHeader field="supplierName" className="text-left px-4 py-3">Nhà cung cấp</SortHeader>
                 <SortHeader field="receiptDate" className="text-left px-4 py-3">Ngày nhập</SortHeader>
-                <SortHeader field="totalAmount" className="text-right px-4 py-3">Tổng tiền</SortHeader>
+                <SortHeader field="totalAmount" className="text-right px-4 py-3">Tổng thực trả</SortHeader>
                 <th className="text-left px-4 py-3">Ghi chú</th>
                 <th className="text-center px-4 py-3">Thao tác</th>
               </tr>
@@ -699,19 +816,34 @@ export default function ReceiptsPage() {
               </tbody>
               <tfoot className="bg-gray-50">
                 <tr>
-                  <td colSpan={6} className="px-3 py-2 font-semibold text-right">Tổng tiền gốc:</td>
-                  <td className="px-3 py-2 text-right font-bold text-gray-700">
+                  <td colSpan={6} className="px-3 py-2 font-semibold text-right text-gray-700">Tổng thực trả (sau CK + ship + VAT):</td>
+                  <td className="px-3 py-2 text-right font-bold text-green-700 text-base">
                     {Number(detail.totalAmount).toLocaleString('vi-VN')} ₫
                   </td>
                 </tr>
                 {Number(detail.shippingFee) > 0 && (
                   <tr>
-                    <td colSpan={6} className="px-3 py-2 text-right text-blue-600">+ Phí vận chuyển:</td>
-                    <td className="px-3 py-2 text-right font-bold text-blue-600">
+                    <td colSpan={6} className="px-3 py-2 text-right text-xs text-blue-500">↳ Trong đó phí ship:</td>
+                    <td className="px-3 py-2 text-right text-xs text-blue-500">
                       {Number(detail.shippingFee).toLocaleString('vi-VN')} ₫
                     </td>
                   </tr>
                 )}
+                {Number(detail.totalVat) > 0 && (() => {
+                  // Tính ngược % VAT từ totalVat / (totalAmount - ship - totalVat) * 100
+                  const base = Number(detail.totalAmount) - Number(detail.shippingFee || 0) - Number(detail.totalVat)
+                  const vatPct = base > 0 ? Math.round(Number(detail.totalVat) / base * 100 * 10) / 10 : 0
+                  return (
+                    <tr>
+                      <td colSpan={6} className="px-3 py-2 text-right text-xs text-purple-500">
+                        ↳ Trong đó VAT{vatPct > 0 ? ` ${vatPct}%` : ''}:
+                      </td>
+                      <td className="px-3 py-2 text-right text-xs text-purple-500">
+                        {Number(detail.totalVat).toLocaleString('vi-VN')} ₫
+                      </td>
+                    </tr>
+                  )
+                })()}
               </tfoot>
             </table>
           </div>

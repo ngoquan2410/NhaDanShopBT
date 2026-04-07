@@ -12,7 +12,6 @@ public record ProductComboResponse(
         BigDecimal sellPrice,
         Boolean active,
         Integer stockQty,          // virtual stock = min(component/qty)
-        String unit,
         String imageUrl,
         Long categoryId,
         String categoryName,
@@ -28,7 +27,7 @@ public record ProductComboResponse(
             Long productId,
             String productCode,
             String productName,
-            String unit,
+            String sellUnit,
             Integer quantity,
             BigDecimal unitSellPrice,
             BigDecimal lineTotal,

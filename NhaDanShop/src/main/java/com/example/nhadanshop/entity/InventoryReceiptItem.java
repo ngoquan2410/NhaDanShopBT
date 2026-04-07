@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 @Entity
 @Table(
         name = "inventory_receipt_items",
-        uniqueConstraints = @UniqueConstraint(name = "uq_receipt_variant", columnNames = {"receipt_id", "variant_id"})
+        indexes = @Index(name = "idx_iri_receipt_variant", columnList = "receipt_id, variant_id")
 )
 public class InventoryReceiptItem {
 

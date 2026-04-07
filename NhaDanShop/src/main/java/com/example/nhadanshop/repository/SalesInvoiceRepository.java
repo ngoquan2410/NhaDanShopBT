@@ -91,24 +91,57 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
+    /**
+     * [Sprint 0] Tổng số lượng bán của từng VARIANT trong khoảng thời gian.
+     * Trả về Object[]: [variantId (Long), totalQty (Long)]
+     */
+    @Query("""
+            SELECT item.variant.id, COALESCE(SUM(item.quantity), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.variant IS NOT NULL
+              AND item.invoice.invoiceDate BETWEEN :from AND :to
+            GROUP BY item.variant.id
+            """)
+    List<Object[]> sumSoldQtyByVariantBetween(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
+
+    /**
+     * [Fix OpeningStock] Tổng số lượng bán của từng VARIANT từ một mốc thời gian trở đi
+     * (không giới hạn trên = toàn bộ lịch sử từ fromDt đến nay).
+     * Dùng để tính ngược tồn đầu kỳ:
+     *   openingStock = currentStock - recvAfter(fromDt) + soldAfter(fromDt)
+     * Trả về Object[]: [variantId (Long), totalQty (Long)]
+     */
+    @Query("""
+            SELECT item.variant.id, COALESCE(SUM(item.quantity), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.variant IS NOT NULL
+              AND item.invoice.invoiceDate >= :from
+            GROUP BY item.variant.id
+            """)
+    List<Object[]> sumSoldQtyByVariantAfter(
+            @Param("from") LocalDateTime from);
+
     // ─── Revenue by Product ───────────────────────────────────────────────────
 
     /**
      * Doanh thu theo từng sản phẩm trong khoảng thời gian.
      * Object[]: [productId, productCode, productName, categoryName, unit, totalQty, totalAmount]
+     * Dùng COALESCE để tránh NPE khi variant IS NULL (data cũ trước V22).
      */
     @Query("""
             SELECT item.product.id,
                    item.product.code,
                    item.product.name,
                    item.product.category.name,
-                   item.product.sellUnit,
+                   COALESCE(item.variant.sellUnit, 'cai'),
                    COALESCE(SUM(item.quantity), 0),
                    COALESCE(SUM(item.quantity * item.unitPrice), 0)
             FROM SalesInvoiceItem item
             WHERE item.invoice.invoiceDate BETWEEN :from AND :to
             GROUP BY item.product.id, item.product.code, item.product.name,
-                     item.product.category.name, item.product.sellUnit
+                     item.product.category.name, item.variant.sellUnit
             ORDER BY COALESCE(SUM(item.quantity * item.unitPrice), 0) DESC
             """)
     List<Object[]> revenueByProduct(

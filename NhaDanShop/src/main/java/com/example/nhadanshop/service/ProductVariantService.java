@@ -40,6 +40,23 @@ public class ProductVariantService {
         return DtoMapper.toResponse(findOrThrow(variantId));
     }
 
+    /**
+     * Lookup variant theo mã — dùng khi barcode scan.
+     * Tìm theo variant_code trước, nếu không có thì fallback tìm theo product.code (default variant).
+     */
+    public ProductVariantResponse getVariantByCode(String code) {
+        // Ưu tiên: tìm theo variant_code
+        var byVariantCode = variantRepo.findByVariantCodeIgnoreCase(code.trim());
+        if (byVariantCode.isPresent()) return DtoMapper.toResponse(byVariantCode.get());
+
+        // Fallback: tìm theo product.code → trả về default variant
+        return productRepo.findByCode(code.trim().toUpperCase())
+                .flatMap(p -> variantRepo.findByProductIdAndIsDefaultTrue(p.getId()))
+                .map(DtoMapper::toResponse)
+                .orElseThrow(() -> new EntityNotFoundException(
+                    "Không tìm thấy sản phẩm/biến thể với mã: '" + code + "'"));
+    }
+
     public List<ProductVariantResponse> getLowStockVariants() {
         return variantRepo.findLowStockVariants()
                 .stream().map(DtoMapper::toResponse).toList();
@@ -52,11 +69,20 @@ public class ProductVariantService {
         Product product = productRepo.findById(productId)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy SP ID: " + productId));
 
-        if (product.isCombo())
-            throw new IllegalArgumentException("COMBO product không hỗ trợ variants.");
+        // ── GUARD: Combo không có variant ────────────────────────────────────
+        // Tồn kho combo là ảo, tính từ min(stock_thành_phần / qty_yêu_cầu).
+        // Mọi attempt tạo variant cho combo đều bị chặn tại đây.
+        if (Product.ProductType.COMBO.equals(product.getProductType())) {
+            throw new IllegalArgumentException(
+                "Không thể tạo variant cho Combo '" + product.getCode() + "'. " +
+                "Combo không có variant — tồn kho được tính tự động từ các SP thành phần.");
+        }
 
         if (variantRepo.existsByVariantCode(req.variantCode()))
             throw new IllegalArgumentException("Mã variant '" + req.variantCode() + "' đã tồn tại.");
+
+        // [Fix #2] variant_code KHÔNG được trùng product.code của SP khác
+        validateVariantCodeNamespace(req.variantCode(), productId);
 
         // Nếu set is_default → clear default cũ trước
         if (Boolean.TRUE.equals(req.isDefault())) {
@@ -77,6 +103,10 @@ public class ProductVariantService {
         if (!v.getVariantCode().equalsIgnoreCase(req.variantCode())
                 && variantRepo.existsByVariantCode(req.variantCode())) {
             throw new IllegalArgumentException("Mã variant '" + req.variantCode() + "' đã tồn tại.");
+        }
+        // [Fix #2] Validate namespace
+        if (!v.getVariantCode().equalsIgnoreCase(req.variantCode())) {
+            validateVariantCodeNamespace(req.variantCode(), v.getProduct().getId());
         }
 
         // Nếu set is_default → clear default cũ trước
@@ -207,21 +237,39 @@ public class ProductVariantService {
         v.setProduct(product);
         v.setVariantCode(variantCode);
         v.setVariantName(product.getName());
-        v.setSellUnit(product.getSellUnit() != null ? product.getSellUnit() : product.getUnit());
-        v.setImportUnit(product.getImportUnit());
-        v.setPiecesPerUnit(product.getPiecesPerImportUnit() != null ? product.getPiecesPerImportUnit() : 1);
-        v.setSellPrice(product.getSellPrice() != null ? product.getSellPrice() : BigDecimal.ZERO);
-        v.setCostPrice(product.getCostPrice() != null ? product.getCostPrice() : BigDecimal.ZERO);
-        v.setStockQty(product.getStockQty() != null ? product.getStockQty() : 0);
-        v.setExpiryDays(product.getExpiryDays());
+        v.setSellUnit("cai");
+        v.setImportUnit(null);
+        v.setPiecesPerUnit(1);
+        v.setSellPrice(BigDecimal.ZERO);
+        v.setCostPrice(BigDecimal.ZERO);
+        v.setStockQty(0);
+        v.setExpiryDays(null);
         v.setActive(product.getActive());
         v.setIsDefault(true);
         v.setImageUrl(product.getImageUrl());
-        v.setConversionNote(product.getConversionNote());
+        v.setConversionNote(null);
         return variantRepo.save(v);
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * [Fix #2] Validate variant_code không được trùng product.code của SP khác.
+     * Cho phép trùng product.code của CHÍNH SP đó (default variant backward compat).
+     *
+     * Convention mới: khi tạo variant thứ 2 trở đi nên dùng mã riêng.
+     * VD: "MUOI-ABC-HU100", "MUOI-ABC-GOI50" thay vì "MUOI-ABC".
+     */
+    private void validateVariantCodeNamespace(String variantCode, Long ownProductId) {
+        productRepo.findByCode(variantCode).ifPresent(conflictProduct -> {
+            if (!conflictProduct.getId().equals(ownProductId)) {
+                throw new IllegalArgumentException(
+                    "Mã variant '" + variantCode + "' trùng với mã sản phẩm gốc '" +
+                    conflictProduct.getName() + "' (ID=" + conflictProduct.getId() + "). " +
+                    "Hãy dùng mã riêng biệt, VD: '" + variantCode + "-V1'.");
+            }
+        });
+    }
 
     private ProductVariant findOrThrow(Long variantId) {
         return variantRepo.findById(variantId)

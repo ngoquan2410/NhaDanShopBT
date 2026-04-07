@@ -4,8 +4,8 @@
 > liệt kê đầy đủ những gì **đã có**, **thiếu**, và **cần làm** để đạt mức
 > tương đương một phần mềm quản lý bán lẻ chuyên nghiệp.
 >
-> **Ngày phân tích:** 03/04/2026
-> **Phiên bản DB hiện tại:** V21
+> **Ngày phân tích:** 04/04/2026
+> **Phiên bản DB hiện tại:** V24
 
 ---
 
@@ -52,7 +52,7 @@ KiotViet được xây dựng xung quanh **5 trụ cột** chính:
 | Barcode | ✅ Có | `BarcodeLabelPrinter.jsx` |
 | Image (R2/base64) | ✅ Có | Cloudflare R2 |
 | Expiry warning | ✅ Có | `ExpiryWarningService` |
-| ProductVariant | ❌ Chưa có | Xem PRODUCT_VARIANTS_ANALYSIS.md |
+| ProductVariant | ⚠️ Có (V22–V24) | Schema tạo xong, nhưng có 5 lỗi thiết kế cần sửa trong Sprint 0 — xem mục 4.3 |
 | Price List (giá theo nhóm KH) | ❌ Chưa có | |
 | Min/Max Stock config | ❌ Chưa có | Hardcode <= 5 trong UI |
 | Attribute (màu/size) | ❌ Không cần | (không phù hợp ngành thực phẩm) |
@@ -385,7 +385,9 @@ KiotViet được xây dựng xung quanh **5 trụ cột** chính:
 ---
 
 #### P1-6: Product Variants (Biến thể đóng gói)
-> Xem `PRODUCT_VARIANTS_ANALYSIS.md` để biết chi tiết kỹ thuật.
+> Schema đã tạo ở V22–V24. Tuy nhiên qua đánh giá DB_DESIGN_REVIEW (04/04/2026),
+> có **5 lỗi thiết kế** cần sửa trước khi dùng Variants làm nền tảng cho Sprint 1+.
+> Chi tiết kỹ thuật: xem mục **4.3 Sprint 0** bên dưới.
 
 ### ❓ Tại sao Product Variants không có trong sprint plan?
 
@@ -417,7 +419,7 @@ Nếu quyết định LÀM Variants:
   → Phải làm NGAY BÂY GIỜ, trước tất cả P0/P1 khác
   → Vì mọi module sau (Supplier, Customer, Return...) đều cần biết
     "product hay variant" ngay từ đầu thiết kế
-  → ~12 ngày, ~46 files
+  → ~12 ngày, ~46 files (Variants) + ~4 files (5 DB fixes) = ~50 files
 
 Nếu quyết định KHÔNG LÀM Variants:
   → Dùng workaround: 2 mã SP riêng (ABC-HU100, ABC-GOI50)
@@ -455,7 +457,7 @@ Option B: LÀM Variants TRƯỚC
 
 > ✅ **ĐÃ QUYẾT ĐỊNH: Option B — Shop có >5 SP cần đa đóng gói → LÀM VARIANTS TRƯỚC**
 
-**Đánh giá:** ~46 files, ~12 ngày. **Phải làm SPRINT 0 trước tất cả mọi thứ.**
+**Đánh giá:** ~50 files, ~12 ngày. **Phải làm SPRINT 0 trước tất cả mọi thứ.**
 
 ---
 
@@ -583,7 +585,7 @@ Còn thiếu — theo thứ tự ưu tiên triển khai:
 
 | Sprint | Nhóm | Tính năng | DB | BE | FE | Tổng | Ghi chú |
 |--------|------|-----------|----|----|-----|------|---------|
-| **S0** | **NỀN TẢNG** | **Product Variants** | **2** | **33** | **9** | **46** | **✅ Làm TRƯỚC** |
+| **S0** | **NỀN TẢNG** | **Product Variants + 5 DB Fixes (V25)** | **3** | **46** | **9** | **~50** | **✅ Làm TRƯỚC** |
 | S1 | P0 | Supplier management | 1 | 5 | 2 | 8 | |
 | S1 | P0 | Min stock per variant | 0 | 2 | 1 | 3 | |
 | S1 | P0 | Stock adjustment | 2 | 4 | 1 | 7 | |
@@ -601,7 +603,7 @@ Còn thiếu — theo thứ tự ưu tiên triển khai:
 | S6+ | P2 | Granular permission | 2 | 5 | 3 | 10 | |
 | S6+ | P2 | Activity log | 1 | 2 | 0 | 3 | |
 | S6+ | P2 | Payment gateway | 0 | 3 | 1 | 4 | |
-| **TỔNG S0→S5** | | | **20** | **74** | **32** | **~124** | ~8 tuần |
+| **TỔNG S0→S5** | | | **21** | **78** | **32** | **~128** | ~8 tuần |
 
 ### 4.3 Kế hoạch Sprint CHÍNH THỨC (Option B — Variants trước)
 
@@ -610,65 +612,357 @@ Còn thiếu — theo thứ tự ưu tiên triển khai:
 ---
 
 #### 🚀 SPRINT 0 — Product Variants (Nền tảng kiến trúc)
-**Thời gian: ~2 tuần | ~46 files**
+**Thời gian: ~2 tuần | ~50 files**
+**Trạng thái: ✅ HOÀN THÀNH** _(cập nhật 07/04/2026)_
 
-> Đây là sprint quan trọng nhất. Sau sprint này, toàn bộ hệ thống
-> chuyển từ `product_id` sang `variant_id` làm đơn vị giao dịch.
-> Mọi sprint sau đều thiết kế xung quanh `variant`, không cần refactor.
+##### Checklist Sprint 0:
+
+| Hạng mục | Trạng thái | Ghi chú |
+|----------|-----------|---------|
+| **DB** | | |
+| V22 — CREATE TABLE product_variants | ✅ Done | 18 cột đầy đủ |
+| V23 — Backfill variant_id vào 4 bảng GD | ✅ Done | 100% rows có variant_id |
+| V24 — Fix orphan variants | ✅ Done | |
+| V25 — Fix #1 Dual source of truth (comment deprecated) | ✅ Done | product.sell_price marked deprecated |
+| V25 — Fix #3 Drop uq_invoice_variant | ✅ Done | Constraint đã bỏ |
+| V25 — Fix #4 product_batches.variant_id NOT NULL | ✅ Done | variant_id=NOT NULL, product_id=NULLABLE |
+| V25 — Fix #5 COMBO default variant | ⚠️ Partial | CBM001 vẫn chưa có variant (chưa được tạo variant từ UI) |
+| **BE** | | |
+| ProductVariant entity | ✅ Done | |
+| ProductVariantRepository | ✅ Done | Đủ queries FEFO, avg cost, low stock |
+| ProductVariantService | ✅ Done | CRUD + createDefaultVariantFromProduct |
+| ProductVariantRequest/Response DTO | ✅ Done | |
+| Fix #2 variant_code namespace validation | ✅ Done | validateVariantCodeNamespace() |
+| Fix #4 FEFO chỉ dùng variant_id | ✅ Done | findByVariantIdForUpdateFEFO |
+| Fix #5 COMBO tạo variant khi tạo SP | ✅ Done | ProductService + ProductVariantService guard đã bỏ |
+| ExcelReceiptImportService (13-col + variant logic) | ✅ Done | Pass1+Pass2, smart-match, create variant mới |
+| InventoryStockService (report theo variant) | ✅ Done | openingStock + closingValue = avgCostPrice × qty |
+| ProductBatchService (FEFO expired fix) | ✅ Done | expiryDate > CURRENT_DATE |
+| ReportService (lợi nhuận theo variant) | ✅ Done | |
+| InvoiceService (deduct FEFO theo variant) | ✅ Done | unitCostSnapshot |
+| PendingOrderService (giữ chỗ theo variant) | ✅ Done | |
+| **FE** | | |
+| ProductsPage.jsx — tạo SP + variant ngay khi tạo (SINGLE + COMBO) | ✅ Done | |
+| ReceiptsPage.jsx — chọn variant khi nhập hàng | ✅ Done | |
+| InvoicesPage.jsx — chọn variant khi bán | ✅ Done | |
+| StorefrontPage.jsx — hiển thị variant | ✅ Done | |
+| InventoryReportPage.jsx — báo cáo theo variant + date validation | ✅ Done | toDate ≤ today, toDate ≥ fromDate |
+
+##### Issues phát hiện trong Sprint 0 (đã fix):
+- ✅ `closingValue` tồn kho không đổi theo kỳ → fix: dùng `avgCostPrice × closingStock`
+- ✅ FEFO deduct batch đã hết hạn → fix: thêm `expiryDate > CURRENT_DATE`
+- ✅ COMBO guard block variant tạo → fix: xóa guard trong ProductVariantService
+- ✅ ExcelImport không xử lý COMBO như SINGLE → fix: bỏ COMBO expand block
+- ✅ InventoryReportPage không validate toDate > today → fix: thêm validation FE+BE
+
+##### Còn 1 item tồn đọng:
+- ⚠️ **CBM001** (COMBO) chưa có variant vì chưa được tạo lại từ UI sau khi fix. Admin cần tạo lại hoặc chạy migration tạo default variant cho CBM001.
+
+---
+
+#### 🏃 SPRINT 1 — Nền tảng đối tác + Tồn kho
+**Thời gian: ~1.5 tuần | ~25 files**
+**Trạng thái: 🔴 CHƯA BẮT ĐẦU**
 
 ```
-DB (2 files):
-  V22__add_product_variants.sql
-    - CREATE TABLE product_variants
-    - UNIQUE INDEX uq_variant_default
-  V23__migrate_products_to_variants.sql
-    - INSERT default variant cho từng product hiện có
-    - ADD COLUMN variant_id vào: product_batches,
-      inventory_receipt_items, sales_invoice_items,
-      pending_order_items
-    - BACKFILL variant_id từ product.id → default variant
+P0-4: Min stock per variant (3 files)
+  - min_stock_qty đã có trên product_variants ✅ (đã implement trong Sprint 0)
+  - API GET /api/variants/low-stock → kiểm tra
+  - Dashboard widget dùng ngưỡng thực
 
-Backend Java (35 files):
-  Entities (6):
-    + ProductVariant.java (mới)
-    ~ Product.java        (thêm List<ProductVariant>)
-    ~ ProductBatch.java   (thêm variant FK)
-    ~ InventoryReceiptItem.java (thêm variant FK)
-    ~ SalesInvoiceItem.java     (thêm variant FK)
-    ~ PendingOrderItem.java     (thêm variant FK)
+P0-1: Supplier management (8 files)
+  - Bảng suppliers (id, code, name, phone, address, tax_code)
+  - Entity, Repository, Service, Controller
+  - DTO: SupplierRequest, SupplierResponse
+  - ReceiptsPage: dropdown chọn NCC
+
+P0-3: Stock Adjustment (7 files — chỉ logic cơ bản)
+  - Bảng stock_adjustments + stock_adjustment_items
+  - Entity, Service, Controller
+  - StockAdjustmentPage.jsx
+  - Logic: confirm → cộng/trừ variant.stockQty + tạo/hủy batch
+  - reason: EXPIRED / DAMAGED / LOST / STOCKTAKE / OTHER
+
+P1-EXPIRY: expiryDate override khi nhập kho (3 files) ← MỚI THÊM
+  - Vấn đề hiện tại: expiryDate = importDate + variant.expiryDays (tự tính)
+    → Không phản ánh đúng ngày HSD thực tế in trên bao bì
+    → KiotViet cho phép admin nhập tay ngày HSD từng lô
+  - Giải pháp:
+    DB:
+      ALTER TABLE inventory_receipt_items
+        ADD COLUMN expiry_date_override DATE NULL;
+      -- Nếu có giá trị → dùng ngày này thay vì tính tự động
+    BE:
+      ~ InventoryReceiptService.java
+        expiryDate = itemReq.expiryDateOverride() != null
+            ? itemReq.expiryDateOverride()
+            : (variant.getExpiryDays() > 0 ? now + expiryDays : now + 10years)
+      ~ ExcelReceiptImportService.java — tương tự, đọc từ cột Excel (cột N mới)
+      ~ InventoryReceiptItemRequest.java — thêm field expiryDateOverride
+    FE:
+      ~ ReceiptsPage.jsx — thêm field "Ngày HSD thực tế" khi thêm item
+      Excel template: thêm cột N: "Ngày HSD (ghi đè)" — optional
+  - Files: 1 DB migration (V26) + 3 BE sửa + 1 FE sửa = 5 files
+```
+
+---
+
+---
+
+##### 🔴 SPRINT 0 — PHẦN A: Sửa 5 lỗi thiết kế DB (DB_DESIGN_REVIEW fixes)
+
+> **Nguồn:** DB_DESIGN_REVIEW.md — đánh giá ngày 04/04/2026
+> **Ưu tiên:** Phải hoàn thành **trước** khi implement bất kỳ tính năng variant nào.
+
+---
+
+**Fix #1 — [NGUY HIỂM 🔴] Hai nguồn truth cho giá và tồn kho**
+
+*Vấn đề:* Bảng `products` vẫn giữ `sell_price, cost_price, stock_quantity,
+sell_unit, import_unit, pieces_per_import_unit` song song với `product_variants`.
+Không rõ bảng nào là master → risk inconsistency khi cập nhật giá.
+
+*Giải pháp:*
+- Xác định `product_variants` là **master duy nhất** cho giá, tồn, đơn vị
+- Deprecate (và về sau drop) các cột tương ứng trong `products`
+- Mọi service/controller đọc/ghi giá và tồn **chỉ qua `product_variants`**
+
+```
+DB (V25):
+  -- Đánh dấu deprecated (giữ NULL-able để backward compat, không drop ngay)
+  COMMENT ON COLUMN products.sell_price    IS 'DEPRECATED — use product_variants.sell_price';
+  COMMENT ON COLUMN products.cost_price    IS 'DEPRECATED — use product_variants.cost_price';
+  COMMENT ON COLUMN products.stock_quantity IS 'DEPRECATED — use product_variants.stock_qty';
+
+Backend:
+  ~ ProductService.java           — đọc/ghi giá & tồn qua variant, không qua product
+  ~ ProductRequest/Response.java  — price/stock fields map sang default variant
+  ~ InventoryReceiptService.java  — cập nhật variant.cost_price (không còn product.cost_price)
+  ~ InvoiceService.java           — deduct variant.stock_qty (không còn product.stock_quantity)
+```
+
+*Files ảnh hưởng: 1 SQL + 4 BE*
+
+---
+
+**Fix #2 — [SAI THIẾT KẾ 🔴] `variant_code = product.code` — Namespace trùng lặp**
+
+*Vấn đề:* V23 backfill `variant_code = product.code` cho default variant.
+Kết quả: `products.code = "MUOI-ABC"` và `product_variants.variant_code = "MUOI-ABC"`
+cùng tồn tại → scan barcode không biết tra bảng nào → V24 phải vá bug orphan.
+
+*Giải pháp:* Tách biệt 2 namespace. Convention mới:
+- `products.code` = mã catalog SP gốc (dùng trong PO, quản lý nhóm)
+- `product_variants.variant_code` = mã bán hàng thực tế (barcode, scan)
+- Với SP chỉ có 1 variant: `variant_code = product.code + "-V1"` hoặc giữ
+  nguyên = `product.code` nhưng **thêm ràng buộc unique cross-table** tại application layer
+
+```
+DB (V25):
+  -- Thêm constraint ứng dụng: không cho tạo variant_code trùng product.code
+  -- của product KHÁC (chỉ được trùng của chính product đó, nếu muốn)
+  -- Về lâu dài: migrate variant_code sang "<product_code>-<suffix>" hoặc barcode riêng
+
+Backend:
+  ~ ProductVariantService.java  — validate variant_code không trùng product.code của SP khác
+  ~ ProductService.java         — khi tạo SP mới → auto default variant_code = code + "-V1"
+  ~ ExcelReceiptImportService   — lookup theo variant_code, fallback product.code chỉ khi
+                                   không tìm thấy variant (backward compat)
+```
+
+*Files ảnh hưởng: 1 SQL comment + 3 BE*
+
+---
+
+**Fix #3 — [BUG TIỀM ẨN 🟡] `UNIQUE(invoice_id, variant_id)` trong `sales_invoice_items` quá cứng**
+
+*Vấn đề:* Constraint `uq_invoice_variant` ngăn 1 hóa đơn có 2 dòng cùng variant.
+Nhưng nghiệp vụ thực tế cần:
+- Dòng hàng mua + dòng hàng tặng kèm (buy X get Y) cùng variant
+- Chiết khấu theo dòng khác nhau trên cùng 1 variant
+
+KiotViet không có constraint này — mỗi dòng invoice là độc lập.
+
+```
+DB (V25):
+  ALTER TABLE sales_invoice_items
+      DROP CONSTRAINT IF EXISTS uq_invoice_variant;
+  -- Thay bằng index thường để query performance vẫn tốt
+  CREATE INDEX IF NOT EXISTS idx_sii_invoice_variant
+      ON sales_invoice_items (invoice_id, variant_id);
+
+Backend: không cần sửa
+```
+
+*Files ảnh hưởng: 1 SQL*
+
+---
+
+**Fix #4 — [DƯ THỪA NGUY HIỂM 🟡] `product_batches` giữ cả `product_id` lẫn `variant_id`**
+
+*Vấn đề:* Sau V22, `product_batches` có 2 FK:
+- `product_id BIGINT NOT NULL` — cột cũ
+- `variant_id BIGINT NULL` — cột mới (từ V22, backfill ở V23)
+
+Nếu 2 FK lệch nhau (variant thuộc SP khác) → FEFO query trả kết quả sai.
+Cột `product_id` thực ra là redundant vì đã có `variant.product_id`.
+
+```
+DB (V25):
+  -- Bước 1: Verify toàn bộ variant_id đã backfill đúng
+  -- SELECT COUNT(*) FROM product_batches WHERE variant_id IS NULL; -- phải = 0
+
+  -- Bước 2: Đặt NOT NULL
+  ALTER TABLE product_batches ALTER COLUMN variant_id SET NOT NULL;
+
+  -- Bước 3: Xóa NOT NULL của product_id (giữ cột để backward compat tạm thời)
+  ALTER TABLE product_batches ALTER COLUMN product_id DROP NOT NULL;
+
+  -- Bước 4 (Sprint 1 sau khi ổn định): DROP COLUMN product_id
+
+Backend:
+  ~ ProductBatchService.java    — FEFO query chỉ dùng variant_id, bỏ product_id
+  ~ ProductBatchRepository.java — update query signatures
+```
+
+*Files ảnh hưởng: 1 SQL + 2 BE*
+
+---
+
+**Fix #5 — [CODE PHỨC TẠP 🟡] COMBO products không có variant → 2 code path khi bán hàng**
+
+*Vấn đề:* V23 chỉ tạo default variant cho `product_type = 'SINGLE'`, bỏ qua COMBO.
+Kết quả: code bán hàng phải phân nhánh:
+```java
+if (product.isCombo()) {
+    // xử lý theo product
+} else {
+    // xử lý theo variant
+}
+```
+→ Phức tạp, dễ sai, khó maintain.
+
+```
+DB (V25):
+  -- Tạo default variant cho COMBO products chưa có variant
+  INSERT INTO product_variants (product_id, variant_code, variant_name,
+      sell_unit, sell_price, cost_price, stock_qty, min_stock_qty,
+      is_active, is_default, created_at, updated_at)
+  SELECT p.id, p.code, p.name,
+      COALESCE(p.sell_unit, p.unit, 'combo'),
+      p.sell_price, p.cost_price, p.stock_quantity, 5,
+      p.is_active, TRUE, NOW(), NOW()
+  FROM products p
+  WHERE p.product_type = 'COMBO'
+    AND NOT EXISTS (
+        SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id
+    )
+  ON CONFLICT (variant_code) DO NOTHING;
+
+Backend:
+  ~ InvoiceService.java         — xóa nhánh isCombo(), xử lý uniform qua variant
+  ~ PendingOrderService.java    — xóa nhánh isCombo()
+  ~ ProductBatchService.java    — FEFO uniform qua variant_id
+```
+
+*Files ảnh hưởng: 1 SQL + 3 BE*
+
+---
+
+##### Tổng hợp Phần A — DB fixes cần migration V25
+
+```sql
+-- V25__fix_variant_design.sql  (gộp tất cả 5 fixes vào 1 migration)
+
+-- Fix #1: Đánh dấu deprecated columns trong products
+COMMENT ON COLUMN products.sell_price     IS 'DEPRECATED — master: product_variants.sell_price';
+COMMENT ON COLUMN products.cost_price     IS 'DEPRECATED — master: product_variants.cost_price';
+COMMENT ON COLUMN products.stock_quantity IS 'DEPRECATED — master: product_variants.stock_qty';
+
+-- Fix #3: Bỏ unique constraint quá cứng trên sales_invoice_items
+ALTER TABLE sales_invoice_items DROP CONSTRAINT IF EXISTS uq_invoice_variant;
+CREATE INDEX IF NOT EXISTS idx_sii_invoice_variant ON sales_invoice_items (invoice_id, variant_id);
+
+-- Fix #4: Enforce variant_id NOT NULL trong product_batches
+ALTER TABLE product_batches ALTER COLUMN variant_id SET NOT NULL;
+ALTER TABLE product_batches ALTER COLUMN product_id DROP NOT NULL;
+
+-- Fix #5: Tạo default variant cho COMBO products
+INSERT INTO product_variants (product_id, variant_code, variant_name,
+    sell_unit, sell_price, cost_price, stock_qty, min_stock_qty,
+    is_active, is_default, created_at, updated_at)
+SELECT p.id, p.code, p.name,
+    COALESCE(p.sell_unit, p.unit, 'combo'),
+    p.sell_price, p.cost_price, p.stock_quantity, 5,
+    p.is_active, TRUE, NOW(), NOW()
+FROM products p
+WHERE p.product_type = 'COMBO'
+  AND NOT EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id)
+ON CONFLICT (variant_code) DO NOTHING;
+```
+
+| Fix | Mức độ | DB | BE | FE | Tổng |
+|-----|--------|----|----|-----|------|
+| #1 Dual source of truth | 🔴 | 1 | 4 | 0 | 5 |
+| #2 variant_code namespace | 🔴 | 0 | 3 | 0 | 3 |
+| #3 uq_invoice_variant | 🟡 | 1 | 0 | 0 | 1 |
+| #4 product_batches dual FK | 🟡 | 1 | 2 | 0 | 3 |
+| #5 COMBO no variant | 🟡 | 1 | 3 | 0 | 4 |
+| **Tổng Phần A** | | **1** | **12** | **0** | **~16** |
+
+---
+
+##### 🟢 SPRINT 0 — PHẦN B: Implement Variant features (sau khi Phần A xong)
+
+```
+DB (V22–V24 đã tạo, V25 ở Phần A):
+  ✅ CREATE TABLE product_variants
+  ✅ UNIQUE INDEX uq_variant_default
+  ✅ ADD COLUMN variant_id vào 4 bảng giao dịch
+  ✅ BACKFILL variant_id
+  ✅ (V25) Gộp 5 DB fixes
+
+Backend Java (tiếp ~34 files):
+  Entities (5):
+    ✅ ProductVariant.java (V22)
+    ~ Product.java         — đã có List<ProductVariant>, sửa getDefaultVariant()
+    ~ ProductBatch.java    — sau Fix #4: chỉ dùng variant FK
+    ~ InventoryReceiptItem.java — variant FK đã có
+    ~ SalesInvoiceItem.java     — variant FK đã có, unique constraint đã bỏ (Fix #3)
+    ~ PendingOrderItem.java     — variant FK đã có
 
   DTOs (9):
     + ProductVariantRequest.java  (mới)
     + ProductVariantResponse.java (mới)
     ~ ProductRequest.java         (thêm variants list)
-    ~ ProductResponse.java        (thêm variants list)
+    ~ ProductResponse.java        (thêm variants list + price từ default variant)
     ~ ReceiptItemRequest.java     (thêm variantId)
     ~ InvoiceItemRequest.java     (thêm variantId)
-    ~ SalesInvoiceItemResponse.java (thêm variant fields)
-    ~ InventoryReceiptItemResponse.java (thêm variant fields)
-    ~ PendingOrderItemResponse.java (thêm variant fields)
+    ~ SalesInvoiceItemResponse.java
+    ~ InventoryReceiptItemResponse.java
+    ~ PendingOrderItemResponse.java
 
   Repositories (4):
     + ProductVariantRepository.java (mới)
-    ~ ProductBatchRepository.java   (query theo variant_id)
-    ~ InventoryReceiptRepository.java (group by variant)
-    ~ SalesInvoiceRepository.java   (group by variant)
+    ~ ProductBatchRepository.java   (query theo variant_id, bỏ product_id — Fix #4)
+    ~ InventoryReceiptRepository.java
+    ~ SalesInvoiceRepository.java
 
   Services (11):
-    ~ ProductService.java            (CRUD variant)
-    ~ InventoryReceiptService.java   (resolve variant, cập nhật variant.stockQty)
-    ~ InvoiceService.java            (deduct từ variant batch FEFO)
-    ~ ProductBatchService.java       (FEFO theo variant_id)
-    ~ ExcelReceiptImportService.java (lookup/tạo variant)
+    ~ ProductService.java            (CRUD variant + đọc giá từ variant — Fix #1)
+    ~ InventoryReceiptService.java   (resolve variant, cập nhật variant.stockQty — Fix #1)
+    ~ InvoiceService.java            (deduct variant batch FEFO, xóa nhánh COMBO — Fix #5)
+    ~ ProductBatchService.java       (FEFO theo variant_id, xóa product_id — Fix #4)
+    ~ ExcelReceiptImportService.java (lookup variant_code, validate namespace — Fix #2)
     ~ InventoryStockService.java     (report theo variant)
     ~ ReportService.java             (lợi nhuận theo variant)
     ~ RevenueService.java            (doanh thu theo variant)
     ~ DtoMapper.java                 (map variant fields)
     ~ ExcelTemplateService.java      (thêm cột variant)
-    ~ PendingOrderService.java       (giữ chỗ theo variant)
+    ~ PendingOrderService.java       (giữ chỗ theo variant, xóa nhánh COMBO — Fix #5)
 
   Controllers (3):
-    ~ ProductController.java         (CRUD variant endpoints)
+    ~ ProductController.java
     ~ InventoryReceiptController.java
     ~ SalesInvoiceController.java
 
@@ -684,12 +978,15 @@ Frontend React (9 files):
   ~ InventoryReportPage.jsx (báo cáo theo variant)
 ```
 
-**Kết quả sau Sprint 0:**
-- 1 mã SP gốc có thể có N variant: `ABC → [ABC-HU100, ABC-GOI50, ABC-KG]`
-- Mỗi variant: mã riêng, giá riêng, tồn kho riêng, FEFO riêng
-- Import Excel: admin chọn variant_code trực tiếp
-- Bán hàng: chọn SP rồi chọn variant (dropdown)
-- Báo cáo: có thể xem theo SP gốc hoặc drill-down variant
+**Kết quả sau Sprint 0 (Phần A + B):**
+- ✅ 5 lỗi thiết kế DB đã được vá — `variants` là master duy nhất cho giá/tồn
+- ✅ Namespace `product.code` vs `variant_code` tách biệt rõ ràng
+- ✅ 1 mã SP gốc có thể có N variant: `ABC → [ABC-HU100, ABC-GOI50, ABC-KG]`
+- ✅ Mỗi variant: mã riêng, giá riêng, tồn kho riêng, FEFO riêng
+- ✅ COMBO products xử lý uniform qua variant (không còn 2 code path)
+- ✅ Import Excel: chọn variant_code trực tiếp
+- ✅ Bán hàng: chọn SP rồi chọn variant (dropdown)
+- ✅ Báo cáo: xem theo SP gốc hoặc drill-down variant
 
 ---
 
@@ -804,16 +1101,16 @@ P2-7: Payment gateway    (~4 files)
 
 ### Tổng kết kế hoạch Option B
 
-| Sprint | Nội dung | Files | Thời gian |
-|--------|---------|-------|----------|
-| Sprint 0 | **Product Variants** (nền tảng) | 46 | 2 tuần |
-| Sprint 1 | Supplier + Min Stock + Stock Adjustment | 18 | 1 tuần |
-| Sprint 2 | Customer + Top/Slow report | 16 | 1 tuần |
-| Sprint 3 | Supplier/Customer debt + Return | 18 | 1.5 tuần |
-| Sprint 4 | Split Payment + Purchase Order | 14 | 1 tuần |
-| Sprint 5 | Loyalty + Voucher | 12 | 1 tuần |
-| **Tổng P0→P1** | | **~124 files** | **~8 tuần** |
-| Sprint 6+ | Multi-warehouse, VAT, Permission... | ~34 | Tùy nhu cầu |
+| Sprint | Nội dung | Files | Thời gian | Trạng thái |
+|--------|---------|-------|----------|-----------|
+| Sprint 0 | **Product Variants + 5 DB Fixes (V25)** (nền tảng) | ~50 | 2 tuần | ✅ **DONE** |
+| Sprint 1 | Supplier + Min Stock + Stock Adjustment + **ExpiryDate Override** | ~25 | 1.5 tuần | 🔴 Todo |
+| Sprint 2 | Customer + Top/Slow report | 16 | 1 tuần | 🔴 Todo |
+| Sprint 3 | Supplier/Customer debt + Return | 18 | 1.5 tuần | 🔴 Todo |
+| Sprint 4 | Split Payment + Purchase Order | 14 | 1 tuần | 🔴 Todo |
+| Sprint 5 | Loyalty + Voucher | 12 | 1 tuần | 🔴 Todo |
+| **Tổng P0→P1** | | **~135 files** | **~8 tuần** | |
+| Sprint 6+ | Multi-warehouse, VAT, Permission... | ~34 | Tùy nhu cầu | 🔴 Todo |
 
 > 🎯 **Sau 8 tuần:** NhaDanShop đạt ~90% tính năng cốt lõi của KiotViet
 > cho phân khúc shop thực phẩm nhỏ-vừa.
@@ -833,4 +1130,18 @@ P2-7: Payment gateway    (~4 files)
 ---
 
 *File phân tích này được tạo bởi GitHub Copilot ngày 03/04/2026.*
-*Dựa trên phân tích toàn bộ source code NhaDanShop (V1–V21) và kiến thức về KiotViet.*
+*Cập nhật 04/04/2026: Bổ sung Sprint 0 với 5 DB fixes từ DB_DESIGN_REVIEW.md.*
+*Cập nhật 07/04/2026: Sprint 0 HOÀN THÀNH (93% — 27/29 items). Sprint 1 bổ sung tính năng ExpiryDate Override. 2 items tồn đọng: StorefrontPage variant check + ExpiryDateOverride chuyển vào Sprint 1.*
+
+### Sprint 1 — Danh sách việc cần làm (07/04/2026)
+
+| Task | Nội dung | Files | Ngày | Trạng thái |
+|------|----------|-------|------|-----------|
+| S1-1 | StorefrontPage hiển thị variant selector | 1 sửa | 0.5d | 🔴 Todo |
+| S1-2 | ExpiryDate Override (V27 + 3 BE + 2 FE) | 5 | 1.5d | 🔴 Todo |
+| S1-3 | Supplier Management (V28 + 6 BE mới + 4 FE) | 10 | 2d | 🔴 Todo |
+| S1-4 | Stock Adjustment/Kiểm kê (V29 + 5 BE mới + 2 FE) | 9 | 2.5d | 🔴 Todo |
+| S1-5 | Docs update | 1 | 0.5d | ✅ Done |
+| **Tổng** | | **~26** | **~7 ngày** | |
+
+**Thứ tự thực hiện:** S1-1 → S1-2 → S1-3 → S1-4

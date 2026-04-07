@@ -42,6 +42,20 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
     @Query("SELECT v FROM ProductVariant v WHERE v.active = TRUE AND v.stockQty <= v.minStockQty")
     List<ProductVariant> findLowStockVariants();
 
+    /**
+     * [Fix Issue 1] Load TẤT CẢ active variants kèm FETCH JOIN product + category
+     * để tránh LazyInitializationException khi gọi ngoài @Transactional.
+     * Dùng bởi InventoryStockService.getStockReport().
+     */
+    @Query("""
+            SELECT v FROM ProductVariant v
+            JOIN FETCH v.product p
+            JOIN FETCH p.category
+            WHERE v.active = TRUE
+            ORDER BY p.id ASC, v.isDefault DESC, v.variantCode ASC
+            """)
+    List<ProductVariant> findAllActiveWithProductAndCategory();
+
     /** Variants của 1 SP có mã tìm kiếm */
     @Query("SELECT v FROM ProductVariant v WHERE v.product.id = :productId AND LOWER(v.variantCode) LIKE LOWER(CONCAT('%', :q, '%'))")
     List<ProductVariant> searchByProductIdAndCode(@Param("productId") Long productId, @Param("q") String q);

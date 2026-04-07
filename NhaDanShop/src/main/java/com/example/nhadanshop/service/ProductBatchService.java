@@ -42,6 +42,13 @@ public class ProductBatchService {
                 .stream().map(this::toResponse).toList();
     }
 
+    /** Lô theo variant còn hàng, FEFO order */
+    public List<ProductBatchResponse> getActiveBatchesByVariant(Long variantId) {
+        return batchRepo
+                .findByVariantIdAndRemainingQtyGreaterThanOrderByExpiryDateAsc(variantId, 0)
+                .stream().map(this::toResponse).toList();
+    }
+
     /** Lô thuộc 1 phiếu nhập kho */
     public List<ProductBatchResponse> getBatchesByReceipt(Long receiptId) {
         return batchRepo.findByReceiptIdOrderByExpiryDateAsc(receiptId)
@@ -96,6 +103,10 @@ public class ProductBatchService {
     @Transactional
     public BigDecimal deductStockFEFOAndComputeCost(Long productId, int qtyNeeded) {
         if (qtyNeeded <= 0) return BigDecimal.ZERO;
+        // [Fix #4] Fallback to product-based FEFO — chỉ dùng khi không có variantId.
+        // Log warning để dễ phát hiện code path cũ còn sót.
+        log.warn("[Fix#4] deductStockFEFOAndComputeCost called with productId={} only — " +
+                 "prefer overload with variantId for accuracy", productId);
         List<ProductBatch> batches = batchRepo.findByProductIdForUpdateFEFO(productId);
         return deductFromBatches(batches, qtyNeeded, "productId=" + productId);
     }
@@ -114,6 +125,12 @@ public class ProductBatchService {
     }
 
     private BigDecimal deductFromBatches(List<ProductBatch> batches, int qtyNeeded, String ctx) {
+        if (batches.isEmpty()) {
+            // Batch rỗng sau khi lọc hết hạn → có thể còn hàng nhưng đã hết hạn
+            throw new IllegalStateException(
+                "Không thể bán: " + ctx + " — không có lô hàng còn hạn sử dụng. " +
+                "Kiểm tra lại hàng hết hạn trong kho.");
+        }
         BigDecimal totalCost = BigDecimal.ZERO;
         int remaining = qtyNeeded;
         for (ProductBatch batch : batches) {
@@ -127,8 +144,9 @@ public class ProductBatchService {
                     batch.getBatchCode(), ctx, deduct, batch.getRemainingQty(), batch.getCostPrice());
         }
         if (remaining > 0)
-            throw new IllegalStateException("Lỗi đồng bộ lô hàng: " + ctx +
-                    " còn thiếu " + remaining + " đơn vị. Kiểm tra lại tồn kho.");
+            throw new IllegalStateException("Không đủ hàng còn hạn để bán: " + ctx +
+                    " còn thiếu " + remaining + " đơn vị. " +
+                    "Có thể một số lô đã hết hạn sử dụng hoặc tồn kho không đồng bộ.");
         return totalCost.divide(BigDecimal.valueOf(qtyNeeded), 2, RoundingMode.HALF_UP);
     }
 
@@ -167,9 +185,8 @@ public class ProductBatchService {
     // ─── Mapper ───────────────────────────────────────────────────────────────
 
     public ProductBatchResponse toResponse(ProductBatch b) {
-        String sellUnit = b.getProduct().getSellUnit() != null
-                ? b.getProduct().getSellUnit()
-                : b.getProduct().getUnit();
+        String sellUnit = b.getVariant() != null && b.getVariant().getSellUnit() != null
+                ? b.getVariant().getSellUnit() : "cai";
         return new ProductBatchResponse(
                 b.getId(),
                 b.getBatchCode(),

@@ -1,5 +1,6 @@
 package com.example.nhadanshop.controller;
 
+import com.example.nhadanshop.dto.ExcelPreviewResponse;
 import com.example.nhadanshop.dto.InventoryReceiptRequest;
 import com.example.nhadanshop.dto.InventoryReceiptResponse;
 import com.example.nhadanshop.service.ExcelReceiptImportService;
@@ -69,6 +70,17 @@ public class InventoryReceiptController {
     @ResponseStatus(HttpStatus.CREATED)
     public InventoryReceiptResponse create(@Valid @RequestBody InventoryReceiptRequest req) {
         return receiptService.createReceipt(req);
+    }
+
+    /**
+     * POST /api/receipts/preview-excel
+     * Parse file Excel, trả về danh sách rows kèm lỗi — KHÔNG ghi DB.
+     * FE dùng để hiển thị preview trước khi admin xác nhận.
+     */
+    @PostMapping(value = "/preview-excel", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ExcelPreviewResponse previewExcel(
+            @RequestParam("file") MultipartFile file) throws IOException {
+        return excelReceiptImportService.previewExcel(file);
     }
 
     /**

@@ -35,19 +35,7 @@ public class ProductController {
     }
 
     /**
-     * POST /api/products/check-availability
-     * Kiểm tra tồn kho khả dụng (stockQty - pending reserved) trước khi checkout.
-     * Authenticated user gọi được — không cần ADMIN.
-     */
-    @PostMapping("/check-availability")
-    public StockCheckResponse checkAvailability(@Valid @RequestBody StockCheckRequest req) {
-        return productService.checkStock(req);
-    }
-
-    /**
      * GET /api/products/next-code?categoryId=1
-     * Trả về mã sản phẩm tiếp theo sẽ được tạo cho category đó.
-     * Admin dùng để preview trước khi thêm sản phẩm.
      */
     @GetMapping("/next-code")
     public java.util.Map<String, String> nextCode(@RequestParam Long categoryId) {
@@ -177,6 +165,17 @@ public class ProductController {
     @GetMapping("/low-stock-variants")
     public List<ProductVariantResponse> getLowStockVariants() {
         return variantService.getLowStockVariants();
+    }
+
+    /**
+     * GET /api/products/variants/by-code/{code}
+     * Lookup variant theo mã barcode — dùng khi quét mã vạch tại POS/InvoicesPage.
+     * Tìm theo variant_code trước, fallback product.code → default variant.
+     * Trả về 404 nếu không tìm thấy.
+     */
+    @GetMapping("/variants/by-code/{code}")
+    public ProductVariantResponse getVariantByCode(@PathVariable String code) {
+        return variantService.getVariantByCode(code);
     }
 }
 

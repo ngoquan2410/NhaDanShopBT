@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react'
+﻿﻿import { useState, useEffect, useRef } from 'react'
 import { useInvoices, useInvoiceMutations } from '../../hooks/useInvoices'
 import { useProducts } from '../../hooks/useProducts'
 import { useSort } from '../../hooks/useSort'
@@ -101,17 +101,28 @@ function InvoiceForm({ products, onSubmit, loading }) {
 
   const getProduct = (id) => products.find(p => String(p.id) === String(id))
 
-  const handleScanResult = (product) => {
-    const existing = items.find(i => String(i.productId) === String(product.id))
+  // [Sprint 0] Nhận cả product VÀ variant từ BarcodeScanner
+  const handleScanResult = (product, variant) => {
+    const variantId = variant?.id || null
+    // Nếu cùng product+variant đã có trong giỏ → tăng qty
+    const existing = items.find(i =>
+      String(i.productId) === String(product.id) &&
+      String(i.variantId || '') === String(variantId || '')
+    )
     if (existing) {
       setItems(prev => prev.map(i =>
-        String(i.productId) === String(product.id) ? { ...i, quantity: i.quantity + 1 } : i))
+        String(i.productId) === String(product.id) &&
+        String(i.variantId || '') === String(variantId || '')
+          ? { ...i, quantity: i.quantity + 1 }
+          : i
+      ))
     } else {
       const emptyIdx = items.findIndex(i => !i.productId)
+      const newItem = { productId: String(product.id), variantId: variantId ? String(variantId) : '', quantity: 1, discountPercent: 0 }
       if (emptyIdx >= 0) {
-        setItem(emptyIdx, 'productId', String(product.id))
+        setItems(prev => prev.map((it, j) => j === emptyIdx ? newItem : it))
       } else {
-        setItems(prev => [...prev, { productId: String(product.id), quantity: 1, discountPercent: 0 }])
+        setItems(prev => [...prev, newItem])
       }
     }
   }
@@ -123,7 +134,7 @@ function InvoiceForm({ products, onSubmit, loading }) {
     const variants = p.variants || []
     const selectedVariant = variants.find(v => String(v.id) === String(it.variantId))
       || variants.find(v => v.isDefault)
-    const price = selectedVariant ? Number(selectedVariant.sellPrice) : Number(p.sellPrice)
+    const price = selectedVariant ? Number(selectedVariant.sellPrice) : 0
     const disc = Number(it.discountPercent) || 0
     const actualPrice = price * (1 - disc / 100)
     return s + actualPrice * Number(it.quantity)
@@ -230,8 +241,8 @@ function InvoiceForm({ products, onSubmit, loading }) {
             // Resolve sellPrice từ variant nếu có
             const selectedVariant = variants.find(v => String(v.id) === String(item.variantId))
               || variants.find(v => v.isDefault)
-            const sellPrice = selectedVariant ? Number(selectedVariant.sellPrice) : (p ? Number(p.sellPrice) : 0)
-            const stockQty  = selectedVariant ? selectedVariant.stockQty : (p ? p.stockQty : 0)
+            const sellPrice = selectedVariant ? Number(selectedVariant.sellPrice) : 0
+            const stockQty  = selectedVariant ? selectedVariant.stockQty : 0
             const sellUnit  = selectedVariant ? selectedVariant.sellUnit : (p?.sellUnit || p?.unit || '')
             const disc = Number(item.discountPercent) || 0
             const actualPrice = Math.round(sellPrice * (1 - disc / 100))
@@ -248,7 +259,7 @@ function InvoiceForm({ products, onSubmit, loading }) {
                   }}
                     required className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
                     <option value="">-- Chọn sản phẩm --</option>
-                    {products.filter(prod => prod.active && prod.stockQty > 0).map(prod => (
+                    {products.filter(prod => prod.active && (prod.variants?.find(v=>v.isDefault)?.stockQty ?? 0) > 0).map(prod => (
                       <option key={prod.id} value={prod.id}>
                         {prod.code} - {prod.name}
                       </option>
@@ -414,49 +425,68 @@ function InvoiceDetail({ inv, onClose }) {
             <tr className="text-gray-600 text-xs">
               <th className="text-left px-3 py-2">Sản phẩm</th>
               <th className="text-right px-3 py-2">SL</th>
-              <th className="text-right px-3 py-2">Giá gốc</th>
+              <th className="text-right px-3 py-2" title="Giá niêm yết bán cho khách (variant.sellPrice tại thời điểm bán)">
+                Giá niêm yết
+              </th>
               <th className="text-right px-3 py-2">CK%</th>
-              <th className="text-right px-3 py-2">Giá bán</th>
+              <th className="text-right px-3 py-2" title="Giá thực tế sau chiết khấu dòng">Giá bán</th>
+              <th className="text-right px-3 py-2 text-orange-600" title="Giá vốn trung bình FEFO từ lô hàng (unitCostSnapshot)">
+                Giá vốn
+              </th>
               <th className="text-right px-3 py-2">Thành tiền</th>
             </tr>
           </thead>
           <tbody>
-            {inv.items?.map((it, i) => (
-              <tr key={i} className="border-t">
-                <td className="px-3 py-2">{it.productName}</td>
-                <td className="px-3 py-2 text-right text-xs">{it.quantity} {it.unit}</td>
+            {inv.items?.map((it, i) => {
+              const disc = Number(it.lineDiscountPercent || 0)
+              const cost = Number(it.unitCostSnapshot || 0)
+              const sellPrice = Number(it.unitPrice || 0)
+              const margin = sellPrice > 0 ? Math.round((sellPrice - cost) / sellPrice * 100) : 0
+              return (
+              <tr key={i} className="border-t hover:bg-gray-50">
+                <td className="px-3 py-2">
+                  {it.productName}
+                  {it.variantCode && it.variantCode !== it.productCode && (
+                    <span className="ml-1 text-xs text-purple-600 font-mono">[{it.variantCode}]</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right text-xs">{it.quantity} {it.sellUnit || it.unit}</td>
                 <td className="px-3 py-2 text-right text-xs text-gray-500">
                   {Number(it.originalUnitPrice ?? it.unitPrice).toLocaleString('vi-VN')}
                 </td>
                 <td className="px-3 py-2 text-right text-xs">
-                  {Number(it.lineDiscountPercent) > 0
-                    ? <span className="text-amber-600 font-medium">{Number(it.lineDiscountPercent)}%</span>
+                  {disc > 0
+                    ? <span className="text-amber-600 font-medium">{disc}%</span>
                     : <span className="text-gray-400">—</span>}
                 </td>
-                <td className="px-3 py-2 text-right text-xs">{Number(it.unitPrice).toLocaleString('vi-VN')}</td>
+                <td className="px-3 py-2 text-right text-xs font-medium">{Number(it.unitPrice).toLocaleString('vi-VN')}</td>
+                <td className="px-3 py-2 text-right text-xs text-orange-700">
+                  <div>{cost.toLocaleString('vi-VN')}</div>
+                  <div className="text-gray-400 text-[10px]">biên {margin}%</div>
+                </td>
                 <td className="px-3 py-2 text-right font-medium">{Number(it.lineTotal).toLocaleString('vi-VN')}</td>
               </tr>
-            ))}
+            )})}
           </tbody>
           <tfoot className="bg-gray-50 text-sm font-semibold">
             <tr>
-              <td colSpan={5} className="px-3 py-2 text-right text-gray-600">Tổng tiền hàng:</td>
+              <td colSpan={6} className="px-3 py-2 text-right text-gray-600">Tổng tiền hàng:</td>
               <td className="px-3 py-2 text-right text-gray-700">{Number(inv.totalAmount).toLocaleString('vi-VN')} ₫</td>
             </tr>
             {Number(inv.discountAmount) > 0 && (
               <tr>
-                <td colSpan={5} className="px-3 py-2 text-right text-amber-600">🎉 Giảm KM:</td>
+                <td colSpan={6} className="px-3 py-2 text-right text-amber-600">🎉 Giảm KM:</td>
                 <td className="px-3 py-2 text-right text-amber-600 font-bold">-{Number(inv.discountAmount).toLocaleString('vi-VN')} ₫</td>
               </tr>
             )}
             <tr>
-              <td colSpan={5} className="px-3 py-2 text-right text-green-700 font-bold text-base">Khách thanh toán:</td>
+              <td colSpan={6} className="px-3 py-2 text-right text-green-700 font-bold text-base">Khách thanh toán:</td>
               <td className="px-3 py-2 text-right text-green-700 font-bold text-base">
                 {Number(inv.finalAmount ?? inv.totalAmount).toLocaleString('vi-VN')} ₫
               </td>
             </tr>
             <tr>
-              <td colSpan={5} className="px-3 py-2 text-right text-blue-600">Lợi nhuận gộp:</td>
+              <td colSpan={6} className="px-3 py-2 text-right text-blue-600">Lợi nhuận gộp:</td>
               <td className="px-3 py-2 text-right text-blue-600">{Number(inv.totalProfit).toLocaleString('vi-VN')} ₫</td>
             </tr>
           </tfoot>

@@ -17,7 +17,7 @@ public record RevenueByProductDto(
         String productCode,
         String productName,
         String categoryName,
-        String unit,
+        String sellUnit,
         List<RevenueRowDto> rows,
         BigDecimal totalAmount,
         Long totalQty

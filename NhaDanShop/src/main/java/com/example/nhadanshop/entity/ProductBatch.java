@@ -33,9 +33,9 @@ public class ProductBatch {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** Sản phẩm thuộc lô này */
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "product_id", nullable = false)
+    /** Sản phẩm thuộc lô này — nullable sau V25 (DEPRECATED, dùng variant.product) */
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "product_id", nullable = true)
     private Product product;
 
     /**

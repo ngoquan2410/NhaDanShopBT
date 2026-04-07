@@ -17,7 +17,7 @@ export default function BarcodeScanner({ products, onScan, onClose }) {
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
   const [cameraReady, setCameraReady] = useState(false)
-  const [lastScanned, setLastScanned] = useState(null)
+  const [lastScanned, setLastScanned] = useState(null)   // { product, variant }
 
   const videoRef   = useRef(null)
   const readerRef  = useRef(null)
@@ -26,21 +26,41 @@ export default function BarcodeScanner({ products, onScan, onClose }) {
   const hidBufRef  = useRef('')   // ref để tránh stale closure
 
   // ── Tìm sản phẩm theo mã ───────────────────────────────────────────────────
+  /**
+   * [Sprint 0] Tìm theo thứ tự ưu tiên:
+   *   1. variant_code của bất kỳ variant nào
+   *   2. product.code (→ default variant)
+   *   3. product.barcode (legacy)
+   * Trả về { product, variant } hoặc null
+   */
   const findProduct = useCallback((code) => {
     const normalized = code.trim().toUpperCase()
-    return products.find(p =>
-      p.code?.toUpperCase() === normalized ||
-      p.barcode?.toUpperCase() === normalized
+    // Tìm theo variant_code
+    for (const p of products) {
+      const variants = p.variants || []
+      const matchVariant = variants.find(v => v.variantCode?.toUpperCase() === normalized)
+      if (matchVariant) return { product: p, variant: matchVariant }
+    }
+    // Fallback: tìm theo product.code hoặc barcode → dùng default variant
+    const p = products.find(pr =>
+      pr.code?.toUpperCase() === normalized ||
+      pr.barcode?.toUpperCase() === normalized
     )
+    if (p) {
+      const defVariant = (p.variants || []).find(v => v.isDefault) || (p.variants || [])[0] || null
+      return { product: p, variant: defVariant }
+    }
+    return null
   }, [products])
 
   const handleCodeFound = useCallback((code) => {
-    const product = findProduct(code)
-    if (product) {
-      setLastScanned(product)
+    const result = findProduct(code)
+    if (result) {
+      setLastScanned(result)   // { product, variant }
       setError('')
-      setInfo(`✅ Tìm thấy: ${product.name}`)
-      onScan(product)
+      const variantLabel = result.variant ? ` [${result.variant.variantCode}]` : ''
+      setInfo(`✅ Tìm thấy: ${result.product.name}${variantLabel}`)
+      onScan(result.product, result.variant)  // [Sprint 0] truyền cả variant
       // Auto clear info sau 2s
       setTimeout(() => setInfo(''), 2000)
     } else {
@@ -219,8 +239,14 @@ export default function BarcodeScanner({ products, onScan, onClose }) {
               {lastScanned && (
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
                   <p className="text-xs text-blue-500 mb-1">Sản phẩm vừa quét:</p>
-                  <p className="font-semibold text-blue-800">{lastScanned.name}</p>
-                  <p className="text-xs text-blue-600">Mã: {lastScanned.code} | Giá: {Number(lastScanned.sellPrice).toLocaleString('vi-VN')} ₫</p>
+                  <p className="font-semibold text-blue-800">{lastScanned.product.name}</p>
+                  {lastScanned.variant
+                    ? <p className="text-xs text-blue-600">
+                        [{lastScanned.variant.variantCode}] {lastScanned.variant.variantName} |
+                        Giá: {Number(lastScanned.variant.sellPrice).toLocaleString('vi-VN')} ₫/{lastScanned.variant.sellUnit}
+                      </p>
+                    : <p className="text-xs text-blue-600">Mã: {lastScanned.product.code}</p>
+                  }
                 </div>
               )}
             </div>

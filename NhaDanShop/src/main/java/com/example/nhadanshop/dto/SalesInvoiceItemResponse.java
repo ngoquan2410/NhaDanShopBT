@@ -7,7 +7,6 @@ public record SalesInvoiceItemResponse(
         Long productId,
         String productCode,
         String productName,
-        String unit,
         Integer quantity,
         BigDecimal originalUnitPrice,   // giá gốc trước CK dòng
         BigDecimal lineDiscountPercent, // % CK dòng
@@ -19,5 +18,10 @@ public record SalesInvoiceItemResponse(
         Long variantId,
         String variantCode,
         String variantName,
-        String sellUnit       // đơn vị bán lẻ của variant
+        String sellUnit,      // đơn vị bán lẻ của variant
+        // Combo KiotViet — null = bán lẻ thường, not null = khai triển từ combo
+        Long comboSourceId,
+        String comboSourceCode,
+        String comboSourceName,
+        BigDecimal comboUnitPrice  // giá bán của combo tại thời điểm giao dịch
 ) {}

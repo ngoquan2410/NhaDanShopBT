@@ -127,7 +127,8 @@ public class PendingOrderService {
                                 i.getProduct().getId(),
                                 i.getQuantity(),
                                 null,
-                                i.getVariant() != null ? i.getVariant().getId() : null)) // [Sprint 0]
+                                i.getVariant() != null ? i.getVariant().getId() : null, // [Sprint 0]
+                                null)) // comboId = null (pending order chỉ chứa SP đơn)
                         .toList()
         );
         SalesInvoiceResponse invoice = invoiceService.createInvoice(invoiceReq);
@@ -183,9 +184,7 @@ public class PendingOrderService {
         List<PendingOrderItemResponse> items = order.getItems().stream()
                 .map(i -> {
                     var v = i.getVariant();
-                    String unit = v != null ? v.getSellUnit()
-                            : (i.getProduct().getSellUnit() != null
-                                ? i.getProduct().getSellUnit() : i.getProduct().getUnit());
+                    String unit = v != null && v.getSellUnit() != null ? v.getSellUnit() : "cai";
                     return new PendingOrderItemResponse(
                             i.getProduct().getId(),
                             i.getProduct().getName(),

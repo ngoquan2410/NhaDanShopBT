@@ -1,4 +1,4 @@
-﻿﻿import { useState, useEffect, useRef } from 'react'
+﻿﻿﻿import { useState, useEffect, useRef } from 'react'
 import { useProducts, useProductMutations, useVariants, useVariantMutations } from '../../hooks/useProducts'
 import { useCategories } from '../../hooks/useCategories'
 import { productService } from '../../services/productService'
@@ -118,22 +118,56 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
     code: initial?.code || '',
     name: initial?.name || '',
     categoryId: initial?.categoryId ? String(initial.categoryId) : '',
-    unit: initial?.unit || '',
-    costPrice: initial?.costPrice || '',
-    sellPrice: initial?.sellPrice || '',
-    stockQty: initial?.stockQty ?? 0,
     active: initial?.active ?? true,
-    expiryDays: initial?.expiryDays || 0,
-    importUnit: initial?.importUnit || '',
-    sellUnit: initial?.sellUnit || '',
-    piecesPerImportUnit: initial?.piecesPerImportUnit || 1,
-    conversionNote: initial?.conversionNote || '',
     imageUrl: initial?.imageUrl || '',
+    productType: initial?.productType || 'SINGLE',
   })
-  // Gợi ý mã (chỉ hint, admin phải tự nhập)
   const [codeSuggestion, setCodeSuggestion] = useState('')
   const [codeError, setCodeError] = useState('')
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  // ── Variants ngay trong form tạo mới (chỉ SINGLE) ─────────────────────
+  const emptyVariant = () => ({
+    _key: Date.now() + Math.random(),
+    variantCode: '', variantName: '', sellUnit: 'cái', importUnit: '',
+    piecesPerUnit: 1, sellPrice: 0, costPrice: 0, stockQty: 0,
+    minStockQty: 5, expiryDays: '', isDefault: false, conversionNote: '',
+  })
+  const [variants, setVariants] = useState([{ ...emptyVariant(), isDefault: true }])
+  const setV = (idx, k, v) => setVariants(vs => vs.map((vv, i) => i === idx ? { ...vv, [k]: v } : vv))
+
+  // Khi chọn loại sản phẩm
+  // COMBO → clear variants (combo không có variant, tồn kho ảo từ thành phần)
+  // SINGLE → giữ hoặc khởi tạo 1 variant mặc định
+  const handleTypeChange = (type) => {
+    set('productType', type)
+    if (type === 'COMBO') {
+      setVariants([]) // Combo không có variant
+    } else {
+      if (variants.length === 0) setVariants([{ ...emptyVariant(), isDefault: true }])
+    }
+  }
+
+  // Khi đổi isDefault → chỉ 1 variant được là default
+  const setDefault = (idx) => {
+    setVariants(vs => vs.map((vv, i) => ({ ...vv, isDefault: i === idx })))
+  }
+
+  // Auto-fill variantCode từ product code nếu chỉ có 1 variant
+  useEffect(() => {
+    if (isEdit) return
+    if (variants.length === 1 && form.code && !variants[0].variantCode) {
+      setV(0, 'variantCode', form.code)
+    }
+  }, [form.code])
+
+  // Auto-fill variantName từ product name nếu chỉ có 1 variant
+  useEffect(() => {
+    if (isEdit) return
+    if (variants.length === 1 && form.name && !variants[0].variantName) {
+      setV(0, 'variantName', form.name)
+    }
+  }, [form.name])
 
   useEffect(() => {
     if (isEdit || !form.categoryId) return
@@ -144,36 +178,54 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!form.code || !form.code.trim()) {
-      setCodeError('Mã sản phẩm không được để trống')
-      return
-    }
+    if (!form.code || !form.code.trim()) { setCodeError('Mã sản phẩm không được để trống'); return }
     setCodeError('')
-    onSubmit({
+
+    // Validate variants — CHỈ khi SINGLE (COMBO không có variant)
+    if (!isEdit && form.productType !== 'COMBO') {
+      for (const v of variants) {
+        if (!v.variantCode.trim()) { alert('Mã biến thể không được để trống'); return }
+        if (!v.variantName.trim()) { alert('Tên biến thể không được để trống'); return }
+        if (!v.sellUnit.trim()) { alert('Đơn vị bán lẻ không được để trống'); return }
+        if (Number(v.sellPrice) < 0) { alert('Giá bán không được âm'); return }
+      }
+      // Đảm bảo có đúng 1 default
+      const hasDefault = variants.some(v => v.isDefault)
+      if (!hasDefault && variants.length > 0) setDefault(0)
+    }
+
+    const payload = {
       ...form,
       categoryId: Number(form.categoryId),
-      costPrice: Number(form.costPrice),
-      sellPrice: Number(form.sellPrice),
-      stockQty: Number(form.stockQty),
-      expiryDays: Number(form.expiryDays),
-      piecesPerImportUnit: Number(form.piecesPerImportUnit),
-    })
+      // Gửi initialVariants khi tạo mới SINGLE — COMBO không gửi variant
+      initialVariants: (!isEdit && form.productType !== 'COMBO')
+        ? variants.map(v => ({
+            variantCode: v.variantCode.trim().toUpperCase(),
+            variantName: v.variantName.trim(),
+            sellUnit: v.sellUnit.trim() || 'cái',
+            importUnit: v.importUnit || null,
+            piecesPerUnit: Number(v.piecesPerUnit) || 1,
+            sellPrice: Number(v.sellPrice) || 0,
+            costPrice: Number(v.costPrice) || 0,
+            stockQty: Number(v.stockQty) || 0,
+            minStockQty: Number(v.minStockQty) || 5,
+            expiryDays: v.expiryDays ? Number(v.expiryDays) : null,
+            isDefault: !!v.isDefault,
+            imageUrl: null,
+            conversionNote: v.conversionNote || null,
+          }))
+        : undefined,
+    }
+    onSubmit(payload)
   }
 
-  const field = (label, key, type = 'text', required = false, extra = {}) => (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}{required && ' *'}</label>
-      <input type={type} value={form[key]} onChange={e => set(key, e.target.value)}
-        required={required} {...extra}
-        className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500 text-sm" />
-    </div>
-  )
-
   const categorySelected = !!form.categoryId
+  const isComboType = form.productType === 'COMBO'
+
+  // Helper render input cho variant
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      {/* Bước 1: Chọn danh mục */}
       <div className={`rounded-lg p-4 border-2 ${categorySelected ? 'border-green-200 bg-green-50' : 'border-yellow-300 bg-yellow-50'}`}>
         <label className="block text-sm font-semibold text-gray-700 mb-2">
           {categorySelected ? 'Danh mục' : 'Bước 1: Chọn danh mục trước *'}
@@ -186,15 +238,12 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
         {!categorySelected && <p className="text-xs text-yellow-700 mt-1">Vui lòng chọn danh mục trước</p>}
       </div>
 
-      {/* Bước 2: Nhập mã sản phẩm (BẮT BUỘC tay) */}
       {categorySelected && (
         <div className="rounded-lg p-4 border-2 border-blue-200 bg-blue-50">
           <label className="block text-sm font-semibold text-gray-700 mb-1">
             {isEdit ? 'Mã sản phẩm' : 'Bước 2: Nhập mã sản phẩm *'}
           </label>
-          <input
-            type="text"
-            value={form.code}
+          <input type="text" value={form.code}
             onChange={e => { set('code', e.target.value.toUpperCase()); setCodeError('') }}
             placeholder={isEdit ? '' : (codeSuggestion ? `Gợi ý: ${codeSuggestion}` : 'VD: BT001, M001...')}
             className={`w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 text-sm font-mono font-bold tracking-widest uppercase ${codeError ? 'border-red-400 focus:ring-red-400' : 'border-blue-300 focus:ring-blue-400'}`}
@@ -202,46 +251,177 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
           {codeError && <p className="text-xs text-red-600 mt-1">⚠️ {codeError}</p>}
           {!isEdit && codeSuggestion && !codeError && (
             <p className="text-xs text-blue-600 mt-1">
-              💡 Gợi ý mã theo danh mục: <b>{codeSuggestion}</b>
-              <button type="button" onClick={() => set('code', codeSuggestion)}
-                className="ml-2 underline hover:text-blue-800">Dùng gợi ý này</button>
+              💡 Gợi ý: <b>{codeSuggestion}</b>
+              <button type="button" onClick={() => set('code', codeSuggestion)} className="ml-2 underline hover:text-blue-800">Dùng gợi ý này</button>
             </p>
           )}
-          {!isEdit && <p className="text-xs text-gray-500 mt-1">Mã phải độc nhất, không thể thay đổi sau khi tạo.</p>}
         </div>
       )}
 
       {categorySelected && (
         <>
-          <div className="grid grid-cols-2 gap-4">
-            {field('Tên sản phẩm', 'name', 'text', true)}
-            {field('Đơn vị', 'unit', 'text', true)}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tên sản phẩm *</label>
+            <input value={form.name} onChange={e => set('name', e.target.value)} required
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            {field('Số ngày hạn sử dụng', 'expiryDays', 'number')}
-            {field('Tồn kho ban đầu', 'stockQty', 'number')}
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            {field('Giá vốn (₫)', 'costPrice', 'number', true)}
-            {field('Giá bán (₫)', 'sellPrice', 'number', true)}
-          </div>
-          <div className="border-t pt-4">
-            <p className="text-sm font-semibold text-gray-600 mb-3">Quy đổi đơn vị (tùy chọn)</p>
-            <div className="grid grid-cols-2 gap-4">
-              {field('Đơn vị nhập kho', 'importUnit')}
-              {field('Đơn vị bán lẻ', 'sellUnit')}
+
+          {/* Loại sản phẩm - chỉ hiện khi tạo mới */}
+          {!isEdit && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Loại sản phẩm *</label>
+              <div className="flex gap-3">
+                {[
+                  { value: 'SINGLE', label: '📦 Sản phẩm đơn', desc: 'Có biến thể đóng gói (kg, hộp, bịch...)' },
+                  { value: 'COMBO', label: '🎁 Combo', desc: 'Gói nhiều sản phẩm lại với nhau' },
+                ].map(opt => (
+                  <button key={opt.value} type="button"
+                    onClick={() => handleTypeChange(opt.value)}
+                    className={`flex-1 border-2 rounded-xl p-3 text-left transition-all ${form.productType === opt.value
+                      ? 'border-green-500 bg-green-50'
+                      : 'border-gray-200 hover:border-gray-300'}`}>
+                    <div className="font-semibold text-sm">{opt.label}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
             </div>
-            {field('Số lẻ / đơn vị nhập', 'piecesPerImportUnit', 'number')}
-            {field('Ghi chú quy đổi', 'conversionNote')}
-          </div>
+          )}
+
           <ImageUploader imageUrl={form.imageUrl} onUrlChange={url => set('imageUrl', url)} />
+
+          {/* Variants - chỉ hiện khi SINGLE, không hiện cho COMBO */}
+          {!isEdit && !isComboType && (
+            <div className="border-2 rounded-xl p-4 space-y-3 border-purple-200 bg-purple-50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-semibold text-sm text-purple-800">🔀 Biến thể đóng gói</h4>
+                  <p className="text-xs mt-0.5 text-purple-600">
+                    Thiết lập ngay khi tạo sản phẩm – có thể thêm thêm sau
+                  </p>
+                </div>
+                <button type="button"
+                  onClick={() => setVariants(vs => [...vs, { ...emptyVariant(), isDefault: vs.length === 0 }])}
+                  className="text-white px-3 py-1.5 rounded-lg text-xs bg-purple-600 hover:bg-purple-700">
+                  + Thêm biến thể
+                </button>
+              </div>
+
+              {variants.map((v, idx) => (
+                <div key={v._key} className={`bg-white border rounded-xl p-3 space-y-2 ${v.isDefault ? 'border-purple-400' : 'border-gray-200'}`}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-semibold text-gray-600">Biến thể #{idx + 1}{v.isDefault && <span className="ml-2 text-purple-600">(Mặc định)</span>}</span>
+                    <div className="flex gap-2 items-center">
+                      {!v.isDefault && (
+                        <button type="button" onClick={() => setDefault(idx)}
+                          className="text-xs text-purple-600 hover:underline">Đặt mặc định</button>
+                      )}
+                      {variants.length > 1 && (
+                        <button type="button" onClick={() => setVariants(vs => vs.filter((_, i) => i !== idx))}
+                          className="text-xs text-red-500 hover:text-red-700">✕ Xóa</button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Mã biến thể *</label>
+                      <input type="text" value={v.variantCode}
+                        onChange={e => setV(idx, 'variantCode', e.target.value.toUpperCase())}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Tên biến thể *</label>
+                      <input type="text" value={v.variantName}
+                        onChange={e => setV(idx, 'variantName', e.target.value)}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Đơn vị bán lẻ *</label>
+                      <input type="text" value={v.sellUnit} placeholder="cái, bịch, hộp..."
+                        onChange={e => setV(idx, 'sellUnit', e.target.value)}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Đơn vị nhập kho</label>
+                      <input type="text" value={v.importUnit} placeholder="kg, thùng..."
+                        onChange={e => setV(idx, 'importUnit', e.target.value)}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Số lẻ / ĐV nhập</label>
+                      <input type="number" value={v.piecesPerUnit} min={1}
+                        onChange={e => setV(idx, 'piecesPerUnit', e.target.value)}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Giá bán (₫) *</label>
+                      <input type="number" value={v.sellPrice} min={0}
+                        onChange={e => setV(idx, 'sellPrice', e.target.value)}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Giá vốn (₫)</label>
+                      <input type="number" value={v.costPrice} min={0}
+                        onChange={e => setV(idx, 'costPrice', e.target.value)}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Tồn kho ban đầu</label>
+                      <input type="number" value={v.stockQty} min={0}
+                        onChange={e => setV(idx, 'stockQty', e.target.value)}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Ngưỡng cảnh báo tồn</label>
+                      <input type="number" value={v.minStockQty} min={0}
+                        onChange={e => setV(idx, 'minStockQty', e.target.value)}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Số ngày HSD</label>
+                      <input type="number" value={v.expiryDays} min={0} placeholder="để trống nếu không có"
+                        onChange={e => setV(idx, 'expiryDays', e.target.value)}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Ghi chú quy đổi</label>
+                    <input type="text" value={v.conversionNote} placeholder="VD: 1 kg = 10 bịch 100g"
+                      onChange={e => setV(idx, 'conversionNote', e.target.value)}
+                      className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Info box cho COMBO — thay thế section variant */}
+          {!isEdit && isComboType && (
+            <div className="border-2 border-green-200 bg-green-50 rounded-xl p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">📊</span>
+                <h4 className="font-semibold text-sm text-green-800">Tồn kho Combo — Tự động từ thành phần</h4>
+              </div>
+              <p className="text-xs text-green-700">
+                Combo <b>không có variant</b> và <b>không nhập kho trực tiếp</b>.
+                Tồn kho được tính tự động:
+              </p>
+              <div className="bg-white rounded-lg p-3 text-xs font-mono text-gray-700 border border-green-200">
+                stockCombo = min( stock(SP_i) / qty_yêu_cầu(SP_i) ) — với mọi SP thành phần i
+              </div>
+              <p className="text-xs text-green-600">
+                ✅ Sau khi tạo combo, vào <b>tab Quản lý Combo</b> để thêm các SP thành phần.
+              </p>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
             <input type="checkbox" id="pactive" checked={form.active} onChange={e => set('active', e.target.checked)} />
             <label htmlFor="pactive" className="text-sm text-gray-700">Hoạt động</label>
           </div>
           <div className="flex justify-end pt-2">
             <button type="submit" disabled={loading || !form.code}
-              className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-60 flex items-center gap-2">
+              className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-60">
               {loading ? 'Đang lưu...' : 'Lưu sản phẩm'}
             </button>
           </div>
@@ -619,7 +799,9 @@ export default function ProductsPage() {
                 ? <tr><td colSpan={10} className="text-center py-8 text-gray-400">Đang tải...</td></tr>
                 : sorted.length === 0
                   ? <tr><td colSpan={10} className="text-center py-8 text-gray-400">Không có sản phẩm</td></tr>
-                  : sorted.map(p => (
+                  : sorted.map(p => {
+                    const dv = p.variants?.find(v => v.isDefault) || p.variants?.[0]
+                    return (
                     <tr key={p.id} className="border-b hover:bg-gray-50 transition">
                       <td className="px-3 py-2">
                         {p.imageUrl
@@ -629,14 +811,14 @@ export default function ProductsPage() {
                       <td className="px-3 py-3 font-mono text-xs text-gray-500 whitespace-nowrap">{p.code}</td>
                       <td className="px-3 py-3 font-medium text-gray-800">{p.name}</td>
                       <td className="px-3 py-3 text-gray-500 text-xs">{p.categoryName}</td>
-                      <td className="px-3 py-3 text-right whitespace-nowrap">{Number(p.costPrice).toLocaleString('vi-VN')} ₫</td>
-                      <td className="px-3 py-3 text-right text-green-700 font-medium whitespace-nowrap">{Number(p.sellPrice).toLocaleString('vi-VN')} ₫</td>
+                      <td className="px-3 py-3 text-right whitespace-nowrap">{dv ? Number(dv.costPrice).toLocaleString('vi-VN') + ' ₫' : '—'}</td>
+                      <td className="px-3 py-3 text-right text-green-700 font-medium whitespace-nowrap">{dv ? Number(dv.sellPrice).toLocaleString('vi-VN') + ' ₫' : '—'}</td>
                       <td className="px-3 py-3 text-right whitespace-nowrap">
-                        <span className={p.stockQty <= 5 ? 'text-red-600 font-bold' : 'text-gray-800'}>
-                          {p.stockQty} {p.sellUnit || p.unit}
+                        <span className={dv && dv.stockQty <= 5 ? 'text-red-600 font-bold' : 'text-gray-800'}>
+                          {dv ? `${dv.stockQty} ${dv.sellUnit || ''}` : '—'}
                         </span>
                       </td>
-                      <td className="px-3 py-3 text-center">{p.expiryDays || '—'}</td>
+                      <td className="px-3 py-3 text-center">{dv?.expiryDays || '—'}</td>
                       <td className="px-3 py-3 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                           {p.active ? 'Đang bán' : 'Ẩn'}
@@ -655,14 +837,15 @@ export default function ProductsPage() {
                         <button onClick={() => handleDelete(p.id)} className="text-red-600 hover:text-red-800 text-xs font-medium">Xóa</button>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
             </tbody>
           </table>
         </div>
       </div>
 
       {showModal && (
-        <Modal title={editing ? 'Chỉnh sửa sản phẩm' : 'Thêm sản phẩm mới'} onClose={() => { setShowModal(false); setEditing(null) }}>
+        <Modal title={editing ? 'Chỉnh sửa sản phẩm' : '➕ Thêm sản phẩm mới'} onClose={() => { setShowModal(false); setEditing(null) }}>
           <ProductForm initial={editing} categories={categories} onSubmit={handleSubmit} loading={create.isLoading || update.isLoading} />
         </Modal>
       )}

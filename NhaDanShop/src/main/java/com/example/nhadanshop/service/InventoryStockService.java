@@ -3,9 +3,10 @@ package com.example.nhadanshop.service;
 import com.example.nhadanshop.dto.InventoryStockReport;
 import com.example.nhadanshop.dto.InventoryStockReportRow;
 import com.example.nhadanshop.entity.Product;
+import com.example.nhadanshop.entity.ProductVariant;
 import com.example.nhadanshop.repository.InventoryReceiptRepository;
 import com.example.nhadanshop.repository.ProductBatchRepository;
-import com.example.nhadanshop.repository.ProductRepository;
+import com.example.nhadanshop.repository.ProductVariantRepository;
 import com.example.nhadanshop.repository.SalesInvoiceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +14,7 @@ import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -30,123 +32,150 @@ import java.util.Map;
  * Service thống kê tồn kho theo kỳ và xuất Excel.
  *
  * Công thức tồn kho (tất cả theo đơn vị BÁN LẺ):
- *   totalReceived  = tổng nhập trong kỳ (đã x piecesPerImportUnit)
- *   totalSold      = tổng bán trong kỳ
- *   openingStock   = currentStock - totalReceived(from→now) + totalSold(from→now)
- *   closingStock   = openingStock + totalReceived(from→to) - totalSold(from→to)
+ *
+ *   [Default khi vào trang]: from = đầu tháng hiện tại, to = TODAY (NOW)
+ *   [Admin chọn]: from → to do admin chọn (to ≤ NOW, to ≥ from)
+ *
+ *   openingStock  = currentStock - recv(from→∞) + sold(from→∞)
+ *   totalReceived = tổng nhập trong kỳ [from, to]
+ *   totalSold     = tổng bán trong kỳ [from, to]
+ *   closingStock  = openingStock + totalReceived - totalSold
  *
  * Giá trị tồn cuối kỳ:
- *   closingValue = sum(batch.remainingQty * batch.costPrice) cho các lô còn hàng cuối kỳ
- *   (dùng giá thực tế từng lô thay vì product.costPrice đồng nhất)
+ *   closingValue = sum(batch.remainingQty * batch.costPrice) cho các lô còn hàng
  */
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class InventoryStockService {
 
-    private final ProductRepository productRepository;
     private final InventoryReceiptRepository receiptRepository;
     private final SalesInvoiceRepository invoiceRepository;
     private final ProductBatchRepository batchRepository;
+    private final ProductVariantRepository variantRepository; // [Sprint 0]
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     /**
-     * Tính báo cáo tồn kho tất cả sản phẩm trong kỳ [from, to].
+     * Tính báo cáo tồn kho tất cả VARIANTS trong kỳ [from, to].
+     *
+     * Rules:
+     *   - to ≤ TODAY (không cho phép to > ngày hiện tại)
+     *   - to ≥ from
+     *   - Default khi load trang: from = đầu tháng, to = TODAY
+     *
+     * openingStock = currentStock - recv(from→∞) + sold(from→∞)
+     *   → Dùng "After" query (không giới hạn trên) để tránh sai số
+     *     khi báo cáo kỳ hiện tại (now nằm trong [from, to])
      */
     public InventoryStockReport getStockReport(LocalDate from, LocalDate to) {
-        LocalDateTime fromDt = from.atStartOfDay();
-        LocalDateTime toDt   = to.atTime(LocalTime.MAX);
-        LocalDateTime nowDt  = LocalDateTime.now();
+        LocalDate today = LocalDate.now();
 
-        List<Product> products = productRepository.findByActiveTrue();
-
-        // ── Nhập kỳ (đã quy đổi sang bán lẻ, piecesPerImportUnit đã nhân trong query) ──
-        Map<Long, Integer> receivedInPeriod = buildQtyMap(
-                receiptRepository.sumReceivedQtyByProductBetween(fromDt, toDt));
-
-        // ── Bán trong kỳ ──────────────────────────────────────────────────────────────
-        Map<Long, Integer> soldInPeriod = buildQtyMap(
-                invoiceRepository.sumSoldQtyByProductBetween(fromDt, toDt));
-
-        // ── Nhập & bán từ from → NOW (để tính ngược opening stock) ───────────────────
-        Map<Long, Integer> receivedFromNow = buildQtyMap(
-                receiptRepository.sumReceivedQtyByProductBetween(fromDt, nowDt));
-        Map<Long, Integer> soldFromNow = buildQtyMap(
-                invoiceRepository.sumSoldQtyByProductBetween(fromDt, nowDt));
-
-        // ── Giá trị tồn cuối kỳ theo lô thực tế (batch-aware) ───────────────────────
-        // Dùng remainingQty * costPrice từ từng batch còn hàng
-        Map<Long, BigDecimal> batchValueByProduct = buildBatchValueMap();
-
-        List<InventoryStockReportRow> rows = new ArrayList<>();
-        for (Product p : products) {
-            Long pid = p.getId();
-
-            // Tồn hiện tại (real-time)
-            int currentStock = p.getStockQty() != null ? p.getStockQty() : 0;
-
-            // Opening = currentStock - (nhập from→now) + (bán from→now)
-            int recvFromNow = receivedFromNow.getOrDefault(pid, 0);
-            int soldFrNow   = soldFromNow.getOrDefault(pid, 0);
-            int openingStock = currentStock - recvFromNow + soldFrNow;
-
-            // Nhập & bán trong kỳ
-            int totalReceived = receivedInPeriod.getOrDefault(pid, 0);
-            int totalSold     = soldInPeriod.getOrDefault(pid, 0);
-
-            // Closing = opening + nhập kỳ - bán kỳ
-            int closingStock = openingStock + totalReceived - totalSold;
-
-            // Giá trị tồn cuối kỳ:
-            // Ưu tiên dùng giá trị thực tế từ các lô (batch-aware)
-            // Nếu không có lô nào (sản phẩm chưa nhập kho qua batch) → fallback product.costPrice
-            BigDecimal closingValue;
-            if (batchValueByProduct.containsKey(pid)) {
-                closingValue = batchValueByProduct.get(pid);
-            } else {
-                closingValue = p.getCostPrice()
-                        .multiply(BigDecimal.valueOf(Math.max(0, closingStock)));
-            }
-
-            String sellUnit = p.getSellUnit() != null ? p.getSellUnit()
-                    : (p.getUnit() != null ? p.getUnit() : "bịch");
-
-            rows.add(new InventoryStockReportRow(
-                    pid,
-                    p.getCode(),
-                    p.getName(),
-                    p.getCategory() != null ? p.getCategory().getName() : "",
-                    sellUnit,
-                    Math.max(0, openingStock),
-                    totalReceived,
-                    totalSold,
-                    Math.max(0, closingStock),
-                    closingValue,
-                    from,
-                    to
-            ));
+        // ── Validation ──────────────────────────────────────────────
+        if (to.isAfter(today)) {
+            log.warn("getStockReport: toDate {} > today {}, clamped to today", to, today);
+            to = today;
+        }
+        if (to.isBefore(from)) {
+            throw new IllegalArgumentException(
+                "Đến ngày (" + to + ") không được nhỏ hơn Từ ngày (" + from + ")");
         }
 
+        LocalDateTime fromDt = from.atStartOfDay();
+        LocalDateTime toDt   = to.atTime(LocalTime.MAX);
+
+        // [Fix Issue 1] Dùng FETCH JOIN query để load product+category trong 1 lần
+        List<ProductVariant> variants = variantRepository.findAllActiveWithProductAndCategory();
+
+        // Nhập trong kỳ [from, to] → cho totalReceived (Nhập kỳ)
+        Map<Long, Integer> receivedInPeriod = buildVariantQtyMap(
+                receiptRepository.sumReceivedQtyByVariantBetween(fromDt, toDt));
+        // Bán trong kỳ [from, to] → cho totalSold (Xuất kỳ)
+        Map<Long, Integer> soldInPeriod = buildVariantQtyMap(
+                invoiceRepository.sumSoldQtyByVariantBetween(fromDt, toDt));
+
+        // [Fix OpeningStock] Nhập & bán từ fromDt → ∞ (toàn bộ lịch sử sau from)
+        // Không phụ thuộc vào LocalDateTime.now() — tránh lỗi khi now == toDate
+        Map<Long, Integer> receivedAfterFrom = buildVariantQtyMap(
+                receiptRepository.sumReceivedQtyByVariantAfter(fromDt));
+        Map<Long, Integer> soldAfterFrom = buildVariantQtyMap(
+                invoiceRepository.sumSoldQtyByVariantAfter(fromDt));
+
+        // [Fix closingValue] Dùng avg cost price theo variant từ batch hiện tại
+        // closingValue = closingStock * avgCostPrice  ← phụ thuộc closingStock của kỳ
+        // (không dùng SUM(remainingQty*costPrice) tĩnh vì không theo kỳ báo cáo)
+        Map<Long, BigDecimal> avgCostByVariant = buildAvgCostPriceByVariantMap();
+
+        List<InventoryStockReportRow> rows = new ArrayList<>();
+        for (ProductVariant v : variants) {
+            Long vid = v.getId();
+            Product p = v.getProduct();
+
+            int currentStock   = v.getStockQty() != null ? v.getStockQty() : 0;
+            // openingStock = currentStock - (tất cả nhập từ from→∞) + (tất cả bán từ from→∞)
+            int recvAfter  = receivedAfterFrom.getOrDefault(vid, 0);
+            int soldAfter  = soldAfterFrom.getOrDefault(vid, 0);
+            int openingStock = currentStock - recvAfter + soldAfter;
+
+            int totalReceived = receivedInPeriod.getOrDefault(vid, 0);
+            int totalSold     = soldInPeriod.getOrDefault(vid, 0);
+            int closingStock  = openingStock + totalReceived - totalSold;
+
+            // closingValue = closingStock * avgCostPrice (fallback về variant.costPrice nếu chưa có batch)
+            BigDecimal avgCost = avgCostByVariant.getOrDefault(vid, v.getCostPrice());
+            if (avgCost == null) avgCost = BigDecimal.ZERO;
+            BigDecimal closingValue = avgCost.multiply(BigDecimal.valueOf(Math.max(0, closingStock)));
+
+            String sellUnit = v.getSellUnit() != null ? v.getSellUnit() : "cai";
+
+            rows.add(new InventoryStockReportRow(
+                    p.getId(), p.getCode(), p.getName(),
+                    p.getCategory() != null ? p.getCategory().getName() : "",
+                    sellUnit,
+                    vid, v.getVariantCode(), v.getVariantName(),
+                    Math.max(0, openingStock),
+                    totalReceived, totalSold,
+                    Math.max(0, closingStock),
+                    closingValue,
+                    v.getMinStockQty() != null ? v.getMinStockQty() : 5,
+                    from, to
+            ));
+        }
         return new InventoryStockReport(from, to, rows);
     }
 
     /**
-     * Build map productId → tổng giá trị tồn (remainingQty * costPrice) từ tất cả lô còn hàng.
-     * Phản ánh đúng giá vốn từng lô nhập, không đồng nhất theo product.costPrice.
+     * Build map variantId → giá vốn bình quân (avgCostPrice) từ batch còn hàng.
+     * avgCostPrice = SUM(remainingQty * costPrice) / SUM(remainingQty)
+     * Dùng để tính: closingValue = closingStock * avgCostPrice
      */
-    private Map<Long, BigDecimal> buildBatchValueMap() {
+    private Map<Long, BigDecimal> buildAvgCostPriceByVariantMap() {
         Map<Long, BigDecimal> map = new HashMap<>();
-        batchRepository.findAll().stream()
-                .filter(b -> b.getRemainingQty() > 0)
-                .forEach(b -> {
-                    Long pid = b.getProduct().getId();
-                    BigDecimal value = b.getCostPrice()
-                            .multiply(BigDecimal.valueOf(b.getRemainingQty()));
-                    map.merge(pid, value, BigDecimal::add);
-                });
+        batchRepository.avgCostPriceByVariant().forEach(row -> {
+            Long vid = ((Number) row[0]).longValue();
+            BigDecimal avg = row[1] != null ? new BigDecimal(row[1].toString()) : BigDecimal.ZERO;
+            map.put(vid, avg);
+        });
         return map;
     }
+
+    /**
+     * [Sprint 0] Build map variantId → tổng giá trị tồn theo lô (tĩnh, không theo kỳ).
+     * @deprecated Dùng buildAvgCostPriceByVariantMap() + closingStock thay thế.
+     */
+    @Deprecated
+    private Map<Long, BigDecimal> buildBatchValueByVariantMap() {
+        Map<Long, BigDecimal> map = new HashMap<>();
+        batchRepository.sumBatchValueByVariant().forEach(row -> {
+            Long vid   = ((Number) row[0]).longValue();
+            BigDecimal val = row[1] != null ? new BigDecimal(row[1].toString()) : BigDecimal.ZERO;
+            map.put(vid, val);
+        });
+        return map;
+    }
+
 
     /**
      * Xuất báo cáo tồn kho ra file Excel (.xlsx).
@@ -204,7 +233,7 @@ public class InventoryStockService {
                 Row dataRow = sheet.createRow(rowIdx++);
                 dataRow.setHeightInPoints(18);
 
-                boolean isLow = row.closingStock() <= 5;
+                boolean isLow = row.closingStock() <= (row.minStockQty() != null ? row.minStockQty() : 5);
                 CellStyle numSt  = isLow ? alertStyle : numberStyle;
                 CellStyle dataSt = isLow ? alertStyle : dataStyle;
 
@@ -271,12 +300,12 @@ public class InventoryStockService {
 
     // ─── Helper: build map từ query result ───────────────────────────────────
 
-    private Map<Long, Integer> buildQtyMap(List<Object[]> rows) {
+    private Map<Long, Integer> buildVariantQtyMap(List<Object[]> rows) {
         Map<Long, Integer> map = new HashMap<>();
         for (Object[] row : rows) {
-            Long pid = ((Number) row[0]).longValue();
+            Long vid = ((Number) row[0]).longValue();
             int qty  = ((Number) row[1]).intValue();
-            map.merge(pid, qty, Integer::sum);
+            map.merge(vid, qty, Integer::sum);
         }
         return map;
     }

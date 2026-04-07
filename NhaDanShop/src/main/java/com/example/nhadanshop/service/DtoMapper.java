@@ -23,22 +23,14 @@ public final class DtoMapper {
 
     // ── Product ───────────────────────────────────────────────────────────────
     public static ProductResponse toResponse(Product p) {
-        return toResponse(p, p.getStockQty()); // availableQty = stockQty nếu không biết pending
-    }
-
-    public static ProductResponse toResponse(Product p, int availableQty) {
         List<ProductVariantResponse> variants = p.getVariants() == null
                 ? Collections.emptyList()
                 : p.getVariants().stream().map(DtoMapper::toResponse).collect(Collectors.toList());
         return new ProductResponse(
-                p.getId(), p.getCode(), p.getName(), p.getUnit(),
-                p.getCostPrice(), p.getSellPrice(), p.getStockQty(), availableQty, p.getActive(),
+                p.getId(), p.getCode(), p.getName(), p.getActive(),
                 p.getCategory().getId(), p.getCategory().getName(),
-                p.getExpiryDays(),
-                p.getImportUnit(), p.getSellUnit(),
-                p.getPiecesPerImportUnit(), p.getConversionNote(),
-                p.getImageUrl(),
                 p.getProductType() != null ? p.getProductType().name() : "SINGLE",
+                p.getImageUrl(),
                 p.getCreatedAt(), p.getUpdatedAt(),
                 variants
         );
@@ -75,50 +67,38 @@ public final class DtoMapper {
     public static SalesInvoiceResponse toResponse(SalesInvoice inv) {
         BigDecimal discountAmount = inv.getDiscountAmount() != null ? inv.getDiscountAmount() : BigDecimal.ZERO;
         BigDecimal finalAmount    = inv.getTotalAmount().subtract(discountAmount);
-
-        // Lợi nhuận gộp = Σ[(unitPrice - unitCostSnapshot) × qty] - discountKM
-        // unitPrice đã là giá sau CK dòng (lineDiscountPercent), costSnapshot là giá vốn FEFO
         BigDecimal grossProfit = inv.getItems().stream()
                 .map(i -> i.getUnitPrice()
                         .subtract(i.getUnitCostSnapshot())
                         .multiply(BigDecimal.valueOf(i.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        // Trừ thêm discount KM cấp đơn hàng
         BigDecimal totalProfit = grossProfit.subtract(discountAmount);
 
         return new SalesInvoiceResponse(
                 inv.getId(), inv.getInvoiceNo(), inv.getInvoiceDate(),
                 inv.getCustomerName(), inv.getNote(),
-                inv.getTotalAmount(),
-                discountAmount,
-                finalAmount,
-                inv.getPromotionName(),
-                totalProfit,
+                inv.getTotalAmount(), discountAmount, finalAmount,
+                inv.getPromotionName(), totalProfit,
                 inv.getCreatedBy() != null ? inv.getCreatedBy().getUsername() : null,
                 inv.getItems().stream().map(DtoMapper::toResponse).collect(Collectors.toList()),
                 inv.getCreatedAt(), inv.getUpdatedAt()
         );
     }
 
-    // ── SalesInvoiceItem (cập nhật để kèm variant fields) ────────────────────
+    // ── SalesInvoiceItem ──────────────────────────────────────────────────────
     public static SalesInvoiceItemResponse toResponse(SalesInvoiceItem item) {
-        BigDecimal lineTotal = item.getUnitPrice()
-                .multiply(BigDecimal.valueOf(item.getQuantity()));
-        BigDecimal profit = item.getUnitPrice()
+        BigDecimal lineTotal = item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity()));
+        BigDecimal profit    = item.getUnitPrice()
                 .subtract(item.getUnitCostSnapshot())
                 .multiply(BigDecimal.valueOf(item.getQuantity()));
-        BigDecimal origPrice = item.getOriginalUnitPrice() != null
-                ? item.getOriginalUnitPrice() : item.getUnitPrice();
-        BigDecimal lineDsc = item.getLineDiscountPercent() != null
-                ? item.getLineDiscountPercent() : BigDecimal.ZERO;
-        // variant fields (nullable — backward compat)
+        BigDecimal origPrice = item.getOriginalUnitPrice() != null ? item.getOriginalUnitPrice() : item.getUnitPrice();
+        BigDecimal lineDsc   = item.getLineDiscountPercent() != null ? item.getLineDiscountPercent() : BigDecimal.ZERO;
         ProductVariant v = item.getVariant();
         return new SalesInvoiceItemResponse(
                 item.getId(),
                 item.getProduct().getId(),
                 item.getProduct().getCode(),
                 item.getProduct().getName(),
-                item.getProduct().getUnit(),
                 item.getQuantity(),
                 origPrice, lineDsc,
                 item.getUnitPrice(),
@@ -127,7 +107,12 @@ public final class DtoMapper {
                 v != null ? v.getId()          : null,
                 v != null ? v.getVariantCode() : item.getProduct().getCode(),
                 v != null ? v.getVariantName() : item.getProduct().getName(),
-                v != null ? v.getSellUnit()    : item.getProduct().getSellUnit()
+                v != null ? v.getSellUnit()    : "cai",
+                // Combo KiotViet fields
+                item.getComboSourceId(),
+                null,  // comboSourceCode — enriched ở tầng FE hoặc query riêng
+                null,  // comboSourceName — enriched ở tầng FE hoặc query riêng
+                item.getComboUnitPrice()
         );
     }
 
@@ -136,18 +121,17 @@ public final class DtoMapper {
         return new InventoryReceiptResponse(
                 r.getId(), r.getReceiptNo(), r.getReceiptDate(),
                 r.getSupplierName(), r.getNote(), r.getTotalAmount(),
-                r.getShippingFee()  != null ? r.getShippingFee()  : java.math.BigDecimal.ZERO,
-                r.getTotalVat()     != null ? r.getTotalVat()     : java.math.BigDecimal.ZERO,
+                r.getShippingFee()  != null ? r.getShippingFee()  : BigDecimal.ZERO,
+                r.getTotalVat()     != null ? r.getTotalVat()     : BigDecimal.ZERO,
                 r.getCreatedBy() != null ? r.getCreatedBy().getUsername() : null,
                 r.getItems().stream().map(DtoMapper::toResponse).collect(Collectors.toList()),
                 r.getCreatedAt(), r.getUpdatedAt()
         );
     }
 
-    // ── InventoryReceiptItem (cập nhật để kèm variant fields) ────────────────
+    // ── InventoryReceiptItem ──────────────────────────────────────────────────
     public static InventoryReceiptItemResponse toResponse(InventoryReceiptItem item) {
-        BigDecimal lineTotal = item.getUnitCost()
-                .multiply(BigDecimal.valueOf(item.getQuantity()));
+        BigDecimal lineTotal = item.getUnitCost().multiply(BigDecimal.valueOf(item.getQuantity()));
         BigDecimal vat   = item.getVatPercent()      != null ? item.getVatPercent()      : BigDecimal.ZERO;
         BigDecimal vatAl = item.getVatAllocated()     != null ? item.getVatAllocated()     : BigDecimal.ZERO;
         BigDecimal fcVat = item.getFinalCostWithVat() != null ? item.getFinalCostWithVat() : item.getFinalCost();
@@ -157,7 +141,6 @@ public final class DtoMapper {
                 item.getProduct().getId(),
                 item.getProduct().getCode(),
                 item.getProduct().getName(),
-                item.getProduct().getUnit(),
                 item.getQuantity(),
                 item.getUnitCost(),
                 item.getDiscountPercent(),
@@ -172,7 +155,7 @@ public final class DtoMapper {
                 v != null ? v.getId()          : null,
                 v != null ? v.getVariantCode() : item.getProduct().getCode(),
                 v != null ? v.getVariantName() : item.getProduct().getName(),
-                v != null ? v.getSellUnit()    : item.getProduct().getSellUnit()
+                v != null ? v.getSellUnit()    : "cai"
         );
     }
 

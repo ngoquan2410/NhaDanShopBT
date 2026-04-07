@@ -79,9 +79,8 @@ public class ExpiryWarningService {
         // daysRemaining = expiryDate - today (âm = đã hết hạn)
         long daysRemaining = ChronoUnit.DAYS.between(today, batch.getExpiryDate());
 
-        String sellUnit = batch.getProduct().getSellUnit() != null
-                ? batch.getProduct().getSellUnit()
-                : batch.getProduct().getUnit();
+        String sellUnit = batch.getVariant() != null && batch.getVariant().getSellUnit() != null
+                ? batch.getVariant().getSellUnit() : "cai";
 
         String category = batch.getProduct().getCategory() != null
                 ? batch.getProduct().getCategory().getName() : "";

@@ -34,6 +34,8 @@ public class InvoiceService {
     private final PromotionRepository promotionRepo;
     private final ProductVariantService variantService; // Sprint 0
     private final ProductVariantRepository variantRepo; // Sprint 0 — explicit save
+    private final ProductComboRepository comboItemRepo; // Combo KiotViet
+    private final ProductComboService comboService;     // Combo KiotViet — refreshVirtualStock
 
     @Transactional
     public SalesInvoiceResponse createInvoice(SalesInvoiceRequest req) {
@@ -57,13 +59,31 @@ public class InvoiceService {
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<SalesInvoiceItem> items = new ArrayList<>();
 
+        // Tập hợp product_id bị ảnh hưởng để refresh combo virtual stock sau khi lưu
+        Set<Long> affectedProductIds = new java.util.HashSet<>();
+
         for (InvoiceItemRequest itemReq : req.items()) {
+
+            // ── Combo KiotViet: expand combo → nhiều line items ──────────────
+            if (itemReq.comboId() != null) {
+                totalAmount = totalAmount.add(
+                    expandComboToItems(itemReq.comboId(), itemReq.quantity(),
+                                       invoice, items, affectedProductIds));
+                continue;
+            }
+
+            // ── Sản phẩm đơn (SINGLE) ────────────────────────────────────────
             Product product = productRepo.findById(itemReq.productId())
                     .orElseThrow(() -> new EntityNotFoundException(
                             "Khong tim thay san pham ID: " + itemReq.productId()));
 
             if (!product.getActive())
                 throw new IllegalArgumentException("San pham '" + product.getName() + "' da ngung kinh doanh");
+
+            if (product.isCombo())
+                throw new IllegalArgumentException(
+                    "San pham '" + product.getName() + "' la combo. " +
+                    "Vui long dung comboId de ban combo theo mo hinh KiotViet.");
 
             // [Sprint 0] Resolve variant — null variantId → dùng default variant
             ProductVariant variant = variantService.resolveVariant(itemReq.variantId(), product.getId());
@@ -80,14 +100,11 @@ public class InvoiceService {
             BigDecimal fefoAvgCost = batchService.deductStockFEFOAndComputeCost(
                     product.getId(), variant.getId(), itemReq.quantity());
 
-            // Trừ variant.stockQty
+            // Trừ variant.stockQty (single source of truth)
             variant.setStockQty(variant.getStockQty() - itemReq.quantity());
             variant.setUpdatedAt(LocalDateTime.now());
             variantRepo.save(variant);
-            // Đồng bộ product.stockQty tổng hợp
-            product.setStockQty(Math.max(0, product.getStockQty() - itemReq.quantity()));
-            product.setUpdatedAt(LocalDateTime.now());
-            productRepo.save(product);
+            affectedProductIds.add(product.getId());
 
             BigDecimal lineDiscPct = itemReq.discountPercent() != null ? itemReq.discountPercent() : BigDecimal.ZERO;
             BigDecimal discountFactor = BigDecimal.ONE.subtract(
@@ -105,6 +122,7 @@ public class InvoiceService {
             item.setUnitPrice(actualUnitPrice);
             item.setUnitCostSnapshot(fefoAvgCost.compareTo(BigDecimal.ZERO) > 0
                     ? fefoAvgCost : variant.getCostPrice());
+            // comboSourceId = null (bán lẻ thường)
 
             totalAmount = totalAmount.add(actualUnitPrice.multiply(BigDecimal.valueOf(itemReq.quantity())));
             items.add(item);
@@ -123,7 +141,128 @@ public class InvoiceService {
         invoice.setDiscountAmount(discountAmount);
 
         SalesInvoice saved = invoiceRepo.save(invoice);
+
+        // ── Refresh virtual stock của tất cả combo chứa SP bị ảnh hưởng ──────
+        affectedProductIds.forEach(comboService::refreshCombosContaining);
+
         return DtoMapper.toResponse(saved);
+    }
+
+    // ── Combo KiotViet: Expand combo → nhiều line items ───────────────────────
+
+    /**
+     * Expand 1 combo (comboQty lần) thành nhiều SalesInvoiceItem.
+     * Mỗi thành phần → 1 invoice item riêng.
+     * Tất cả item đều có combo_source_id = comboId để trace.
+     * Giá bán từng item = 0 (combo được tính tổng ở combo level)
+     * → Hóa đơn chỉ tính tiền theo giá combo: combQty × combo.sellPrice
+     *
+     * KiotViet model:
+     *   - Ghi nhận kho: trừ từng thành phần × qty
+     *   - Ghi nhận doanh thu: theo giá combo (không phải tổng thành phần)
+     *   - Hiển thị HĐ: gom lại theo comboSourceId để show 1 dòng "Combo X × N"
+     */
+    private BigDecimal expandComboToItems(Long comboId, int comboQty,
+                                           SalesInvoice invoice,
+                                           List<SalesInvoiceItem> items,
+                                           Set<Long> affectedProductIds) {
+        // Load combo
+        Product combo = productRepo.findById(comboId)
+                .orElseThrow(() -> new EntityNotFoundException("Khong tim thay combo ID: " + comboId));
+        if (!combo.isCombo())
+            throw new IllegalArgumentException("San pham ID " + comboId + " khong phai combo");
+        if (!combo.getActive())
+            throw new IllegalArgumentException("Combo '" + combo.getName() + "' da ngung kinh doanh");
+
+        // Lấy giá bán combo từ default variant
+        ProductVariant comboVariant = variantRepo.findByProductIdAndIsDefaultTrue(comboId)
+                .orElseThrow(() -> new IllegalStateException(
+                    "Combo '" + combo.getName() + "' chua co default variant. Vui long cap nhat combo."));
+        BigDecimal comboSellPrice = comboVariant.getSellPrice();
+
+        // Lấy danh sách thành phần
+        List<ProductComboItem> comboItems = comboItemRepo.findByComboProduct(combo);
+        if (comboItems.isEmpty())
+            throw new IllegalStateException("Combo '" + combo.getName() + "' chua co thanh phan nao");
+
+        // Kiểm tra tồn kho đủ cho tất cả thành phần trước khi trừ
+        for (ProductComboItem ci : comboItems) {
+            Product component = ci.getProduct();
+            ProductVariant compVariant = variantService.resolveVariant(null, component.getId());
+            int required = ci.getQuantity() * comboQty;
+            if (compVariant.getStockQty() < required) {
+                throw new IllegalArgumentException(
+                    "Combo '" + combo.getName() + "': Thanh phan '" + component.getName() +
+                    "' khong du hang. Can: " + required + ", ton kho: " + compVariant.getStockQty());
+            }
+        }
+
+        // Trừ kho và tạo invoice items
+        BigDecimal totalComboRevenue = comboSellPrice.multiply(BigDecimal.valueOf(comboQty));
+
+        // Phân bổ doanh thu combo theo tỷ lệ giá vốn từng thành phần
+        BigDecimal totalCost = comboItems.stream()
+                .map(ci -> {
+                    ProductVariant v = ci.getProduct().getDefaultVariant();
+                    BigDecimal cost = v != null ? v.getCostPrice() : BigDecimal.ZERO;
+                    return cost.multiply(BigDecimal.valueOf(ci.getQuantity()));
+                })
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        for (int i = 0; i < comboItems.size(); i++) {
+            ProductComboItem ci = comboItems.get(i);
+            Product component = ci.getProduct();
+            ProductVariant compVariant = variantService.resolveVariant(null, component.getId());
+            int requiredQty = ci.getQuantity() * comboQty;
+
+            // FEFO deduct
+            BigDecimal fefoAvgCost = batchService.deductStockFEFOAndComputeCost(
+                    component.getId(), compVariant.getId(), requiredQty);
+
+            // Trừ variant stock
+            compVariant.setStockQty(compVariant.getStockQty() - requiredQty);
+            compVariant.setUpdatedAt(LocalDateTime.now());
+            variantRepo.save(compVariant);
+            affectedProductIds.add(component.getId());
+
+            // Phân bổ doanh thu combo theo tỷ lệ giá vốn thành phần (hoặc chia đều nếu cost = 0)
+            BigDecimal componentCost = totalCost.compareTo(BigDecimal.ZERO) > 0
+                    ? compVariant.getCostPrice().multiply(BigDecimal.valueOf(ci.getQuantity()))
+                    : BigDecimal.ZERO;
+            BigDecimal allocRatio = totalCost.compareTo(BigDecimal.ZERO) > 0
+                    ? componentCost.divide(totalCost, 10, RoundingMode.HALF_UP)
+                    : BigDecimal.ONE.divide(BigDecimal.valueOf(comboItems.size()), 10, RoundingMode.HALF_UP);
+
+            // Dòng cuối nhận phần dư để tránh sai số làm tròn
+            BigDecimal allocatedRevenue;
+            if (i == comboItems.size() - 1) {
+                BigDecimal alreadyAllocated = items.stream()
+                        .filter(it -> comboId.equals(it.getComboSourceId()))
+                        .map(it -> it.getUnitPrice().multiply(BigDecimal.valueOf(it.getQuantity())))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                allocatedRevenue = totalComboRevenue.subtract(alreadyAllocated)
+                        .divide(BigDecimal.valueOf(requiredQty), 0, RoundingMode.HALF_UP);
+            } else {
+                allocatedRevenue = totalComboRevenue.multiply(allocRatio)
+                        .divide(BigDecimal.valueOf(requiredQty), 0, RoundingMode.HALF_UP);
+            }
+
+            SalesInvoiceItem item = new SalesInvoiceItem();
+            item.setInvoice(invoice);
+            item.setProduct(component);
+            item.setVariant(compVariant);
+            item.setQuantity(requiredQty);
+            item.setOriginalUnitPrice(compVariant.getSellPrice());
+            item.setLineDiscountPercent(BigDecimal.ZERO);
+            item.setUnitPrice(allocatedRevenue);   // giá phân bổ từ combo
+            item.setUnitCostSnapshot(fefoAvgCost.compareTo(BigDecimal.ZERO) > 0
+                    ? fefoAvgCost : compVariant.getCostPrice());
+            item.setComboSourceId(comboId);
+            item.setComboUnitPrice(comboSellPrice); // snapshot giá combo
+            items.add(item);
+        }
+
+        return totalComboRevenue;
     }
 
     private void validatePromotionEligibility(Promotion promo, List<SalesInvoiceItem> items) {
@@ -200,20 +339,19 @@ public class InvoiceService {
     public void deleteInvoice(Long id) {
         SalesInvoice inv = invoiceRepo.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Khong tim thay hoa don ID: " + id));
+        Set<Long> affectedProductIds = new java.util.HashSet<>();
         for (SalesInvoiceItem item : inv.getItems()) {
-            Product p = item.getProduct();
-            p.setStockQty(p.getStockQty() + item.getQuantity());
-            p.setUpdatedAt(LocalDateTime.now());
-            productRepo.save(p);
-            // [Sprint 0] Restore theo variant nếu có
             Long variantId = item.getVariant() != null ? item.getVariant().getId() : null;
             if (item.getVariant() != null) {
                 item.getVariant().setStockQty(item.getVariant().getStockQty() + item.getQuantity());
                 variantRepo.save(item.getVariant());
             }
-            batchService.restoreStockOnCancel(p.getId(), variantId, item.getQuantity());
+            batchService.restoreStockOnCancel(item.getProduct().getId(), variantId, item.getQuantity());
+            affectedProductIds.add(item.getProduct().getId());
         }
         invoiceRepo.delete(inv);
+        // Refresh virtual stock combo sau khi hoàn kho
+        affectedProductIds.forEach(comboService::refreshCombosContaining);
     }
 }
 

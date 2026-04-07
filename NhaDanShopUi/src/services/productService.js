@@ -21,6 +21,8 @@ export const productService = {
   createVariant:  (productId, data)     => api.post(`/api/products/${productId}/variants`, data).then(r => r.data),
   updateVariant:  (productId, vid, data)=> api.put(`/api/products/${productId}/variants/${vid}`, data).then(r => r.data),
   deleteVariant:  (productId, vid)      => api.delete(`/api/products/${productId}/variants/${vid}`),
+  /** Lookup variant theo mã barcode — dùng cho BarcodeScanner + POS */
+  getVariantByCode: (code) => api.get(`/api/products/variants/by-code/${encodeURIComponent(code)}`).then(r => r.data),
 
   // ── Image upload to Google Drive ──────────────────────────────────────────
   /** Upload ảnh lên Google Drive, trả về { url, message } */

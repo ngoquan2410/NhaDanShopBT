@@ -60,4 +60,50 @@ public interface InventoryReceiptRepository extends JpaRepository<InventoryRecei
     List<Object[]> sumReceivedQtyByProductBetween(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
+
+    /**
+     * [Sprint 0] Tổng số lượng nhập kho theo VARIANT trong kỳ (đã quy đổi sang bán lẻ).
+     * Trả về Object[]: [variantId, totalRetailQty]
+     */
+    @Query("""
+            SELECT item.variant.id,
+                   COALESCE(SUM(
+                       CASE
+                           WHEN item.piecesUsed IS NULL OR item.piecesUsed <= 1
+                           THEN item.quantity
+                           ELSE item.quantity * item.piecesUsed
+                       END
+                   ), 0)
+            FROM InventoryReceiptItem item
+            WHERE item.variant IS NOT NULL
+              AND item.receipt.receiptDate BETWEEN :from AND :to
+            GROUP BY item.variant.id
+            """)
+    List<Object[]> sumReceivedQtyByVariantBetween(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
+
+    /**
+     * [Fix OpeningStock] Tổng số lượng nhập kho theo VARIANT từ một mốc thời gian trở đi
+     * (không giới hạn trên = toàn bộ lịch sử từ fromDt đến nay).
+     * Dùng để tính ngược tồn đầu kỳ:
+     *   openingStock = currentStock - recvAfter(fromDt) + soldAfter(fromDt)
+     * Trả về Object[]: [variantId, totalRetailQty]
+     */
+    @Query("""
+            SELECT item.variant.id,
+                   COALESCE(SUM(
+                       CASE
+                           WHEN item.piecesUsed IS NULL OR item.piecesUsed <= 1
+                           THEN item.quantity
+                           ELSE item.quantity * item.piecesUsed
+                       END
+                   ), 0)
+            FROM InventoryReceiptItem item
+            WHERE item.variant IS NOT NULL
+              AND item.receipt.receiptDate >= :from
+            GROUP BY item.variant.id
+            """)
+    List<Object[]> sumReceivedQtyByVariantAfter(
+            @Param("from") LocalDateTime from);
 }

@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react'
+﻿﻿import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { reportService } from '../../services/reportService'
 import { productService } from '../../services/productService'
@@ -38,6 +38,8 @@ export default function DashboardPage() {
   const { data: weekProfit } = useQuery(['profit-week'], reportService.getProfitThisWeek)
   const { data: warnings } = useQuery(['expiry-warnings', 3], () => productService.getExpiryWarnings(3))
   const { data: expired } = useQuery(['expired-products'], productService.getExpired)
+  // [Sprint 0 - P0-4] Hàng sắp hết tồn kho — dùng ngưỡng per-variant
+  const { data: lowStockVariants = [] } = useQuery(['low-stock-variants'], productService.getLowStockVariants)
 
   // Show 9AM notification
   useEffect(() => {
@@ -183,6 +185,41 @@ export default function DashboardPage() {
       {expiredList.length === 0 && warningList.length === 0 && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-5 text-center text-green-700">
           ✅ Tất cả hàng hóa đều trong hạn sử dụng!
+        </div>
+      )}
+
+      {/* [Sprint 0 - P0-4] Cảnh báo tồn kho thấp theo variant */}
+      {lowStockVariants.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-5">
+          <h3 className="text-yellow-700 font-bold text-lg mb-3 flex items-center gap-2">
+            📦 Hàng sắp hết tồn kho ({lowStockVariants.length} biến thể)
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-yellow-700 border-b border-yellow-200">
+                  <th className="text-left py-2 pr-4">Mã SP</th>
+                  <th className="text-left py-2 pr-4">Biến thể</th>
+                  <th className="text-left py-2 pr-4">Tên</th>
+                  <th className="text-right py-2 pr-4">Tồn kho</th>
+                  <th className="text-right py-2">Ngưỡng tối thiểu</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lowStockVariants.map(v => (
+                  <tr key={v.id} className="border-b border-yellow-100">
+                    <td className="py-2 pr-4 font-mono text-xs text-gray-500">{v.productCode}</td>
+                    <td className="py-2 pr-4 font-mono font-bold text-yellow-700">{v.variantCode}</td>
+                    <td className="py-2 pr-4">{v.variantName}</td>
+                    <td className={`py-2 pr-4 text-right font-bold ${v.stockQty === 0 ? 'text-red-600' : 'text-yellow-700'}`}>
+                      {v.stockQty === 0 ? '🚫 Hết hàng' : `${v.stockQty} ${v.sellUnit}`}
+                    </td>
+                    <td className="py-2 text-right text-gray-500">≤ {v.minStockQty} {v.sellUnit}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

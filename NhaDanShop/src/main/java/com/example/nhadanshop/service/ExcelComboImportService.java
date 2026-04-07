@@ -31,12 +31,13 @@ import java.util.*;
  *   C: Giá bán (*)
  *   D: Đơn vị (để trống = "combo")
  *   E: Danh mục ID
- *   F: Mã SP thành phần 1 (*)  → tìm theo code
- *   G: SL SP thành phần 1 (*)
- *   H: Mã SP thành phần 2
- *   I: SL SP thành phần 2
- *   J: Mã SP thành phần 3
- *   K: SL SP thành phần 3
+ *   F: Mô tả combo (tuỳ chọn)
+ *   G: Mã SP thành phần 1 (*)  → tìm theo code
+ *   H: SL SP thành phần 1 (*)
+ *   I: Mã SP thành phần 2
+ *   J: SL SP thành phần 2
+ *   K: Mã SP thành phần 3
+ *   L: SL SP thành phần 3
  *   ... (tối đa 5 thành phần / dòng)
  */
 @Slf4j
@@ -48,9 +49,10 @@ public class ExcelComboImportService {
     private final ProductRepository productRepo;
     private final ProductComboService comboService;
 
-    // Mỗi combo dùng 2 cột cho 1 thành phần: Mã SP + SL, từ cột F (index 5) trở đi
-    private static final int FIRST_COMPONENT_COL = 5; // F
-    private static final int MAX_COMPONENTS      = 5;
+    // Cột F (index 5) = Mô tả; Cột G (index 6) = Mã SP1; từ đó +2 mỗi thành phần
+    private static final int DESC_COL             = 5; // F
+    private static final int FIRST_COMPONENT_COL  = 6; // G
+    private static final int MAX_COMPONENTS       = 5;
 
     @Transactional
     public Map<String, Object> importCombos(MultipartFile file) throws IOException {
@@ -113,8 +115,9 @@ public class ExcelComboImportService {
 
                 String unit = getCellString(row, 3);
                 Long catId = getCellLong(row, 4);
+                String description = getCellString(row, DESC_COL);
 
-                validRows.add(new RowData(comboCode, comboName, sellPrice, unit, catId, compItems, linePrefix));
+                validRows.add(new RowData(comboCode, comboName, sellPrice, unit, catId, description, compItems, linePrefix));
             }
 
             // Nếu có lỗi bất kỳ → báo hết, không import
@@ -130,7 +133,7 @@ public class ExcelComboImportService {
             for (RowData rd : validRows) {
                 try {
                     ProductComboRequest req = new ProductComboRequest(
-                            rd.code(), rd.name(), rd.unit(), rd.sellPrice(),
+                            rd.code(), rd.name(), rd.description(), rd.sellPrice(),
                             true, null, rd.categoryId(), rd.items()
                     );
                     ProductComboResponse resp = comboService.create(req);
@@ -155,7 +158,7 @@ public class ExcelComboImportService {
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private record RowData(String code, String name, BigDecimal sellPrice,
-                           String unit, Long categoryId,
+                           String unit, Long categoryId, String description,
                            List<ProductComboRequest.ComboItemRequest> items,
                            String prefix) {}
 

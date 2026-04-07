@@ -7,24 +7,22 @@ import com.example.nhadanshop.entity.Product.ProductType;
 import com.example.nhadanshop.repository.CategoryRepository;
 import com.example.nhadanshop.repository.ProductComboRepository;
 import com.example.nhadanshop.repository.ProductRepository;
+import com.example.nhadanshop.repository.ProductVariantRepository;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Service quản lý Combo theo mô hình KiotViet:
  * Combo = Product(productType=COMBO) + ProductComboItem[]
- *
- * Tồn kho combo (Virtual Stock):
- *   stockQty = min(component.stockQty / component.qty) với mọi thành phần
- *
- * Khi bán combo: InvoiceService expand từng thành phần và trừ kho từng SP.
- * Giá vốn combo  = Σ (component.costPrice × component.qty)
+ * Tồn kho combo (Virtual): min(component.defaultVariant.stockQty / component.qty)
+ * Giá vốn combo: Σ (component.defaultVariant.costPrice × qty)
+ * Giá bán combo: từ default variant của combo
  */
 @Service
 @RequiredArgsConstructor
@@ -34,9 +32,7 @@ public class ProductComboService {
     private final ProductRepository productRepo;
     private final ProductComboRepository comboItemRepo;
     private final CategoryRepository categoryRepo;
-    private final ProductService productService;
-
-    // ── Queries ──────────────────────────────────────────────────────────────
+    private final ProductVariantRepository variantRepo;
 
     public List<ProductComboResponse> listActive() {
         return productRepo.findByProductTypeAndActiveTrue(ProductType.COMBO)
@@ -55,76 +51,75 @@ public class ProductComboService {
     // ── Commands ─────────────────────────────────────────────────────────────
 
     public ProductComboResponse create(ProductComboRequest req) {
-        // Tạo Product với type=COMBO
         Product combo = new Product();
         combo.setProductType(ProductType.COMBO);
         applyComboFields(combo, req);
-
-        // Auto-generate code nếu trống
-        if (combo.getCode() == null || combo.getCode().isBlank()) {
+        if (combo.getCode() == null || combo.getCode().isBlank())
             combo.setCode(generateComboCode());
-        }
-        if (productRepo.existsByCode(combo.getCode())) {
+        if (productRepo.existsByCode(combo.getCode()))
             throw new IllegalArgumentException("Mã combo '" + combo.getCode() + "' đã tồn tại");
-        }
 
         Product saved = productRepo.save(combo);
         saveComboItems(saved, req);
 
-        // Cập nhật virtual stock
-        updateVirtualStock(saved);
+        // Tạo default variant cho combo (mang giá bán + virtual stock)
+        createOrUpdateComboVariant(saved, req.sellPrice());
         return toResponse(productRepo.save(saved));
     }
 
     public ProductComboResponse update(Long id, ProductComboRequest req) {
         Product combo = findComboOrThrow(id);
         applyComboFields(combo, req);
-
-        // Xóa items cũ, thêm lại
         comboItemRepo.deleteByComboProduct(combo);
         combo.getComboItems().clear();
         Product saved = productRepo.save(combo);
         saveComboItems(saved, req);
-
-        updateVirtualStock(saved);
+        createOrUpdateComboVariant(saved, req.sellPrice());
         return toResponse(productRepo.save(saved));
     }
 
     public void delete(Long id) {
-        Product combo = findComboOrThrow(id);
-        productRepo.delete(combo); // cascade xóa combo_items
+        productRepo.delete(findComboOrThrow(id));
     }
 
     public ProductComboResponse toggleActive(Long id) {
         Product combo = findComboOrThrow(id);
         combo.setActive(!combo.getActive());
+        // Đồng bộ active sang variant
+        variantRepo.findByProductIdOrderByIsDefaultDescVariantCodeAsc(combo.getId())
+                .forEach(v -> { v.setActive(combo.getActive()); variantRepo.save(v); });
         return toResponse(productRepo.save(combo));
     }
 
-    // ── Virtual Stock ────────────────────────────────────────────────────────
+    // ── Virtual Stock & Combo Variant ─────────────────────────────────────────
 
     /**
-     * Tính và cập nhật tồn kho ảo của combo.
-     * stockQty = min(floor(component.stockQty / requiredQty)) với mọi thành phần.
-     * Được gọi sau mỗi giao dịch ảnh hưởng đến thành phần.
+     * Tính virtual stock và cost, cập nhật vào default variant của combo.
+     * stockQty = min(floor(component.defaultVariant.stockQty / requiredQty))
+     * costPrice = Σ (component.defaultVariant.costPrice × qty)
      */
     public void updateVirtualStock(Product combo) {
         if (!combo.isCombo()) return;
         List<ProductComboItem> items = comboItemRepo.findByComboProduct(combo);
-        if (items.isEmpty()) { combo.setStockQty(0); return; }
+        if (items.isEmpty()) { syncComboVariant(combo, 0, BigDecimal.ZERO); return; }
 
         int virtualStock = items.stream()
-                .mapToInt(ci -> ci.getProduct().getStockQty() / ci.getQuantity())
-                .min()
-                .orElse(0);
-        combo.setStockQty(virtualStock);
+                .mapToInt(ci -> {
+                    ProductVariant cv = ci.getProduct().getDefaultVariant();
+                    int stock = cv != null ? cv.getStockQty() : 0;
+                    return stock / ci.getQuantity();
+                })
+                .min().orElse(0);
 
-        // Cập nhật giá vốn combo = Σ costPrice × qty thành phần
         BigDecimal comboCost = items.stream()
-                .map(ci -> ci.getProduct().getCostPrice()
-                        .multiply(BigDecimal.valueOf(ci.getQuantity())))
+                .map(ci -> {
+                    ProductVariant cv = ci.getProduct().getDefaultVariant();
+                    BigDecimal cost = cv != null ? cv.getCostPrice() : BigDecimal.ZERO;
+                    return cost.multiply(BigDecimal.valueOf(ci.getQuantity()));
+                })
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        combo.setCostPrice(comboCost);
+
+        syncComboVariant(combo, virtualStock, comboCost);
     }
 
     /** Cập nhật tất cả combo chứa SP đã thay đổi tồn kho */
@@ -142,33 +137,57 @@ public class ProductComboService {
         if (req.code() != null && !req.code().isBlank())
             combo.setCode(req.code().trim().toUpperCase());
         combo.setName(req.name());
-        combo.setUnit(req.unit() != null ? req.unit() : "combo");
-        combo.setSellPrice(req.sellPrice());
-        combo.setCostPrice(BigDecimal.ZERO); // cập nhật sau khi có items
-        if (req.active() != null) combo.setActive(req.active());
+        combo.setDescription(req.description());
+        combo.setActive(req.active() != null ? req.active() : (combo.getActive() != null ? combo.getActive() : true));
         combo.setImageUrl(req.imageUrl());
+        combo.setUpdatedAt(LocalDateTime.now());
+        if (combo.getCreatedAt() == null) combo.setCreatedAt(LocalDateTime.now());
 
-        // Category — lấy từ request hoặc dùng category đầu tiên của thành phần
         if (req.categoryId() != null) {
             combo.setCategory(categoryRepo.findById(req.categoryId())
-                    .orElseThrow(() -> new EntityNotFoundException(
-                            "Category ID: " + req.categoryId())));
+                    .orElseThrow(() -> new EntityNotFoundException("Category ID: " + req.categoryId())));
         } else if (combo.getCategory() == null) {
-            // Fallback: lấy category đầu tiên
             combo.setCategory(categoryRepo.findAll().stream().findFirst()
                     .orElseThrow(() -> new IllegalStateException("Chưa có danh mục nào trong hệ thống")));
         }
     }
 
+    private void createOrUpdateComboVariant(Product combo, BigDecimal sellPrice) {
+        var existing = variantRepo.findByProductIdAndIsDefaultTrue(combo.getId());
+        ProductVariant v = existing.orElseGet(ProductVariant::new);
+        v.setProduct(combo);
+        v.setVariantCode(combo.getCode());
+        v.setVariantName(combo.getName());
+        v.setSellUnit("combo");
+        v.setSellPrice(sellPrice != null ? sellPrice : BigDecimal.ZERO);
+        v.setCostPrice(BigDecimal.ZERO); // sẽ cập nhật lại bởi updateVirtualStock
+        v.setStockQty(0);
+        v.setMinStockQty(0);
+        v.setIsDefault(true);
+        v.setActive(combo.getActive());
+        v.setImageUrl(combo.getImageUrl());
+        if (v.getCreatedAt() == null) v.setCreatedAt(LocalDateTime.now());
+        v.setUpdatedAt(LocalDateTime.now());
+        variantRepo.save(v);
+        // Cập nhật stock thực tế
+        updateVirtualStock(combo);
+    }
+
+    private void syncComboVariant(Product combo, int virtualStock, BigDecimal comboCost) {
+        variantRepo.findByProductIdAndIsDefaultTrue(combo.getId()).ifPresent(v -> {
+            v.setStockQty(virtualStock);
+            v.setCostPrice(comboCost);
+            v.setUpdatedAt(LocalDateTime.now());
+            variantRepo.save(v);
+        });
+    }
+
     private void saveComboItems(Product combo, ProductComboRequest req) {
         for (ProductComboRequest.ComboItemRequest ir : req.items()) {
             Product component = productRepo.findById(ir.productId())
-                    .orElseThrow(() -> new EntityNotFoundException(
-                            "Sản phẩm ID: " + ir.productId() + " không tồn tại"));
-            if (component.isCombo()) {
-                throw new IllegalArgumentException(
-                        "Không thể thêm combo '" + component.getName() + "' vào trong combo khác");
-            }
+                    .orElseThrow(() -> new EntityNotFoundException("Sản phẩm ID: " + ir.productId()));
+            if (component.isCombo())
+                throw new IllegalArgumentException("Không thể thêm combo '" + component.getName() + "' vào combo khác");
             ProductComboItem item = new ProductComboItem();
             item.setComboProduct(combo);
             item.setProduct(component);
@@ -194,23 +213,24 @@ public class ProductComboService {
 
     public ProductComboResponse toResponse(Product combo) {
         List<ProductComboItem> items = comboItemRepo.findByComboProduct(combo);
+        ProductVariant comboVariant = combo.getDefaultVariant();
 
         List<ProductComboResponse.ComboItemResponse> itemResponses = items.stream()
                 .map(i -> {
-                    BigDecimal unitPrice = i.getProduct().getSellPrice();
-                    BigDecimal lineSell  = unitPrice.multiply(BigDecimal.valueOf(i.getQuantity()));
-                    BigDecimal lineCost  = i.getProduct().getCostPrice()
-                                           .multiply(BigDecimal.valueOf(i.getQuantity()));
+                    ProductVariant cv = i.getProduct().getDefaultVariant();
+                    BigDecimal unitPrice = cv != null ? cv.getSellPrice() : BigDecimal.ZERO;
+                    BigDecimal unitCost  = cv != null ? cv.getCostPrice() : BigDecimal.ZERO;
+                    String sellUnit      = cv != null ? cv.getSellUnit() : "cai";
                     return new ProductComboResponse.ComboItemResponse(
                             i.getId(),
                             i.getProduct().getId(),
                             i.getProduct().getCode(),
                             i.getProduct().getName(),
-                            i.getProduct().getUnit(),
+                            sellUnit,
                             i.getQuantity(),
                             unitPrice,
-                            lineSell,
-                            lineCost
+                            unitPrice.multiply(BigDecimal.valueOf(i.getQuantity())),
+                            unitCost.multiply(BigDecimal.valueOf(i.getQuantity()))
                     );
                 })
                 .collect(Collectors.toList());
@@ -222,11 +242,14 @@ public class ProductComboService {
                 .map(ProductComboResponse.ComboItemResponse::lineCost)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        int stockQty   = comboVariant != null ? comboVariant.getStockQty() : 0;
+        BigDecimal sell = comboVariant != null ? comboVariant.getSellPrice() : BigDecimal.ZERO;
+
         return new ProductComboResponse(
                 combo.getId(), combo.getCode(), combo.getName(),
-                null, // description — Product entity chưa có field này
-                combo.getSellPrice(), combo.getActive(), combo.getStockQty(),
-                combo.getUnit(), combo.getImageUrl(),
+                combo.getDescription(),
+                sell, combo.getActive(), stockQty,
+                combo.getImageUrl(),
                 combo.getCategory() != null ? combo.getCategory().getId() : null,
                 combo.getCategory() != null ? combo.getCategory().getName() : null,
                 itemResponses, totalRetail, totalCost,

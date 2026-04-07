@@ -1,10 +1,15 @@
 package com.example.nhadanshop.service;
 
+import com.example.nhadanshop.entity.Product;
+import com.example.nhadanshop.entity.ProductComboItem;
+import com.example.nhadanshop.repository.ProductComboRepository;
+import com.example.nhadanshop.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.xssf.usermodel.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -21,6 +26,9 @@ import java.io.IOException;
 @Service
 @RequiredArgsConstructor
 public class ExcelTemplateService {
+
+    private final ProductRepository productRepository;
+    private final ProductComboRepository productComboRepository;
 
     // ══════════════════════════════════════════════════════════════════════════
     // 1. TEMPLATE IMPORT SẢN PHẨM
@@ -158,171 +166,187 @@ public class ExcelTemplateService {
 
     /**
      * Tạo file Excel template import phiếu nhập kho.
-     * Columns A-L (12 cột):
-     *   A-code | B-name | C-quantity | D-unitCost | E-sellPrice |
-     *   F-discountPct | G-note | H-category(mới) | I-unit(mới) |
-     *   J-importUnit | K-sellUnit | L-piecesPerImportUnit
+     * Columns A-M (13 cột — NEW FORMAT có cột B: variant_code):
+     *   A-productCode | B-variantCode(optional) | C-name | D-quantity |
+     *   E-unitCost | F-sellPrice | G-discountPct | H-note |
+     *   I-category(mới) | J-unit(mới) | K-importUnit | L-sellUnit | M-piecesPerImportUnit
      */
+    @Transactional(readOnly = true)
     public byte[] buildReceiptTemplate() throws IOException {
         try (XSSFWorkbook wb = new XSSFWorkbook()) {
 
             CellStyle headerStyle  = buildHeaderStyle(wb, new byte[]{(byte)0,(byte)100,(byte)0});
             CellStyle required     = buildHeaderStyle(wb, new byte[]{(byte)180,(byte)50,(byte)30});
             CellStyle optional     = buildHeaderStyle(wb, new byte[]{(byte)70,(byte)130,(byte)180});
-            CellStyle sellStyle    = buildHeaderStyle(wb, new byte[]{(byte)0,(byte)120,(byte)160}); // cyan: giá bán
-            CellStyle unitStyle    = buildHeaderStyle(wb, new byte[]{(byte)120,(byte)80,(byte)0});  // brown: đơn vị
+            CellStyle variantStyle = buildHeaderStyle(wb, new byte[]{(byte)100,(byte)60,(byte)160});
+            CellStyle sellStyle    = buildHeaderStyle(wb, new byte[]{(byte)0,(byte)120,(byte)160});
+            CellStyle unitStyle    = buildHeaderStyle(wb, new byte[]{(byte)120,(byte)80,(byte)0});
+            CellStyle comboHdr     = buildHeaderStyle(wb, new byte[]{(byte)100,(byte)50,(byte)180});
             CellStyle dataStyle    = buildDataStyle(wb);
             CellStyle numberStyle  = buildNumberStyle(wb);
             CellStyle noteStyle    = buildNoteStyle(wb);
             CellStyle titleStyle   = buildTitleStyle(wb);
             CellStyle sectionStyle = buildSectionStyle(wb, new byte[]{(byte)0,(byte)100,(byte)0});
+            CellStyle comboSection = buildSectionStyle(wb, new byte[]{(byte)100,(byte)50,(byte)180});
             CellStyle newSpStyle   = buildHighlightStyle(wb);
 
-            XSSFSheet data = wb.createSheet("Du lieu Phieu Nhap");
-            data.setDefaultColumnWidth(15);
-            data.setColumnWidth(1, 32 * 256);  // B: Tên SP
-            data.setColumnWidth(6, 28 * 256);  // G: Ghi chú
-            data.setColumnWidth(7, 22 * 256);  // H: Danh mục
-            data.setColumnWidth(9, 14 * 256);  // J: ĐV nhập
-            data.setColumnWidth(10, 14 * 256); // K: ĐV bán
-            data.setColumnWidth(11, 14 * 256); // L: Số lẻ/ĐV
+            // ══════════════════════════════════════════════════════════════
+            // SHEET 1: SP Don (13 cột A-M)
+            // ══════════════════════════════════════════════════════════════
+            XSSFSheet spSheet = wb.createSheet("SP Don");
+            spSheet.setDefaultColumnWidth(15);
+            spSheet.setColumnWidth(1, 16 * 256);
+            spSheet.setColumnWidth(2, 30 * 256);
+            spSheet.setColumnWidth(7, 28 * 256);
+            spSheet.setColumnWidth(8, 22 * 256);
+            spSheet.setColumnWidth(10, 14 * 256);
+            spSheet.setColumnWidth(11, 14 * 256);
+            spSheet.setColumnWidth(12, 14 * 256);
 
-            // Title row 0
-            Row titleRow = data.createRow(0);
-            titleRow.setHeightInPoints(28);
-            Cell titleCell = titleRow.createCell(0);
-            titleCell.setCellValue("TEMPLATE IMPORT PHIEU NHAP KHO - NHA DAN SHOP (12 COT A-L)");
-            titleCell.setCellStyle(titleStyle);
+            Row spTitle = spSheet.createRow(0); spTitle.setHeightInPoints(28);
+            Cell spTc = spTitle.createCell(0);
+            spTc.setCellValue("SHEET 1: NHAP HANG SP DON - NHA DAN SHOP (13 COT A-M)");
+            spTc.setCellStyle(titleStyle);
 
-            // Sub-title row 1
-            Row subRow = data.createRow(1);
-            subRow.setHeightInPoints(50);
-            Cell subCell = subRow.createCell(0);
-            subCell.setCellValue(
-                "Do tim: Ma SP (cot A) → Ten SP (cot B). SP CHUA CO: de trong A, dien B+H+I → HE THONG TU TAO SP MOI.\n" +
-                "E=Gia ban, F=CK%, G=Ghi chu, H=DanhMuc, I=DonVi. " +
-                "J=DV_Nhap (kg/xau/bich), K=DV_Ban (bich/goi), L=SoLe (1kg=10bich → L=10). " +
-                "J/K/L chi ap dung SP MOI hoac SP chua co lo hang. VAT% va PhiShip nhap tren web.");
-            subCell.setCellStyle(noteStyle);
+            Row spSub = spSheet.createRow(1); spSub.setHeightInPoints(50);
+            Cell spSc = spSub.createCell(0);
+            spSc.setCellValue(
+                "A=Ma SP (bat buoc), B=Ma Variant (de trong = default variant).\n" +
+                "SP CHUA CO: dien C(Ten)+I(DanhMuc) → tu dong tao SP moi.\n" +
+                "K=DV Nhap (kg/xau), L=DV Ban (bich/goi), M=SoLe (1kg=10bich → M=10). VAT%+PhiShip nhap tren web.");
+            spSc.setCellStyle(noteStyle);
 
-            // Header row 2 — 12 cột A..L
-            String[] hTexts = {
-                "A: Ma SP", "B: Ten SP (*)", "C: So luong (*)", "D: Gia nhap (*)",
-                "E: Gia ban", "F: Chiet khau %", "G: Ghi chu dong",
-                "H: Danh muc (SP moi)", "I: Don vi (SP moi)",
-                "J: DV Nhap kho", "K: DV Ban le", "L: So le/DV"
+            String[] spHeaders = {
+                "A: Ma SP (*)", "B: Ma Variant", "C: Ten SP",
+                "D: So luong (*)", "E: Gia nhap (*)", "F: Gia ban",
+                "G: Chiet khau %", "H: Ghi chu dong",
+                "I: Danh muc (SP moi)", "J: Don vi (SP moi)",
+                "K: DV Nhap kho", "L: DV Ban le", "M: So le/DV"
             };
-            CellStyle[] hStyles = {
-                headerStyle, required, required, required,
-                sellStyle, optional, headerStyle,
+            CellStyle[] spHStyles = {
+                required, variantStyle, headerStyle,
+                required, required, sellStyle,
+                optional, headerStyle,
                 optional, optional,
                 unitStyle, unitStyle, unitStyle
             };
-
-            Row hRow = data.createRow(2);
-            hRow.setHeightInPoints(20);
-            for (int i = 0; i < hTexts.length; i++) {
-                Cell c = hRow.createCell(i);
-                c.setCellValue(hTexts[i]);
-                c.setCellStyle(hStyles[i]);
+            Row spHRow = spSheet.createRow(2); spHRow.setHeightInPoints(20);
+            for (int i = 0; i < spHeaders.length; i++) {
+                Cell c = spHRow.createCell(i);
+                c.setCellValue(spHeaders[i]); c.setCellStyle(spHStyles[i]);
             }
 
-            // ── Dummy data 12 cột A-L ────────────────────────────────────────
-            // code,name,qty,unitCost,sellPrice,discountPct,note,category(H),unit(I),importUnit(J),sellUnit(K),pieces(L)
-            Object[][] rows = {
-                // SP đã có — J,K,L điền nếu SP chưa có lô (hệ thống kiểm tra tự động)
-                {"BT001","Banh Trang Rong Bien", 1, 65000,  90000, 0,   "SP co san - 1kg=10bich", "",           "",    "kg",  "bich", 10},
-                {"BT002","Banh Trang Cuon Tep",  5, 38000,  55000, 5,   "CK 5% - nhap hop",       "",           "",    "",    "",     ""},
-                {"M001", "Muoi Bien Khanh Hoa", 20,  5000,   8000, 10,  "CK 10%",                 "",           "",    "",    "",     ""},
-                // SP tìm theo tên
-                {"",    "Com Chay Nam Huong",    3, 45000,  65000, 0,   "Tim theo ten SP",        "",           "",    "",    "",     ""},
-                // SP mới — bắt buộc điền H,I; nên điền J,K,L nếu muốn cấu hình đơn vị ngay
-                {"",    "Banh Phong Tom Viet",   8, 12000,  18000, 0,   "SP MOI - nhap goi",      "Banh Phong", "goi", "goi", "goi",  1},
-                {"",    "Keo Dua Ben Tre XYZ",   2, 35000,  50000, 8.5, "SP MOI - 1xau=7bich",   "Keo Dua",    "bich","xau", "bich", 7},
-            };
+            // ── Data thực từ DB: load SP đơn active ────────────────────────
+            java.util.List<Product> singleProducts =
+                productRepository.findByProductTypeAndActiveTrue(Product.ProductType.SINGLE);
 
-            int rowNum = 3;
-            for (Object[] r : rows) {
-                Row row = data.createRow(rowNum++);
-                boolean isNew = r[7] != null && !r[7].toString().isBlank();
-                for (int col = 0; col < r.length; col++) {
-                    Cell c = row.createCell(col);
-                    if (r[col] instanceof Number) {
-                        c.setCellValue(((Number) r[col]).doubleValue());
-                        c.setCellStyle(isNew ? newSpStyle : numberStyle);
-                    } else {
-                        c.setCellValue(r[col] != null ? r[col].toString() : "");
-                        c.setCellStyle(isNew ? newSpStyle : dataStyle);
-                    }
+            int spRowNum = 3;
+
+            if (singleProducts.isEmpty()) {
+                // Không có SP nào → ghi hướng dẫn
+                Row emptyRow = spSheet.createRow(spRowNum++);
+                Cell ec = emptyRow.createCell(0);
+                ec.setCellValue("(Chua co san pham nao. Dien ma SP moi vao cot A + Ten SP cot C + Danh muc cot I de tao SP moi.)");
+                ec.setCellStyle(noteStyle);
+            } else {
+                for (Product p : singleProducts) {
+                    // Lấy default variant nếu có
+                    var variants = p.getVariants();
+                    var defaultVar = variants == null ? null :
+                        variants.stream().filter(v -> Boolean.TRUE.equals(v.getIsDefault())).findFirst()
+                            .orElse(variants.isEmpty() ? null : variants.get(0));
+
+                    Row row = spSheet.createRow(spRowNum++);
+                    // A: Mã SP
+                    Cell ca = row.createCell(0); ca.setCellValue(p.getCode()); ca.setCellStyle(dataStyle);
+                    // B: Mã Variant (default variant code)
+                    Cell cb2 = row.createCell(1);
+                    cb2.setCellValue(defaultVar != null ? defaultVar.getVariantCode() : "");
+                    cb2.setCellStyle(dataStyle);
+                    // C: Tên SP
+                    Cell cc = row.createCell(2); cc.setCellValue(p.getName()); cc.setCellStyle(dataStyle);
+                    // D: Số lượng — để trống cho user điền
+                    row.createCell(3).setCellStyle(numberStyle);
+                    // E: Giá nhập — để trống
+                    row.createCell(4).setCellStyle(numberStyle);
+                    // F: Giá bán hiện tại (nếu có)
+                    Cell cf = row.createCell(5);
+                    if (defaultVar != null && defaultVar.getSellPrice() != null) {
+                        cf.setCellValue(defaultVar.getSellPrice().doubleValue());
+                        cf.setCellStyle(numberStyle);
+                    } else { cf.setCellStyle(numberStyle); }
+                    // G: CK% — 0
+                    Cell cg = row.createCell(6); cg.setCellValue(0); cg.setCellStyle(numberStyle);
+                    // H: Ghi chú — tên danh mục
+                    Cell ch = row.createCell(7);
+                    ch.setCellValue(p.getCategory() != null ? p.getCategory().getName() : "");
+                    ch.setCellStyle(dataStyle);
+                    // I, J — trống (SP đã có, không cần tạo mới)
+                    row.createCell(8).setCellStyle(dataStyle);
+                    row.createCell(9).setCellStyle(dataStyle);
+                    // K: Import unit
+                    Cell ck = row.createCell(10);
+                    ck.setCellValue(defaultVar != null && defaultVar.getImportUnit() != null
+                        ? defaultVar.getImportUnit() : "");
+                    ck.setCellStyle(dataStyle);
+                    // L: Sell unit
+                    Cell cl = row.createCell(11);
+                    cl.setCellValue(defaultVar != null && defaultVar.getSellUnit() != null
+                        ? defaultVar.getSellUnit() : "");
+                    cl.setCellStyle(dataStyle);
+                    // M: Pieces per unit
+                    Cell cm = row.createCell(12);
+                    if (defaultVar != null && defaultVar.getPiecesPerUnit() != null) {
+                        cm.setCellValue(defaultVar.getPiecesPerUnit());
+                        cm.setCellStyle(numberStyle);
+                    } else { cm.setCellStyle(numberStyle); }
                 }
             }
+            Row spLegend = spSheet.createRow(spRowNum + 1);
+            Cell sl1 = spLegend.createCell(0); sl1.setCellValue("Xanh = SP/Variant da co"); sl1.setCellStyle(dataStyle);
+            Cell sl2 = spLegend.createCell(6); sl2.setCellValue("Vang = SP MOI tu dong tao"); sl2.setCellStyle(newSpStyle);
 
-            Row legendRow = data.createRow(rowNum + 1);
-            Cell l1 = legendRow.createCell(0);
-            l1.setCellValue("Mau xanh = SP da co / Tim theo ten"); l1.setCellStyle(dataStyle);
-            Cell l2 = legendRow.createCell(7);
-            l2.setCellValue("Mau vang = SP MOI tu dong tao"); l2.setCellStyle(newSpStyle);
-            Cell l3 = legendRow.createCell(9);
-            l3.setCellValue("J/K/L: SP moi hoac SP chua co lo hang"); l3.setCellStyle(dataStyle);
+            spSheet.addMergedRegion(new CellRangeAddress(0,0,0,12));
+            spSheet.addMergedRegion(new CellRangeAddress(1,1,0,12));
+            spSheet.setAutoFilter(new CellRangeAddress(2,2,0,12));
+            spSheet.createFreezePane(0,3);
 
-            // Merged regions — 12 cột (A..L = 0..11)
-            data.addMergedRegion(new CellRangeAddress(0, 0, 0, 11));
-            data.addMergedRegion(new CellRangeAddress(1, 1, 0, 11));
-            data.setAutoFilter(new CellRangeAddress(2, 2, 0, 11));
-            data.createFreezePane(0, 3);
-
-            // ── Sheet 2: Hướng dẫn ───────────────────────────────────────────
+            // ══════════════════════════════════════════════════════════════
+            // SHEET 2: Huong dan  (Sheet Combo tạm thời bị bỏ)
+            // ══════════════════════════════════════════════════════════════
             XSSFSheet guide = wb.createSheet("Huong dan");
             guide.setColumnWidth(0, 28 * 256);
             guide.setColumnWidth(1, 65 * 256);
             guide.setColumnWidth(2, 28 * 256);
 
             addGuideHeader(guide, wb, sectionStyle, noteStyle, dataStyle,
-                "HUONG DAN IMPORT PHIEU NHAP KHO (12 COT A-L)",
+                "HUONG DAN IMPORT PHIEU NHAP KHO",
                 new String[][]{
-                    {"Cot","Mo ta","Vi du"},
-                    {"A: Ma SP","Ma san pham (uu tien). De trong → tim theo ten (cot B)","BT001"},
-                    {"B: Ten SP (*)","Ten san pham. SP CHUA CO → he thong tu tao moi","Banh Trang Rong Bien"},
-                    {"C: So luong (*)","So luong nhap theo DV NHAP (kg/xau/hop/bich/chai)","10"},
-                    {"D: Gia nhap (*)","Gia tren 1 DV NHAP. He thong tu chia sang gia le","65000"},
-                    {"E: Gia ban","(TUY CHON) Gia ban moi → cap nhat sell_price SP.\nDe trong = giu nguyen gia ban cu.","90000"},
-                    {"F: Chiet khau %","% chiet khau NCC (0-100). De trong = 0%.","5"},
-                    {"G: Ghi chu","Ghi chu tung dong (tuy chon)","Lo nhap thang 3"},
-                    {"H: Danh muc","Chi dien khi SP MOI chua co trong he thong.","Banh Trang"},
-                    {"I: Don vi","Chi dien khi SP MOI. Don vi chung: bich/goi/hop/chai","bich"},
-                    {"J: DV Nhap kho","(TUY CHON) Don vi NHAP tu NCC.\n" +
-                     "ATOMIC (khong chia): bich, hop, chai, goi, hu, lon, tui\n" +
-                     "  → qty ban = qty nhap (khong nhan pieces)\n" +
-                     "GOP (chia ra le): kg, xau, 5xau, thung...\n" +
-                     "  → qty ban = qty nhap x L (so le)\n" +
-                     "Chi ap dung cho SP MOI hoac SP chua co lo hang.","kg"},
-                    {"K: DV Ban le","(TUY CHON) Don vi ban cho khach: bich/goi/hop/chai.\n" +
-                     "Chi ap dung cho SP MOI hoac SP chua co lo hang.","bich"},
-                    {"L: So le/DV nhap","(TUY CHON) So DV ban tu 1 DV nhap.\n" +
-                     "VD: 1kg = 10bich → L=10 | 1xau = 7bich → L=7.\n" +
-                     "Neu J la ATOMIC (bich/hop/chai...) → L bi bo qua, luon = 1.\n" +
-                     "Chi ap dung cho SP MOI hoac SP chua co lo hang.","10"},
-                    {"J/K/L - CANH BAO","NEU SP DA CO LO HANG (da nhap kho truoc): J, K, L bi BO QUA.\n" +
-                     "Ly do: thay doi importUnit/pieces sau khi co lo se lam SAI cong thuc:\n" +
-                     "  sumReceivedQty dung gia tri MOI de tinh lai lich su → ton kho sai.\n" +
-                     "  Muon thay doi: vao Quan ly San pham → Sua truc tiep.","-"},
-                    {"CONG THUC TON KHO","ATOMIC: stockQty += qty_nhap (khong x pieces)\n" +
-                     "GOP: stockQty += qty_nhap x L","-"},
-                    {"CONG THUC GIA VON","ATOMIC: costPerUnit = unitCost\n" +
-                     "GOP: costPerUnit = unitCost / L\n" +
-                     "finalCost = costPerUnit x (1-CK%) + ship/unit + VAT/unit","-"},
-                    {"LOI NHUAN","profit = unitPrice_ban - unitCostSnapshot\n" +
-                     "unitCostSnapshot = FEFO avg cost luc ban (tu batch)\n" +
-                     "Thay doi importUnit/pieces KHONG anh huong loi nhuan lich su.","-"},
-                    {"VAT% (WEB)","Nhap % VAT tren form web khi upload file.\n" +
-                     "vatAmount = tong_sau_CK x vat%. Chia theo ty le gia tri.","10"},
-                    {"PHI SHIP (WEB)","Nhap phi van chuyen tren form web.\n" +
-                     "Chia theo ty le gia tri sau CK.","-"},
-                    {"COMBO","Nhap ma combo (VD: COMBO001) vao cot A.\n" +
-                     "He thong tu expand thanh cac SP thanh phan.","-"},
-                    {"LUU Y CHUNG","1 file = 1 phieu nhap. Nhap NCC + ship + VAT tren web.\n" +
-                     "1 loi bat ky → rollback toan bo, khong luu gi.\n" +
-                     "Cot A (Ma SP): BAT BUOC nhap tay, he thong KHONG tu sinh ma.","-"},
+                    {"Chu de","Mo ta","Vi du"},
+                    {"SHEET 1: SP Don","13 cot A-M. Moi dong = 1 SP don hoac 1 variant.\n" +
+                     "He thong doc theo thu tu: A(Ma SP) → B(Ma Variant) → C(Ten SP).\n" +
+                     "Xem ghi chu trong sheet 'SP Don' de biet chi tiet tung cot.",""},
+                    {"[TAM THOI] Nhap Combo","Nhap kho combo qua Excel chua duoc ho tro.\n" +
+                     "Dung form nhap kho thu cong (tao phieu nhap → chon Combo) de nhap combo.\n" +
+                     "Ly do: can giai quyet van de cap nhat gia ban thanh phan khi nhap combo.", ""},
+                    {"A: Ma SP (*)","BAT BUOC. Ma SP don le (BT001, M001...).\n" +
+                     "Neu ma chua co trong he thong → can dien them C+I de tao SP moi.","BT001"},
+                    {"B: Ma Variant","TUY CHON. De trong → default variant.\n" +
+                     "Dien ma → tim chinh xac variant do.\n" +
+                     "Dien ma CHUA CO → tao variant moi.","BT002"},
+                    {"C: So luong (*)","So luong theo DV NHAP (kg/xau/bich/hop).","10"},
+                    {"D: Gia nhap (*)","Gia tren 1 DV NHAP.","65000"},
+                    {"E: Gia ban","Gia ban moi → cap nhat sell_price. De trong = giu gia cu.","90000"},
+                    {"F: Gia ban","Gia ban hien thi. Cap nhat vao variant.","90000"},
+                    {"G: Chiet khau %","% chiet khau NCC (0-100).","5"},
+                    {"K/L/M","K=DV Nhap, L=DV Ban, M=So le.\n" +
+                     "ATOMIC (bich/hop/chai): M bo qua, ton kho += qty.\n" +
+                     "GOP (kg/xau/thung): ton kho += qty x M.","K=kg L=bich M=10"},
+                    {"Chi phi sau import","finalCost = (unitCost / pieces) x (1-CK%) + ship/unit + VAT/unit.\n" +
+                     "Ship + VAT nhap tren web, phan bo theo ti le gia tri dong.",""},
+                    {"PREVIEW truoc khi import","He thong hien thi tat ca dong du lieu, danh dau loi do/xanh.\n" +
+                     "Co loi → khoa nut 'Tao phieu nhap'. Sua file roi upload lai.",""},
+                    {"Rollback","1 loi bat ky → rollback toan bo, khong ghi gi vao DB.",""},
                 }
             );
 
@@ -332,6 +356,38 @@ public class ExcelTemplateService {
             return out.toByteArray();
         }
     }
+
+    /** Build title style với màu tùy chỉnh */
+    private CellStyle buildTitleStyleColored(XSSFWorkbook wb, byte[] rgb) {
+        XSSFCellStyle style = wb.createCellStyle();
+        XSSFColor color = new XSSFColor(rgb, null);
+        style.setFillForegroundColor(color);
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        style.setAlignment(HorizontalAlignment.CENTER);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        XSSFFont font = wb.createFont();
+        font.setBold(true); font.setColor(IndexedColors.WHITE.getIndex());
+        font.setFontHeightInPoints((short)14);
+        style.setFont(font);
+        return style;
+    }
+
+    /** Highlight style cho mã combo trong sheet Combo */
+    private CellStyle buildHighlightCombo(XSSFWorkbook wb) {
+        XSSFCellStyle style = wb.createCellStyle();
+        XSSFColor bg = new XSSFColor(new byte[]{(byte)237,(byte)231,(byte)246}, null);
+        style.setFillForegroundColor(bg);
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        style.setBorderBottom(BorderStyle.THIN); style.setBorderTop(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);  style.setBorderRight(BorderStyle.THIN);
+        XSSFFont font = wb.createFont();
+        font.setBold(true);
+        font.setColor(new XSSFColor(new byte[]{(byte)100,(byte)50,(byte)180}, null));
+        style.setFont(font);
+        return style;
+    }
+
+
 
     // ══════════════════════════════════════════════════════════════════════════
     // 3. TEMPLATE IMPORT COMBO
@@ -352,6 +408,7 @@ public class ExcelTemplateService {
             XSSFSheet data = wb.createSheet("Du lieu Combo");
             data.setDefaultColumnWidth(16);
             data.setColumnWidth(1, 35 * 256);  // B: Tên combo
+            data.setColumnWidth(5, 40 * 256);  // F: Mô tả
 
             // Title row 0
             Row titleRow = data.createRow(0);
@@ -362,27 +419,28 @@ public class ExcelTemplateService {
 
             // Sub-title row 1
             Row subRow = data.createRow(1);
-            subRow.setHeightInPoints(36);
+            subRow.setHeightInPoints(40);
             Cell sc = subRow.createCell(0);
             sc.setCellValue(
-                "Moi dong = 1 combo. Toi da 5 thanh phan/dong (cot F-O).\n" +
+                "Moi dong = 1 combo. Toi da 5 thanh phan/dong (cot G-P).\n" +
                 "SP thanh phan phai la ma SP DON LE (SINGLE) da co trong he thong.\n" +
                 "De trong cot A → tu dong sinh ma COMBO###. Cat ID: xem sheet Huong dan.");
             sc.setCellStyle(noteStyle);
 
             // Header row 2
-            // Cột A-E: thông tin combo
-            // Cột F-O: từng cặp (Mã SP, SL) × 5 thành phần
+            // Cột A-F: thông tin combo (thêm F: Mô tả)
+            // Cột G-P: từng cặp (Mã SP, SL) × 5 thành phần
             String[] headers = {
                 "A: Ma combo", "B: Ten combo (*)", "C: Gia ban (*)", "D: Don vi", "E: Cat.ID",
-                "F: Ma SP 1 (*)", "G: SL 1 (*)",
-                "H: Ma SP 2", "I: SL 2",
-                "J: Ma SP 3", "K: SL 3",
-                "L: Ma SP 4", "M: SL 4",
-                "N: Ma SP 5", "O: SL 5"
+                "F: Mo ta combo",
+                "G: Ma SP 1 (*)", "H: SL 1 (*)",
+                "I: Ma SP 2", "J: SL 2",
+                "K: Ma SP 3", "L: SL 3",
+                "M: Ma SP 4", "N: SL 4",
+                "O: Ma SP 5", "P: SL 5"
             };
             CellStyle[] hStyles = {
-                headerStyle, required, required, optional, optional,
+                headerStyle, required, required, optional, optional, optional,
                 compStyle, compStyle,
                 compStyle, compStyle,
                 compStyle, compStyle,
@@ -398,10 +456,11 @@ public class ExcelTemplateService {
             }
 
             // Dummy data
+            // A:code | B:name | C:price | D:unit | E:catId | F:description | G:sp1 | H:sl1 | I:sp2 | J:sl2 ...
             Object[][] rows = {
-                {"", "Combo Banh Trang Dac Biet", 150000, "combo", "", "BT001", 5, "M001", 2, "", "", "", "", "", ""},
-                {"", "Combo Muoi Goi To", 80000, "combo", "", "M001", 5, "M002", 1, "M003", 2, "", "", "", ""},
-                {"COMBO_TEST", "Combo Thu Nghiem", 200000, "bo", "", "BT001", 3, "BT002", 2, "CC001", 1, "", "", "", ""},
+                {"", "Combo Banh Trang Dac Biet", 150000, "combo", "", "Combo gom 5 bich banh trang + 2 goi muoi", "BT001", 5, "M001", 2, "", "", "", "", "", ""},
+                {"", "Combo Muoi Goi To",          80000,  "combo", "", "Muoi bien + muoi hong + muoi toi ot",       "M001", 5, "M002", 1, "M003", 2, "", "", "", ""},
+                {"COMBO_TEST", "Combo Thu Nghiem",  200000, "bo",   "", "",                                          "BT001", 3, "BT002", 2, "CC001", 1, "", "", "", ""},
             };
             int rowNum = 3;
             for (Object[] r : rows) {
@@ -418,9 +477,9 @@ public class ExcelTemplateService {
                 }
             }
 
-            data.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(0, 0, 0, 14));
-            data.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(1, 1, 0, 14));
-            data.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(2, 2, 0, 14));
+            data.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(0, 0, 0, 15));
+            data.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(1, 1, 0, 15));
+            data.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(2, 2, 0, 15));
             data.createFreezePane(0, 3);
 
             // Guide sheet
@@ -437,14 +496,16 @@ public class ExcelTemplateService {
                     {"C: Gia ban (*)", "Gia ban combo (dong). Thuong thap hon tong SP le", "150000"},
                     {"D: Don vi", "Don vi cua combo. De trong = 'combo'", "bo, set, combo"},
                     {"E: Cat.ID", "ID danh muc (so nguyen). De trong = lay tu SP thanh phan dau tien", "3"},
-                    {"F+G: SP 1", "Ma SP + So luong thanh phan 1. BAT BUOC it nhat 1 cap.", "BT001 | 5"},
-                    {"H+I: SP 2", "Ma SP + So luong thanh phan 2 (tuy chon)", "M001 | 2"},
-                    {"J+K...O: SP 3-5", "Tuong tu, toi da 5 thanh phan", ""},
+                    {"F: Mo ta", "Mo ta combo (tuy chon). Hien thi o trang admin.", "Combo gom 5 bich banh trang + 2 goi muoi"},
+                    {"G+H: SP 1", "Ma SP + So luong thanh phan 1. BAT BUOC it nhat 1 cap.", "BT001 | 5"},
+                    {"I+J: SP 2", "Ma SP + So luong thanh phan 2 (tuy chon)", "M001 | 2"},
+                    {"K+L...P: SP 3-5", "Tuong tu, toi da 5 thanh phan", ""},
                     {"LUU Y 1", "SP thanh phan PHAI LA SP DON LE (SINGLE) da co trong he thong", ""},
                     {"LUU Y 2", "Khong the them combo vao trong combo (khong long combo)", ""},
                     {"LUU Y 3", "1 dong loi → rollback toan bo file, khong tao combo nao", ""},
                     {"TON KHO AO", "stockQty combo = min(stockQty_SP / required_qty) moi thanh phan\nVD: BT001 ton 20, can 5 → co the ban 4 combo", ""},
                     {"GIA VON", "costPrice combo = Σ (costPrice_thanh_phan × qty)\nTu dong cap nhat moi khi nhap kho SP thanh phan", ""},
+                    {"BAN COMBO", "Khi ban: chon combo, he thong tu expand thanh cac line item SP don,\nghi nhan tru kho tung thanh phan, doanh thu tinh theo gia combo", ""},
                 }
             );
 
