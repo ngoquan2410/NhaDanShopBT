@@ -1,9 +1,10 @@
-﻿﻿﻿import { useState, useRef } from 'react'
+﻿﻿﻿﻿import { useState, useRef } from 'react'
 import { useReceipts, useReceiptMutations } from '../../hooks/useReceipts'
 import { useProducts } from '../../hooks/useProducts'
 import { useSort } from '../../hooks/useSort'
 import { receiptService } from '../../services/receiptService'
 import { comboService } from '../../services/comboService'
+import { supplierService } from '../../services/supplierService'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import dayjs from 'dayjs'
@@ -25,13 +26,18 @@ function Modal({ title, onClose, children }) {
 
 function ReceiptForm({ products, onSubmit, loading }) {
   const [supplierName, setSupplierName] = useState('')
+  const [supplierId, setSupplierId] = useState(null)
   const [note, setNote] = useState('')
   const [shippingFee, setShippingFee] = useState(0)
   const [vatPercent, setVatPercent] = useState(0)
-  // SP đơn — không cần variantId, hệ thống tự smart-match theo importUnit/sellUnit/pieces
   const [items, setItems] = useState([{ productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
-  // Combo — nhập theo combo, hệ thống expand thành phần
   const [comboItems, setComboItems] = useState([])
+
+  const { data: suppliers = [] } = useQuery({
+    queryKey: ['suppliers'],
+    queryFn: () => supplierService.getAll(),
+    staleTime: 60_000,
+  })
 
   const { data: combos = [] } = useQuery({
     queryKey: ['combos'],
@@ -58,7 +64,7 @@ function ReceiptForm({ products, onSubmit, loading }) {
       toast.error('Phiếu nhập phải có ít nhất 1 sản phẩm hoặc combo'); return
     }
     onSubmit({
-      supplierName, note,
+      supplierName, supplierId: supplierId || null, note,
       shippingFee:  Number(shippingFee),
       vatPercent:   Number(vatPercent) || 0,
       items: validItems.map(it => ({
@@ -66,7 +72,8 @@ function ReceiptForm({ products, onSubmit, loading }) {
         quantity:        Number(it.quantity),
         unitCost:        Number(it.unitCost),
         discountPercent: Number(it.discountPercent) || 0,
-        variantId:       null, // hệ thống tự smart-match
+        variantId:       null,
+        expiryDateOverride: it.expiryDateOverride || null,
       })),
       comboItems: validCombos.map(it => ({
         comboId:         Number(it.comboId),
@@ -97,9 +104,25 @@ function ReceiptForm({ products, onSubmit, loading }) {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Nhà cung cấp</label>
-          <input value={supplierName} onChange={e => setSupplierName(e.target.value)}
-            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-            placeholder="Tên nhà cung cấp" />
+          {suppliers.length > 0 ? (
+            <select value={supplierId || ''}
+              onChange={e => {
+                const id = e.target.value ? Number(e.target.value) : null
+                setSupplierId(id)
+                const s = suppliers.find(s => s.id === id)
+                if (s) setSupplierName(s.name)
+                else setSupplierName('')
+              }}
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+              <option value="">-- Chọn NCC hoặc nhập tay --</option>
+              {suppliers.map(s => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
+            </select>
+          ) : null}
+          {!supplierId && (
+            <input value={supplierName} onChange={e => setSupplierName(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 mt-1"
+              placeholder="Hoặc nhập tên NCC thủ công" />
+          )}
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú</label>
@@ -176,6 +199,13 @@ function ReceiptForm({ products, onSubmit, loading }) {
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 pr-6" placeholder="0" />
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
                 </div>
+              </div>
+              <div className="w-32">
+                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Ngày HSD <span className="text-gray-400">(ghi đè)</span></label>}
+                <input type="date" value={item.expiryDateOverride || ''}
+                  onChange={e => setItem(idx, 'expiryDateOverride', e.target.value || null)}
+                  className="w-full border rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-green-500"
+                  title="Để trống → tự tính từ số ngày HSD của variant" />
               </div>
               <div className="w-28 text-right pb-2">
                 {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Sau CK</label>}
@@ -325,6 +355,7 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
   const [previewing, setPreviewing]   = useState(false)
   const [activeTab, setActiveTab]     = useState('SP_DON') // 'SP_DON' | 'COMBO'
   const [supplierName, setSupplierName] = useState('')
+  const [supplierId, setSupplierId]     = useState(null)
   const [note, setNote]               = useState('')
   const [shippingFee, setShippingFee] = useState(0)
   const [vatPercent, setVatPercent]   = useState(0)
@@ -333,6 +364,13 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
   const [downloading, setDownloading] = useState(false)
   const [dragging, setDragging]       = useState(false)
   const fileRef = useRef(null)
+
+  // Sprint 1 S1-3: load danh sách NCC
+  const { data: suppliers = [] } = useQuery({
+    queryKey: ['suppliers'],
+    queryFn: () => supplierService.getAll(),
+    staleTime: 60_000,
+  })
 
   const handleFile = (f) => {
     if (!f) return
@@ -358,11 +396,11 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
 
   const handleImport = async () => {
     if (!preview?.canImport) return
-    if (!supplierName.trim()) { toast.error('Nhập tên nhà cung cấp'); return }
+    if (!supplierId && !supplierName.trim()) { toast.error('Vui lòng chọn hoặc nhập tên nhà cung cấp'); return }
     setImporting(true); setResult(null)
     try {
       const res = await receiptService.importExcel(file, supplierName.trim(), note.trim(),
-                                                    Number(shippingFee) || 0, Number(vatPercent) || 0)
+                                                    Number(shippingFee) || 0, Number(vatPercent) || 0, supplierId || null)
       setResult(res)
       if (res.successItems > 0) {
         toast.success(`✅ Tạo phiếu nhập ${res.receiptNo} thành công! (${res.successItems} SP)`)
@@ -409,7 +447,7 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
         <div className="flex-1 bg-gradient-to-r from-green-600 to-green-700 rounded-xl p-4 flex items-center justify-between">
           <div className="text-white min-w-0">
             <p className="font-bold text-sm">📥 Template Excel — 2 sheets</p>
-            <p className="text-green-200 text-xs mt-0.5">Sheet 1: SP Đơn (13 cột A–M) | Sheet 2: Hướng dẫn | Combo nhập qua form thủ công</p>
+            <p className="text-green-200 text-xs mt-0.5">Sheet 1: SP Đơn (14 cột A–N) | Sheet 2: Hướng dẫn | Combo nhập qua form thủ công</p>
           </div>
           <button onClick={handleDownload} disabled={downloading}
             className="bg-white text-green-700 font-bold px-3 py-2 rounded-lg text-xs shrink-0 disabled:opacity-70">
@@ -534,9 +572,25 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Nhà cung cấp *</label>
-                <input value={supplierName} onChange={e => setSupplierName(e.target.value)}
-                  placeholder="VD: Nhà Cung Cấp ABC"
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                {suppliers.length > 0 ? (
+                  <select value={supplierId || ''}
+                    onChange={e => {
+                      const id = e.target.value ? Number(e.target.value) : null
+                      setSupplierId(id)
+                      const s = suppliers.find(s => s.id === id)
+                      if (s) setSupplierName(s.name)
+                      else setSupplierName('')
+                    }}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                    <option value="">-- Chọn NCC từ danh mục --</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
+                  </select>
+                ) : null}
+                {!supplierId && (
+                  <input value={supplierName} onChange={e => setSupplierName(e.target.value)}
+                    placeholder="Hoặc nhập tên NCC thủ công"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 mt-1" />
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Ghi chú phiếu</label>
@@ -608,7 +662,7 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
               </div>
             ) : (
               <button onClick={handleImport}
-                disabled={!supplierName.trim() || importing}
+ cho nhungwex sa                disabled={(!supplierId && !supplierName.trim()) || importing}
                 className="flex-1 py-2.5 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2">
                 {importing
                   ? <><span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"/>Đang tạo phiếu...</>

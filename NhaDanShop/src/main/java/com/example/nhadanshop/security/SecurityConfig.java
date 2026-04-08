@@ -96,6 +96,16 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/categories/**", "/api/products/**").hasRole("ADMIN")
                         // Batches
                         .requestMatchers(HttpMethod.GET, "/api/batches/**").authenticated()
+                        // Suppliers (Sprint 1 S1-3)
+                        .requestMatchers(HttpMethod.GET, "/api/suppliers/**").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/suppliers/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/suppliers/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/suppliers/**").hasRole("ADMIN")
+                        // Stock Adjustments (Sprint 1 S1-4)
+                        .requestMatchers(HttpMethod.GET, "/api/stock-adjustments/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/stock-adjustments/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/stock-adjustments/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/stock-adjustments/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 );
         return http.build();

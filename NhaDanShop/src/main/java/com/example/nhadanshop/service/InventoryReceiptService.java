@@ -32,9 +32,10 @@ public class InventoryReceiptService {
     private final InvoiceNumberGenerator numberGen;
     private final ProductComboRepository comboRepo;
     private final ProductImportUnitRepository importUnitRepo;
-    private final ProductVariantService variantService; // Sprint 0
-    private final ProductVariantRepository variantRepo;  // Sprint 0 — explicit save
-    private final ProductComboService comboService;      // Combo KiotViet — refresh virtual stock
+    private final ProductVariantService variantService;
+    private final ProductVariantRepository variantRepo;
+    private final ProductComboService comboService;
+    private final SupplierRepository supplierRepository; // Sprint 1 S1-3
 
     @Transactional
     public InventoryReceiptResponse createReceipt(InventoryReceiptRequest req) {
@@ -44,6 +45,11 @@ public class InventoryReceiptService {
         receipt.setSupplierName(req.supplierName());
         receipt.setNote(req.note());
         receipt.setReceiptDate(LocalDateTime.now());
+
+        // Sprint 1 S1-3: set supplier FK nếu có supplierId
+        if (req.supplierId() != null) {
+            supplierRepository.findById(req.supplierId()).ifPresent(receipt::setSupplier);
+        }
 
         BigDecimal shippingFee = safe(req.shippingFee());
         BigDecimal vatPctOrder = safe(req.vatPercent());
@@ -82,7 +88,7 @@ public class InventoryReceiptService {
                             ci.getQuantity() * cr.quantity(),
                             componentCost,
                             safe(cr.discountPercent()),
-                            null, 1, null  // importUnit=null, pieces=1 (ATOMIC), variantId=null→default
+                            null, 1, null, null // importUnit=null, pieces=1, variantId=null, expiryDateOverride=null
                     ));
                 }
             }
@@ -217,9 +223,15 @@ public class InventoryReceiptService {
             variantRepo.save(variant);
 
             // Tạo Batch — gắn variant
-            LocalDate expiryDate = (variant.getExpiryDays() != null && variant.getExpiryDays() > 0)
-                    ? LocalDate.now().plusDays(variant.getExpiryDays())
-                    : LocalDate.now().plusYears(10);
+            // Sprint 1 S1-2: ưu tiên expiryDateOverride từ request nếu admin nhập ngày HSD thực tế
+            LocalDate expiryDate;
+            if (itemReq.expiryDateOverride() != null) {
+                expiryDate = itemReq.expiryDateOverride();
+            } else if (variant.getExpiryDays() != null && variant.getExpiryDays() > 0) {
+                expiryDate = LocalDate.now().plusDays(variant.getExpiryDays());
+            } else {
+                expiryDate = LocalDate.now().plusYears(10); // không có HSD → dùng ngày rất xa
+            }
             String batchCode = buildBatchCode(saved.getReceiptNo(), variant.getVariantCode());
             ProductBatch batch = new ProductBatch();
             batch.setProduct(product); batch.setVariant(variant); batch.setReceipt(saved);
@@ -232,7 +244,7 @@ public class InventoryReceiptService {
             InventoryReceiptItem item = new InventoryReceiptItem();
             item.setReceipt(saved);
             item.setProduct(product);
-            item.setVariant(variant); // [Sprint 0]
+            item.setVariant(variant);
             item.setQuantity(itemReq.quantity());
             item.setUnitCost(itemReq.unitCost());
             item.setDiscountPercent(disc);
@@ -242,10 +254,12 @@ public class InventoryReceiptService {
             item.setShippingAllocated(shippingPerUnit);
             item.setFinalCost(finalCostBeforeVat);
             item.setFinalCostWithVat(finalCostWithVat);
-            // ── [BƯỚC 1] Ghi snapshot bất biến ──
+            // ── Ghi snapshot bất biến ──
             item.setImportUnitUsed(importUnitUsed);
             item.setPiecesUsed(pieces);
             item.setRetailQtyAdded(addedRetailQty);
+            // Sprint 1 S1-2: lưu expiryDateOverride nếu có
+            item.setExpiryDateOverride(itemReq.expiryDateOverride());
 
             totalAmount = totalAmount.add(discountedLine);
             items.add(item);

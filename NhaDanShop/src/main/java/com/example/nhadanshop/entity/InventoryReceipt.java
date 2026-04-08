@@ -1,5 +1,6 @@
 package com.example.nhadanshop.entity;
 
+import com.example.nhadanshop.entity.Supplier;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -27,6 +28,11 @@ public class InventoryReceipt {
 
     @Column(name = "supplier_name", length = 150)
     private String supplierName;
+
+    /** FK → suppliers (Sprint 1 S1-3). Nullable — NCC chưa có trong danh mục hoặc phiếu cũ */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "supplier_id")
+    private Supplier supplier;
 
     @Column(name = "note", length = 500)
     private String note;

@@ -202,33 +202,40 @@ public class ExcelTemplateService {
             spSheet.setColumnWidth(10, 14 * 256);
             spSheet.setColumnWidth(11, 14 * 256);
             spSheet.setColumnWidth(12, 14 * 256);
+            spSheet.setColumnWidth(13, 18 * 256); // N: Ngày HSD
 
             Row spTitle = spSheet.createRow(0); spTitle.setHeightInPoints(28);
             Cell spTc = spTitle.createCell(0);
-            spTc.setCellValue("SHEET 1: NHAP HANG SP DON - NHA DAN SHOP (13 COT A-M)");
+            spTc.setCellValue("SHEET 1: NHAP HANG SP DON - NHA DAN SHOP (14 COT A-N)");
             spTc.setCellStyle(titleStyle);
 
-            Row spSub = spSheet.createRow(1); spSub.setHeightInPoints(50);
+            Row spSub = spSheet.createRow(1); spSub.setHeightInPoints(60);
             Cell spSc = spSub.createCell(0);
             spSc.setCellValue(
                 "A=Ma SP (bat buoc), B=Ma Variant (de trong = default variant).\n" +
                 "SP CHUA CO: dien C(Ten)+I(DanhMuc) → tu dong tao SP moi.\n" +
-                "K=DV Nhap (kg/xau), L=DV Ban (bich/goi), M=SoLe (1kg=10bich → M=10). VAT%+PhiShip nhap tren web.");
+                "K=DV Nhap (kg/xau), L=DV Ban (bich/goi), M=SoLe (1kg=10bich → M=10). VAT%+PhiShip nhap tren web.\n" +
+                "N=Ngay HSD thuc te tren bao bi (yyyy-mm-dd hoac dd/mm/yyyy) — de trong → tu tinh tu so ngay HSD.");
             spSc.setCellStyle(noteStyle);
+
+            // Thêm cột N: Ngày HSD (màu xám nhạt — optional)
+            CellStyle expiryHdrStyle = buildHeaderStyle(wb, new byte[]{(byte)120,(byte)120,(byte)120});
 
             String[] spHeaders = {
                 "A: Ma SP (*)", "B: Ma Variant", "C: Ten SP",
                 "D: So luong (*)", "E: Gia nhap (*)", "F: Gia ban",
                 "G: Chiet khau %", "H: Ghi chu dong",
                 "I: Danh muc (SP moi)", "J: Don vi (SP moi)",
-                "K: DV Nhap kho", "L: DV Ban le", "M: So le/DV"
+                "K: DV Nhap kho", "L: DV Ban le", "M: So le/DV",
+                "N: Ngay HSD (ghi de)"
             };
             CellStyle[] spHStyles = {
                 required, variantStyle, headerStyle,
                 required, required, sellStyle,
                 optional, headerStyle,
                 optional, optional,
-                unitStyle, unitStyle, unitStyle
+                unitStyle, unitStyle, unitStyle,
+                expiryHdrStyle
             };
             Row spHRow = spSheet.createRow(2); spHRow.setHeightInPoints(20);
             for (int i = 0; i < spHeaders.length; i++) {
@@ -300,15 +307,17 @@ public class ExcelTemplateService {
                         cm.setCellValue(defaultVar.getPiecesPerUnit());
                         cm.setCellStyle(numberStyle);
                     } else { cm.setCellStyle(numberStyle); }
+                    // N: Ngày HSD ghi đè — để trống (user tự điền nếu cần)
+                    row.createCell(13).setCellStyle(dataStyle);
                 }
             }
             Row spLegend = spSheet.createRow(spRowNum + 1);
             Cell sl1 = spLegend.createCell(0); sl1.setCellValue("Xanh = SP/Variant da co"); sl1.setCellStyle(dataStyle);
             Cell sl2 = spLegend.createCell(6); sl2.setCellValue("Vang = SP MOI tu dong tao"); sl2.setCellStyle(newSpStyle);
 
-            spSheet.addMergedRegion(new CellRangeAddress(0,0,0,12));
-            spSheet.addMergedRegion(new CellRangeAddress(1,1,0,12));
-            spSheet.setAutoFilter(new CellRangeAddress(2,2,0,12));
+            spSheet.addMergedRegion(new CellRangeAddress(0,0,0,13));
+            spSheet.addMergedRegion(new CellRangeAddress(1,1,0,13));
+            spSheet.setAutoFilter(new CellRangeAddress(2,2,0,13));
             spSheet.createFreezePane(0,3);
 
             // ══════════════════════════════════════════════════════════════
@@ -323,7 +332,7 @@ public class ExcelTemplateService {
                 "HUONG DAN IMPORT PHIEU NHAP KHO",
                 new String[][]{
                     {"Chu de","Mo ta","Vi du"},
-                    {"SHEET 1: SP Don","13 cot A-M. Moi dong = 1 SP don hoac 1 variant.\n" +
+                    {"SHEET 1: SP Don","14 cot A-N. Moi dong = 1 SP don hoac 1 variant.\n" +
                      "He thong doc theo thu tu: A(Ma SP) → B(Ma Variant) → C(Ten SP).\n" +
                      "Xem ghi chu trong sheet 'SP Don' de biet chi tiet tung cot.",""},
                     {"[TAM THOI] Nhap Combo","Nhap kho combo qua Excel chua duoc ho tro.\n" +
@@ -342,6 +351,10 @@ public class ExcelTemplateService {
                     {"K/L/M","K=DV Nhap, L=DV Ban, M=So le.\n" +
                      "ATOMIC (bich/hop/chai): M bo qua, ton kho += qty.\n" +
                      "GOP (kg/xau/thung): ton kho += qty x M.","K=kg L=bich M=10"},
+                    {"N: Ngay HSD (ghi de)","TUY CHON. Ngay het han thuc te in tren bao bi.\n" +
+                     "Format: yyyy-mm-dd hoac dd/mm/yyyy.\n" +
+                     "De trong → tu dong tinh: ngay nhap + so ngay HSD cua variant.\n" +
+                     "Co → ghi de len ngay tinh tu expiryDays, dam bao FEFO chinh xac.","2027-12-31"},
                     {"Chi phi sau import","finalCost = (unitCost / pieces) x (1-CK%) + ship/unit + VAT/unit.\n" +
                      "Ship + VAT nhap tren web, phan bo theo ti le gia tri dong.",""},
                     {"PREVIEW truoc khi import","He thong hien thi tat ca dong du lieu, danh dau loi do/xanh.\n" +

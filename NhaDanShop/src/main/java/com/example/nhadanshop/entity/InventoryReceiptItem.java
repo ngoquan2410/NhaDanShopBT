@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Getter
 @Setter
@@ -97,4 +98,12 @@ public class InventoryReceiptItem {
      */
     @Column(name = "retail_qty_added", nullable = false)
     private Integer retailQtyAdded = 0;
+
+    /**
+     * Ngày HSD thực tế ghi đè (Sprint 1 — S1-2).
+     * null → tự tính từ variant.expiryDays.
+     * Nếu có → productBatch.expiry_date = giá trị này (FEFO chính xác).
+     */
+    @Column(name = "expiry_date_override")
+    private LocalDate expiryDateOverride;
 }

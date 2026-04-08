@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 public record ReceiptItemRequest(
         @NotNull Long productId,
@@ -18,9 +19,13 @@ public record ReceiptItemRequest(
         /**
          * ID variant đóng gói (Sprint 0).
          * null → tự động dùng default variant của productId.
-         * Ví dụ: nhập Muối ABC dạng hủ → variantId = ID của ABC-HU100
          */
-        Long variantId
+        Long variantId,
+
+        /**
+         * Ngày HSD thực tế in trên bao bì (Sprint 1 — S1-2).
+         * null → tự tính: importDate + variant.expiryDays
+         * Nếu có → dùng ngày này cho productBatch.expiry_date (FEFO đúng).
+         */
+        LocalDate expiryDateOverride
 ) {}
-
-

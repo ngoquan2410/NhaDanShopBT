@@ -120,7 +120,9 @@ public final class DtoMapper {
     public static InventoryReceiptResponse toResponse(InventoryReceipt r) {
         return new InventoryReceiptResponse(
                 r.getId(), r.getReceiptNo(), r.getReceiptDate(),
-                r.getSupplierName(), r.getNote(), r.getTotalAmount(),
+                r.getSupplierName(),
+                r.getSupplier() != null ? r.getSupplier().getId() : null, // supplierId Sprint 1
+                r.getNote(), r.getTotalAmount(),
                 r.getShippingFee()  != null ? r.getShippingFee()  : BigDecimal.ZERO,
                 r.getTotalVat()     != null ? r.getTotalVat()     : BigDecimal.ZERO,
                 r.getCreatedBy() != null ? r.getCreatedBy().getUsername() : null,

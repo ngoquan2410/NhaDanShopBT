@@ -9,6 +9,7 @@ public record InventoryReceiptResponse(
         String receiptNo,
         LocalDateTime receiptDate,
         String supplierName,
+        Long supplierId,       // Sprint 1 S1-3: FK → suppliers
         String note,
         BigDecimal totalAmount,
         BigDecimal shippingFee,

@@ -11,6 +11,8 @@ import java.util.List;
 
 public record InventoryReceiptRequest(
         @Size(max = 150) String supplierName,
+        /** FK → suppliers.id (Sprint 1 S1-3). Null → chỉ lưu supplierName snapshot */
+        Long supplierId,
         @Size(max = 500) String note,
         /** Phí vận chuyển toàn đơn — phân bổ theo tỷ lệ giá trị sau CK */
         @DecimalMin("0.00") BigDecimal shippingFee,

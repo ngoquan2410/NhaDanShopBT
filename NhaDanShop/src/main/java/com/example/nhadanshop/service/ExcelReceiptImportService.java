@@ -83,7 +83,8 @@ public class ExcelReceiptImportService {
     private final ProductImportUnitRepository importUnitRepo;
     private final ProductVariantService variantService;
     private final ProductVariantRepository variantRepo;
-    private final ProductComboService comboService; // Combo KiotViet — expand + refresh
+    private final ProductComboService comboService;
+    private final SupplierRepository supplierRepository; // Sprint 1 S1-3
 
     // ── Column indices — NEW FORMAT (13 cột A..M) ────────────────────────────
     private static final int COL_PRODUCT_CODE    = 0;  // A
@@ -99,6 +100,7 @@ public class ExcelReceiptImportService {
     private static final int COL_IMPORT_UNIT     = 10; // K
     private static final int COL_SELL_UNIT       = 11; // L
     private static final int COL_PIECES          = 12; // M
+    private static final int COL_EXPIRY_DATE     = 13; // N (Sprint 1 S1-2 — optional, ghi đè HSD)
 
     // ── Column indices — OLD FORMAT (12 cột A..L, không có cột B variant) ───
     private static final int OLD_COL_NAME        = 1;  // B
@@ -154,10 +156,10 @@ public class ExcelReceiptImportService {
             String importUnit,
             String sellUnit,
             Integer piecesPerImportUnit,
-            /** != null khi dòng này được EXPAND từ combo (comboSourceId = product.id của combo gốc) */
-            Long comboSourceId) {
+            /** Sprint 1 S1-2: Ngày HSD thực tế ghi đè từ cột N Excel — null → tự tính từ expiryDays */
+            java.time.LocalDate expiryDateOverride) {
 
-        /** Constructor backward-compat (không có comboSourceId) */
+        /** Constructor backward-compat (không có expiryDateOverride) */
         ValidatedRow(VariantAction action, Product product, ProductVariant resolvedVariant,
                      boolean isLegacyVariant, String excelVariantCode,
                      String newProductName, String newCategoryName, String newUnit, String newCode,
@@ -395,7 +397,7 @@ public class ExcelReceiptImportService {
 
     @Transactional(rollbackFor = Exception.class)
     public ExcelReceiptResult importReceiptFromExcel(
-            MultipartFile file, String supplierName, String note,
+            MultipartFile file, String supplierName, Long supplierId, String note,
             BigDecimal shippingFee, BigDecimal vatPercent) throws IOException {
 
         validateFile(file);
@@ -457,6 +459,7 @@ public class ExcelReceiptImportService {
                     String excelImportUnit;
                     String excelSellUnit;
                     Integer excelPieces;
+                    LocalDate expiryDateOverride = null; // Sprint 1 S1-2: cột N
 
                     if (isNewFormat) {
                         productCode     = getCellString(row, COL_PRODUCT_CODE);
@@ -470,6 +473,7 @@ public class ExcelReceiptImportService {
                         excelImportUnit = getCellString(row, COL_IMPORT_UNIT);
                         excelSellUnit   = getCellString(row, COL_SELL_UNIT);
                         excelPieces     = getCellIntOptional(row, COL_PIECES);
+                        expiryDateOverride = getCellLocalDate(row, COL_EXPIRY_DATE); // Sprint 1 S1-2: cột N
                     } else {
                         productCode     = getCellString(row, COL_PRODUCT_CODE);
                         variantCode     = null;
@@ -538,7 +542,7 @@ public class ExcelReceiptImportService {
                                 VariantAction.NEW_PRODUCT, null, null, false, newVariantCode,
                                 name.trim(), categoryName.trim(), unit.trim(), upperCode,
                                 qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
-                                passImportUnit, passSellUnit, passPieces);
+                                passImportUnit, passSellUnit, passPieces, expiryDateOverride);
                         validatedRows.add(vRow);
                         pendingNewProductRows.put(upperCode, vRow);
                         pendingNewVariantCodes.add(newVariantCode);
@@ -561,7 +565,7 @@ public class ExcelReceiptImportService {
                                 VariantAction.CREATE_NEW, null, null, false, newVCodeForPending,
                                 null, null, null, upperCode,
                                 qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
-                                passImportUnit, passSellUnit, passPieces));
+                                passImportUnit, passSellUnit, passPieces, expiryDateOverride));
                         continue;
                     }
 
@@ -593,7 +597,7 @@ public class ExcelReceiptImportService {
                                     null, null, null, null, null,
                                     ci.getQuantity() * qty, componentUnitCost, null, discountPct, false,
                                     lineNum, "Expand từ combo " + product.getCode(),
-                                    null, null, null, product.getId()));
+                                    null, null, null, null));
                         }
                         continue;
                     }
@@ -604,7 +608,7 @@ public class ExcelReceiptImportService {
                         if (allVariants.isEmpty()) {
                             validatedRows.add(new ValidatedRow(VariantAction.CREATE_NEW, product, null, false, null,
                                     null, null, null, null, qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
-                                    passImportUnit, passSellUnit, passPieces));
+                                    passImportUnit, passSellUnit, passPieces, expiryDateOverride));
                             warnings.add("⚠️ Dòng " + lineNum + ": SP '" + product.getCode() + "' chưa có variant → tạo mới.");
                             continue;
                         }
@@ -642,7 +646,7 @@ public class ExcelReceiptImportService {
                         }
                         validatedRows.add(new ValidatedRow(VariantAction.EXISTING_EXACT, product, matchedVar, isLegacy, null,
                                 null, null, null, null, qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
-                                passImportUnit, passSellUnit, passPieces));
+                                passImportUnit, passSellUnit, passPieces, expiryDateOverride));
                         continue;
                     }
 
@@ -662,11 +666,11 @@ public class ExcelReceiptImportService {
                         }
                         validatedRows.add(new ValidatedRow(VariantAction.EXISTING_EXACT, product, ev, isLegacy, variantCode,
                                 null, null, null, null, qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
-                                passImportUnit, passSellUnit, passPieces));
+                                passImportUnit, passSellUnit, passPieces, expiryDateOverride));
                     } else {
                         validatedRows.add(new ValidatedRow(VariantAction.CREATE_NEW, product, null, false, variantCode,
                                 null, null, null, null, qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
-                                passImportUnit, passSellUnit, passPieces));
+                                passImportUnit, passSellUnit, passPieces, expiryDateOverride));
                         warnings.add("ℹ️ Dòng " + lineNum + " [SP Don]: Variant '" + variantCode + "' chưa tồn tại → sẽ tạo mới.");
                     }
                 } // end for SP Don rows
@@ -696,6 +700,10 @@ public class ExcelReceiptImportService {
         receipt.setNote(note);
         receipt.setReceiptDate(LocalDateTime.now());
         receipt.setShippingFee(shippingFee);
+        // Sprint 1 S1-3: set supplier FK nếu có supplierId
+        if (supplierId != null) {
+            supplierRepository.findById(supplierId).ifPresent(receipt::setSupplier);
+        }
         String currentUser = SecurityContextHolder.getContext().getAuthentication().getName();
         userRepository.findByUsername(currentUser).ifPresent(receipt::setCreatedBy);
         InventoryReceipt savedReceipt = receiptRepository.saveAndFlush(receipt);
@@ -986,6 +994,7 @@ public class ExcelReceiptImportService {
                 item.setImportUnitUsed(resolvedImportUnit); item.setPiecesUsed(pieces);
                 item.setRetailQtyAdded(addedRetailQty);
                 item.setVariant(variant);
+                item.setExpiryDateOverride(vr.expiryDateOverride()); // Sprint 1 S1-2
                 itemMap.put(itemKey, item);
                 discountedLineTotals.put(itemKey, discountedLineTotal);
                 weightedDiscountedCostSum.put(itemKey, weightedSum);
@@ -993,9 +1002,15 @@ public class ExcelReceiptImportService {
 
             // Tạo Batch — 1 batch per row (costPrice tạm thời, sẽ update sau khi phân bổ shipping/VAT)
             if (variant != null) {
-                LocalDate expiryDate = (variant.getExpiryDays() != null && variant.getExpiryDays() > 0)
-                        ? LocalDate.now().plusDays(variant.getExpiryDays())
-                        : LocalDate.now().plusYears(10);
+                // Sprint 1 S1-2: ưu tiên expiryDateOverride từ cột N Excel → fallback sang expiryDays
+                LocalDate expiryDate;
+                if (vr.expiryDateOverride() != null) {
+                    expiryDate = vr.expiryDateOverride();
+                } else if (variant.getExpiryDays() != null && variant.getExpiryDays() > 0) {
+                    expiryDate = LocalDate.now().plusDays(variant.getExpiryDays());
+                } else {
+                    expiryDate = LocalDate.now().plusYears(10);
+                }
                 String batchCode = buildUniqueBatchCode(savedReceipt.getReceiptNo(), variant.getVariantCode());
                 ProductBatch batch = new ProductBatch();
                 batch.setProduct(product); batch.setVariant(variant); batch.setReceipt(savedReceipt);
@@ -1347,4 +1362,41 @@ public class ExcelReceiptImportService {
     }
 
     private Integer getCellIntOptional(Row row, int col) { return getCellInt(row, col); }
+
+    /**
+     * Sprint 1 S1-2: Đọc cột N (expiryDateOverride) từ Excel.
+     * Hỗ trợ: Date cell (Excel date serial), String "yyyy-MM-dd" hoặc "dd/MM/yyyy".
+     * Trả null nếu ô trống hoặc không parse được.
+     */
+    private LocalDate getCellLocalDate(Row row, int col) {
+        if (row == null) return null;
+        Cell cell = row.getCell(col);
+        if (cell == null) return null;
+        try {
+            return switch (cell.getCellType()) {
+                case NUMERIC -> {
+                    // Excel date serial → LocalDate
+                    if (org.apache.poi.ss.usermodel.DateUtil.isCellDateFormatted(cell)) {
+                        yield cell.getLocalDateTimeCellValue().toLocalDate();
+                    }
+                    yield null;
+                }
+                case STRING -> {
+                    String s = cell.getStringCellValue().trim();
+                    if (s.isBlank()) yield null;
+                    // Thử yyyy-MM-dd
+                    try { yield LocalDate.parse(s, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE); }
+                    catch (Exception ignored) {}
+                    // Thử dd/MM/yyyy
+                    try { yield LocalDate.parse(s, java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")); }
+                    catch (Exception ignored) {}
+                    // Thử dd-MM-yyyy
+                    try { yield LocalDate.parse(s, java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy")); }
+                    catch (Exception ignored) {}
+                    yield null;
+                }
+                default -> null;
+            };
+        } catch (Exception e) { return null; }
+    }
 }
