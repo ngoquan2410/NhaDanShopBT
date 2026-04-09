@@ -68,7 +68,7 @@ public class AuthService {
                 .orElseThrow(() -> new BadCredentialsException("Sai tên đăng nhập hoặc mật khẩu"));
 
         if (!user.getActive()) {
-            throw new DisabledException("Tài khoản đã bị vô hiệu hóa");
+            throw new DisabledException("Tài khoản đã bị vô hiệu hóa ");
         }
 
         if (!passwordEncoder.matches(req.password(), user.getPassword())) {

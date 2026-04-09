@@ -8,7 +8,7 @@ const links = [
   { to: '/admin/products',         label: 'Sản phẩm',        icon: '📦' },
   { to: '/admin/receipts',         label: 'Phiếu nhập kho',  icon: '📥' },
   { to: '/admin/invoices',         label: 'Hóa đơn bán',     icon: '🧾', badge: true },
-  { to: '/admin/inventory-report', label: 'Tồn kho',         icon: '📊' },
+  { to: '/admin/inventory-report', label: 'Tồn kho',         icon: '📊'},
   { to: '/admin/profit-report',    label: 'Lợi nhuận',       icon: '💰' },
   { to: '/admin/revenue',          label: 'Doanh thu',        icon: '📈' },
   { to: '/admin/promotions',       label: 'Khuyến mãi',       icon: '🎉' },
