@@ -164,36 +164,8 @@ jobs:
       (needs.build-backend.result == 'success' || needs.build-frontend.result == 'success')
 
     steps:
-      # ── BƯỚC 1: Start RDS nếu đang stopped ──────────────────────────────
-      - name: 🗄️ Start RDS (nếu đang stopped)
-        run: |
-          STATUS=$(aws rds describe-db-instances \
-            --db-instance-identifier ${{ env.RDS_INSTANCE_ID }} \
-            --query 'DBInstances[0].DBInstanceStatus' \
-            --output text \
-            --region ${{ env.AWS_REGION }})
-          echo "RDS status: $STATUS"
-
-          if [ "$STATUS" = "stopped" ]; then
-            echo "▶️ Starting RDS..."
-            aws rds start-db-instance \
-              --db-instance-identifier ${{ env.RDS_INSTANCE_ID }} \
-              --region ${{ env.AWS_REGION }}
-
-            echo "⏳ Chờ RDS available (tối đa 5 phút)..."
-            aws rds wait db-instance-available \
-              --db-instance-identifier ${{ env.RDS_INSTANCE_ID }} \
-              --region ${{ env.AWS_REGION }}
-            echo "✅ RDS đã available!"
-          elif [ "$STATUS" = "available" ]; then
-            echo "✅ RDS đang chạy, không cần start."
-          else
-            echo "⚠️ RDS status: $STATUS — chờ thêm 60s..."
-            sleep 60
-          fi
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      # NOTE: Start/Stop RDS làm thủ công qua AWS Console khi cần
+      # Không dùng aws CLI ở đây để tránh cần AWS_ACCESS_KEY_ID/SECRET
 
       - name: 📥 Download Backend JAR (nếu BE thay đổi)
         if: needs.detect-changes.outputs.backend == 'true'
