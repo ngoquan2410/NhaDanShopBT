@@ -9,6 +9,8 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
+// Sprint 2: Customer FK
+
 @Getter
 @Setter
 @Entity
@@ -27,6 +29,11 @@ public class SalesInvoice {
 
     @Column(name = "customer_name", length = 150)
     private String customerName;
+
+    /** FK → customers (Sprint 2). Null = khách vãng lai. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "customer_id")
+    private Customer customer;
 
     @Column(name = "note", length = 500)
     private String note;

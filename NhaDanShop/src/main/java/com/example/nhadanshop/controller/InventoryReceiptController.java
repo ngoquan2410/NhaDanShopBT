@@ -89,15 +89,19 @@ public class InventoryReceiptController {
      *
      * Form-data params:
      *   file         : file .xlsx (required)
-     *   supplierName : tên nhà cung cấp (required)
+     *   supplierName : tên nhà cung cấp (optional — nếu có supplierId thì ưu tiên supplierId)
+     *   supplierId   : ID nhà cung cấp (optional, Long)
      *   note         : ghi chú phiếu nhập (optional)
      *   shippingFee  : phí vận chuyển (optional, default=0)
      *   vatPercent   : thuế GTGT % (optional, default=0)
      *
-     * Cấu trúc Excel (9 cột A–I, header row 3, data từ row 4):
-     *   A: Mã SP  B: Tên SP  C: Số lượng (đvị nhập)  D: Giá nhập
-     *   E: Giá bán (cập nhật sell_price, optional)
-     *   F: Chiết khấu %  G: Ghi chú  H: Danh mục (SP mới)  I: Đơn vị (SP mới)
+     * Cấu trúc Excel — Sheet "SP Don" (14 cột A-N, header row 3, data từ row 4):
+     *   A: Mã SP (*)       B: Mã Variant (optional)   C: Tên SP
+     *   D: Số lượng (*)    E: Giá nhập (*)            F: Giá bán
+     *   G: Chiết khấu %    H: Ghi chú dòng
+     *   I: Danh mục (SP mới)  J: Đơn vị (SP mới)
+     *   K: ĐV Nhập kho     L: ĐV Bán lẻ              M: Số lẻ/ĐV nhập
+     *   N: Ngày HSD thực tế (yyyy-MM-dd / dd/MM/yyyy — ghi đè expiryDays, optional)
      */
     @PostMapping(value = "/import-excel", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)

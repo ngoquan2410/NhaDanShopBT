@@ -5,6 +5,7 @@ import { useSort } from '../../hooks/useSort'
 import { usePendingOrders } from '../../hooks/usePendingOrders'
 import { useQuery } from '@tanstack/react-query'
 import { promotionService } from '../../services/promotionService'
+import { customerService } from '../../services/customerService'
 import PendingOrdersTab from './PendingOrdersTab'
 import BarcodeScanner from '../../components/BarcodeScanner'
 import dayjs from 'dayjs'
@@ -84,15 +85,46 @@ function Modal({ title, onClose, children }) {
 // ── Invoice Form with barcode ─────────────────────────────────────────────────
 function InvoiceForm({ products, onSubmit, loading }) {
   const [customerName, setCustomerName] = useState('')
+  const [customerId, setCustomerId]     = useState(null)
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [customerResults, setCustomerResults] = useState([])
   const [note, setNote] = useState('')
   const [items, setItems] = useState([{ productId: '', variantId: '', quantity: 1, discountPercent: 0 }])
   const [showScanner, setShowScanner] = useState(false)
   const [selectedPromoId, setSelectedPromoId] = useState('')
+  const custSearchTimer = useRef(null)
 
   const { data: activePromos = [] } = useQuery({
     queryKey: ['promotions-active'],
     queryFn: promotionService.getActive,
   })
+
+  // Search customer debounce
+  const handleCustomerSearch = (val) => {
+    setCustomerSearch(val)
+    if (!val.trim()) { setCustomerResults([]); return }
+    clearTimeout(custSearchTimer.current)
+    custSearchTimer.current = setTimeout(async () => {
+      try {
+        const res = await customerService.getAll(val.trim())
+        setCustomerResults(res.slice(0, 6))
+      } catch { setCustomerResults([]) }
+    }, 300)
+  }
+
+  const selectCustomer = (c) => {
+    setCustomerId(c.id)
+    setCustomerName(c.name)
+    setCustomerSearch('')
+    setCustomerResults([])
+  }
+
+  const clearCustomer = () => {
+    setCustomerId(null)
+    setCustomerName('')
+    setCustomerSearch('')
+    setCustomerResults([])
+  }
 
   const addItem = () => setItems(i => [...i, { productId: '', variantId: '', quantity: 1, discountPercent: 0 }])
   const removeItem = (idx) => setItems(i => i.filter((_, j) => j !== idx))
@@ -162,14 +194,15 @@ function InvoiceForm({ products, onSubmit, loading }) {
     const validItems = items.filter(i => i.productId)
     if (!validItems.length) return
     onSubmit({
-      customerName,
+      customerName: customerId ? undefined : (customerName || undefined),
+      customerId: customerId || null,
       note,
       promotionId: selectedPromoId ? Number(selectedPromoId) : null,
       items: validItems.map(it => ({
         productId: Number(it.productId),
         quantity: Number(it.quantity),
         discountPercent: Number(it.discountPercent) || 0,
-        variantId: it.variantId ? Number(it.variantId) : null, // [Sprint 0]
+        variantId: it.variantId ? Number(it.variantId) : null,
       })),
     })
   }
@@ -178,11 +211,41 @@ function InvoiceForm({ products, onSubmit, loading }) {
     <>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Khách hàng</label>
-            <input value={customerName} onChange={e => setCustomerName(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="Tên khách hàng (tùy chọn)" />
+          {/* Sprint 2: Customer picker */}
+          <div className="relative">
+            <label className="block text-sm font-medium text-gray-700 mb-1">👤 Khách hàng</label>
+            {customerId ? (
+              <div className="flex items-center gap-2 border rounded-lg px-3 py-2 bg-blue-50">
+                <span className="text-sm font-medium text-blue-800 flex-1">{customerName}</span>
+                <button type="button" onClick={clearCustomer}
+                  className="text-gray-400 hover:text-red-500 text-lg leading-none">&times;</button>
+              </div>
+            ) : (
+              <>
+                <input value={customerSearch}
+                  onChange={e => handleCustomerSearch(e.target.value)}
+                  placeholder="Tìm KH theo tên / SĐT (để trống = khách lẻ)"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                {customerResults.length > 0 && (
+                  <div className="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-xl shadow-xl max-h-48 overflow-y-auto">
+                    {customerResults.map(c => (
+                      <button key={c.id} type="button" onClick={() => selectCustomer(c)}
+                        className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b last:border-0">
+                        <span className="font-mono text-blue-600 mr-2">{c.code}</span>
+                        <span className="font-medium">{c.name}</span>
+                        {c.phone && <span className="text-gray-400 ml-2 text-xs">{c.phone}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {/* Fallback: nhập tay tên KH vãng lai */}
+                {!customerSearch && (
+                  <input value={customerName} onChange={e => setCustomerName(e.target.value)}
+                    placeholder="...hoặc nhập tên khách vãng lai"
+                    className="w-full border border-dashed rounded-lg px-3 py-1.5 text-xs text-gray-500 focus:outline-none mt-1" />
+                )}
+              </>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú</label>

@@ -258,6 +258,8 @@ public class InventoryReceiptService {
             item.setImportUnitUsed(importUnitUsed);
             item.setPiecesUsed(pieces);
             item.setRetailQtyAdded(addedRetailQty);
+            // V2: snapshot sellUnit của variant tại thời điểm nhập
+            item.setSellUnitSnapshot(variant.getSellUnit());
             // Sprint 1 S1-2: lưu expiryDateOverride nếu có
             item.setExpiryDateOverride(itemReq.expiryDateOverride());
 

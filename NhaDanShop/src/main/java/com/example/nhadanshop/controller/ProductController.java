@@ -106,8 +106,20 @@ public class ProductController {
     }
 
     /**
+     * POST /api/products/preview-excel
+     * Parse + validate file Excel, trả về danh sách rows kèm lỗi — KHÔNG ghi DB.
+     * FE dùng để hiển thị preview trước khi admin xác nhận import.
+     */
+    @PostMapping(value = "/preview-excel", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ProductExcelPreviewResponse previewFromExcel(
+            @RequestParam("file") MultipartFile file) throws IOException {
+        return excelImportService.previewProducts(file);
+    }
+
+    /**
      * POST /api/products/import-excel
      * Upload file .xlsx để import hàng loạt sản phẩm.
+     * Chỉ thực hiện ghi DB khi KHÔNG có lỗi nào (Pass 1 sạch).
      */
     @PostMapping(value = "/import-excel", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ExcelImportResult importFromExcel(@RequestParam("file") MultipartFile file) throws IOException {

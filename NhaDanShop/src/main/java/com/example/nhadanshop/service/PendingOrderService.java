@@ -120,6 +120,7 @@ public class PendingOrderService {
         // Tạo invoice thật sự (trừ kho)
         SalesInvoiceRequest invoiceReq = new SalesInvoiceRequest(
                 order.getCustomerName(),
+                null,  // customerId — Sprint 2: pending order chưa liên kết KH (backward compat)
                 "[" + order.getPaymentMethod() + "] " + (order.getNote() != null ? order.getNote() : ""),
                 null,
                 order.getItems().stream()

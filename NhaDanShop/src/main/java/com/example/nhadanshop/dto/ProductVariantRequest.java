@@ -26,9 +26,17 @@ public record ProductVariantRequest(
          */
         @Min(1) Integer piecesPerUnit,
 
-        @NotNull @DecimalMin("0.00") BigDecimal sellPrice,
+        /**
+         * Giá bán — optional khi tạo mới.
+         * Điền sau khi biết giá vốn thực từ lần nhập kho đầu tiên.
+         * null/0 → SP vẫn tạo được, cần cập nhật trước khi bán.
+         */
+        @DecimalMin("0.00") BigDecimal sellPrice,
 
-        /** Giá vốn — thường bỏ trống khi create, hệ thống tự tính khi nhập kho */
+        /**
+         * Giá vốn — optional khi tạo mới.
+         * Hệ thống tự tính và overwrite mỗi lần nhập kho (FEFO weighted avg).
+         */
         @DecimalMin("0.00") BigDecimal costPrice,
 
         /** Tồn kho ban đầu — thường = 0 */

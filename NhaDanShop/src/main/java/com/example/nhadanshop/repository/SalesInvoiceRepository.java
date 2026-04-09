@@ -184,4 +184,54 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
     List<Object[]> dailyRevenue(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
+
+    // ─── Filter by Customer (Sprint 2) ───────────────────────────────────────
+
+    /** Lấy hóa đơn theo KH — sort theo ngày mới nhất */
+    Page<SalesInvoice> findByCustomerIdOrderByInvoiceDateDesc(Long customerId, Pageable pageable);
+
+    // ��── Top Products (Sprint 2) ──────────────────────────────────────────────
+
+    /**
+     * Top variant bán chạy nhất theo doanh thu trong kỳ.
+     * Object[]: [variantId, variantCode, variantName, productId, productCode, productName,
+     *            categoryName, sellUnit, totalQty, totalRevenue, totalProfit]
+     */
+    @Query("""
+            SELECT sii.variant.id,
+                   sii.variant.variantCode,
+                   sii.variant.variantName,
+                   sii.product.id,
+                   sii.product.code,
+                   sii.product.name,
+                   sii.product.category.name,
+                   sii.variant.sellUnit,
+                   COALESCE(SUM(sii.quantity), 0),
+                   COALESCE(SUM(sii.quantity * sii.unitPrice), 0),
+                   COALESCE(SUM(sii.quantity * (sii.unitPrice - sii.unitCostSnapshot)), 0)
+            FROM SalesInvoiceItem sii
+            WHERE sii.variant IS NOT NULL
+              AND sii.invoice.invoiceDate BETWEEN :from AND :to
+            GROUP BY sii.variant.id, sii.variant.variantCode, sii.variant.variantName,
+                     sii.product.id, sii.product.code, sii.product.name,
+                     sii.product.category.name, sii.variant.sellUnit
+            ORDER BY COALESCE(SUM(sii.quantity), 0) DESC
+            """)
+    List<Object[]> topProducts(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            Pageable pageable);
+
+    /**
+     * Variants có giao dịch gần nhất — dùng để tính slow products.
+     * Object[]: [variantId, lastSaleDate]
+     */
+    @Query("""
+            SELECT sii.variant.id,
+                   MAX(sii.invoice.invoiceDate)
+            FROM SalesInvoiceItem sii
+            WHERE sii.variant IS NOT NULL
+            GROUP BY sii.variant.id
+            """)
+    List<Object[]> lastSaleDateByVariant();
 }

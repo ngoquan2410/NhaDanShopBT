@@ -1,4 +1,4 @@
-﻿﻿﻿import { useState, useEffect, useRef } from 'react'
+﻿﻿﻿﻿import { useState, useEffect, useRef } from 'react'
 import { useProducts, useProductMutations, useVariants, useVariantMutations } from '../../hooks/useProducts'
 import { useCategories } from '../../hooks/useCategories'
 import { productService } from '../../services/productService'
@@ -188,8 +188,9 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
         if (!v.variantName.trim()) { alert('Tên biến thể không được để trống'); return }
         if (!v.sellUnit.trim()) { alert('Đơn vị bán lẻ không được để trống'); return }
         if (Number(v.sellPrice) < 0) { alert('Giá bán không được âm'); return }
+        if (Number(v.costPrice) < 0) { alert('Giá vốn không được âm'); return }
+        // Giá bán = 0 → vẫn cho phép, cảnh báo sau khi nhập hàng
       }
-      // Đảm bảo có đúng 1 default
       const hasDefault = variants.some(v => v.isDefault)
       if (!hasDefault && variants.length > 0) setDefault(0)
     }
@@ -354,14 +355,23 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Giá bán (₫) *</label>
-                      <input type="number" value={v.sellPrice} min={0}
+                      <label className="block text-xs text-gray-500 mb-1">
+                        Giá bán (₫)
+                        <span className="ml-1 text-gray-400 font-normal">(để trống = điền sau)</span>
+                      </label>
+                      <input type="number" value={v.sellPrice} min={0} placeholder="0"
                         onChange={e => setV(idx, 'sellPrice', e.target.value)}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                      {Number(v.sellPrice) === 0 && (
+                        <p className="text-xs text-amber-600 mt-0.5">⚠️ Chưa có giá bán — SP sẽ hiện 0₫ trên POS</p>
+                      )}
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Giá vốn (₫)</label>
-                      <input type="number" value={v.costPrice} min={0}
+                      <label className="block text-xs text-gray-500 mb-1">
+                        Giá vốn (₫)
+                        <span className="ml-1 text-gray-400 font-normal">(để trống = tự tính khi nhập kho)</span>
+                      </label>
+                      <input type="number" value={v.costPrice} min={0} placeholder="0"
                         onChange={e => setV(idx, 'costPrice', e.target.value)}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
@@ -431,164 +441,434 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
   )
 }
 
-// ── Import Excel Modal ────────────────────────────────────────────────────────
+// ── Import Excel Modal (có Preview giống phiếu nhập kho) ────────────────────
+const fmt = n => Number(n ?? 0).toLocaleString('vi-VN')
+
+function StatusBadge({ status }) {
+  const map = {
+    OK:              { bg: 'bg-green-100',  text: 'text-green-700',  label: '✅ Hợp lệ' },
+    NEW_CATEGORY:    { bg: 'bg-blue-100',   text: 'text-blue-700',   label: '🆕 DM mới' },
+    SKIP_DUPLICATE:  { bg: 'bg-yellow-100', text: 'text-yellow-700', label: '⏭️ Bỏ qua' },
+    ERROR:           { bg: 'bg-red-100',    text: 'text-red-700',    label: '❌ Lỗi' },
+  }
+  const s = map[status] || map.ERROR
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${s.bg} ${s.text}`}>
+      {s.label}
+    </span>
+  )
+}
+
 function ImportExcelModal({ onClose, onSuccess }) {
-  const [file, setFile] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [downloading, setDownloading] = useState(false)
-  const [result, setResult] = useState(null)
+  // ── State: 3 bước ──────────────────────────────────────────────────────────
+  // step: 'upload' | 'preview' | 'done'
+  const [step, setStep]         = useState('upload')
+  const [file, setFile]         = useState(null)
   const [dragging, setDragging] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
+  const [importing, setImporting]   = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [preview, setPreview]   = useState(null)   // ProductExcelPreviewResponse
+  const [result, setResult]     = useState(null)   // ExcelImportResult
+  const [filterStatus, setFilterStatus] = useState('ALL')
   const fileRef = useRef(null)
 
+  // ── File pick ──────────────────────────────────────────────────────────────
   const handleFile = (f) => {
     if (!f) return
     if (!f.name.endsWith('.xlsx')) { toast.error('Chỉ hỗ trợ file .xlsx'); return }
-    setFile(f); setResult(null)
+    setFile(f); setPreview(null); setResult(null); setStep('upload')
   }
 
-  const handleDownloadTemplate = async () => {
-    setDownloading(true)
-    try {
-      await productService.downloadTemplate()
-      toast.success('Đã tải template! Mở file và điền dữ liệu theo hướng dẫn.')
-    } catch {
-      toast.error('Lỗi tải template')
-    } finally {
-      setDownloading(false)
-    }
-  }
-
-  const handleImport = async () => {
+  // ── Bước 1→2: Preview (Pass 1) ────────────────────────────────────────────
+  const handlePreview = async () => {
     if (!file) { toast.error('Chưa chọn file Excel'); return }
-    setLoading(true)
+    setPreviewing(true)
+    try {
+      const data = await productService.previewExcel(file)
+      setPreview(data)
+      setStep('preview')
+      if (data.errorRows > 0)
+        toast.error(`Có ${data.errorRows} dòng lỗi — vui lòng sửa file rồi upload lại`)
+      else
+        toast.success(`✅ ${data.validRows} dòng hợp lệ — có thể import`)
+    } catch (e) {
+      toast.error(e?.response?.data?.message || e?.response?.data?.detail || 'Lỗi đọc file Excel')
+    } finally { setPreviewing(false) }
+  }
+
+  // ── Bước 2→3: Import thật (Pass 2) ────────────────────────────────────────
+  const handleImport = async () => {
+    if (!file || !preview?.canImport) return
+    setImporting(true)
     try {
       const res = await productService.importExcel(file)
-      setResult(res)
+      setResult(res); setStep('done')
       if (res.successCount > 0) {
-        toast.success(`Import thành công ${res.successCount} sản phẩm!`)
+        toast.success(`🎉 Import thành công ${res.successCount} sản phẩm!`)
         onSuccess()
       } else {
         toast.error('Không có sản phẩm nào được import')
       }
     } catch (e) {
       toast.error(e?.response?.data?.message || 'Lỗi import Excel')
-    } finally {
-      setLoading(false)
-    }
+    } finally { setImporting(false) }
   }
 
+  // ── Download template ──────────────────────────────────────────────────────
+  const handleDownloadTemplate = async () => {
+    setDownloading(true)
+    try {
+      await productService.downloadTemplate()
+      toast.success('Đã tải template!')
+    } catch { toast.error('Lỗi tải template') }
+    finally { setDownloading(false) }
+  }
+
+  // ── Filtered rows ──────────────────────────────────────────────────────────
+  const filteredRows = preview?.rows?.filter(r =>
+    filterStatus === 'ALL' ? true : r.status === filterStatus
+  ) ?? []
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-5">
-      {/* Banner download template */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-4 flex items-center justify-between">
-        <div className="text-white">
-          <p className="font-bold text-base">📥 Bước 1: Tải file template</p>
-          <p className="text-blue-100 text-xs mt-0.5">File có sẵn dummy data + sheet hướng dẫn chi tiết từng cột</p>
-        </div>
-        <button onClick={handleDownloadTemplate} disabled={downloading}
-          className="bg-white text-blue-700 font-bold px-5 py-2.5 rounded-lg hover:bg-blue-50 transition flex items-center gap-2 text-sm whitespace-nowrap disabled:opacity-70">
-          {downloading
-            ? <><span className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />Đang tải...</>
-            : <>⬇️ Tải Template Excel</>}
-        </button>
+
+      {/* ── Stepper ─────────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 text-xs font-medium">
+        {[
+          { id: 'upload',  label: '① Upload file' },
+          { id: 'preview', label: '② Preview & Validate' },
+          { id: 'done',    label: '③ Kết quả' },
+        ].map((s, i, arr) => (
+          <div key={s.id} className="flex items-center gap-2">
+            <span className={`px-3 py-1 rounded-full border transition ${
+              step === s.id
+                ? 'bg-blue-600 text-white border-blue-600'
+                : step === 'done' || (step === 'preview' && s.id === 'upload') || (step === 'done' && s.id !== 'done')
+                  ? 'bg-green-100 text-green-700 border-green-300'
+                  : 'bg-gray-100 text-gray-400 border-gray-200'
+            }`}>{s.label}</span>
+            {i < arr.length - 1 && <span className="text-gray-300">›</span>}
+          </div>
+        ))}
       </div>
 
-      {/* Cấu trúc nhanh */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
-        <p className="font-semibold mb-2">📋 Bước 2: Điền dữ liệu theo cấu trúc (từ dòng 4):</p>
-        <div className="overflow-x-auto">
-          <table className="text-xs w-full border-collapse">
-            <thead>
-              <tr className="bg-blue-100">
-                {['A: Mã SP *', 'B: Tên SP *', 'C: Danh mục *', 'D: Đ/vị *', 'E: Giá vốn *', 'F: Giá bán *', 'G: Tồn kho', 'H: Hạn(ngày)', 'I: Hoạt động', 'J: ĐV nhập', 'K: ĐV bán', 'L: Số lẻ/ĐV', 'M: Ghi chú'].map(h => (
-                  <th key={h} className="border border-blue-200 px-1.5 py-1 text-left whitespace-nowrap font-semibold">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="bg-white">
-                {['BT001', 'Bánh Tráng Rong Biển', 'Bánh Tráng', 'bịch', '6500', '9000', '100', '180', 'TRUE', 'kg', 'bịch', '10', '1kg=10 bịch'].map((v, i) => (
-                  <td key={i} className="border border-blue-200 px-1.5 py-1 text-gray-600">{v}</td>
-                ))}
-              </tr>
-              <tr className="bg-blue-50">
-                {['', 'Muối Himalaya', 'Muối', 'gói', '5000', '8000', '0', '365', 'TRUE', 'gói', 'gói', '1', ''].map((v, i) => (
-                  <td key={i} className="border border-blue-200 px-1.5 py-1 text-gray-500 italic">{v || '(tự tạo)'}</td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p className="mt-2 text-xs text-blue-600">💡 Cột A (Mã SP) bắt buộc nhập — hệ thống không tự tạo mã. Danh mục chưa có → tự tạo. Mã trùng → bỏ qua (skip).</p>
-      </div>
-
-      {/* Upload area */}
-      <div>
-        <p className="text-sm font-semibold text-gray-700 mb-2">📤 Bước 3: Upload file đã điền</p>
-        <div onDragOver={e => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)}
-          onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
-          onClick={() => fileRef.current?.click()}
-          className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
-            ${dragging ? 'border-green-500 bg-green-50' : file ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-green-400 hover:bg-green-50'}`}>
-          <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={e => handleFile(e.target.files?.[0])} />
-          {file ? (
-            <div className="space-y-1">
-              <div className="text-3xl">📄</div>
-              <p className="font-medium text-green-700">{file.name}</p>
-              <p className="text-xs text-gray-400">{(file.size / 1024).toFixed(1)} KB</p>
-              <button type="button" onClick={e => { e.stopPropagation(); setFile(null); setResult(null) }}
-                className="text-xs text-red-500 hover:text-red-700 underline">Chọn file khác</button>
+      {/* ════════════════════════════════════════════════════════════════════
+           BƯỚC 1: UPLOAD
+      ════════════════════════════════════════════════════════════════════ */}
+      {(step === 'upload' || !preview) && (
+        <>
+          {/* Download template */}
+          <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-4 flex items-center justify-between">
+            <div className="text-white">
+              <p className="font-bold text-sm">📥 Tải file template</p>
+              <p className="text-blue-100 text-xs mt-0.5">13 cột A-M · J=ĐV bán lẻ bắt buộc · dummy data + hướng dẫn</p>
             </div>
-          ) : (
-            <div className="space-y-2 text-gray-500">
-              <div className="text-4xl">📊</div>
-              <p className="font-medium text-gray-700">Kéo thả file .xlsx vào đây hoặc click để chọn</p>
-              <p className="text-xs text-gray-400">Chỉ hỗ trợ file Excel (.xlsx)</p>
+            <button onClick={handleDownloadTemplate} disabled={downloading}
+              className="bg-white text-blue-700 font-bold px-4 py-2 rounded-lg hover:bg-blue-50 text-sm flex items-center gap-2 whitespace-nowrap disabled:opacity-70">
+              {downloading
+                ? <><span className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"/>Đang tải...</>
+                : '⬇️ Tải Template'}
+            </button>
+          </div>
+
+          {/* Cấu trúc cột */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <p className="text-xs font-semibold text-blue-800 mb-2">📋 Cấu trúc 13 cột A-M (header dòng 3, data từ dòng 4):</p>
+            <div className="flex flex-wrap gap-1">
+              {[
+                { col:'A', label:'Mã SP',           req:false, tip:'Để trống → tự sinh mã' },
+                { col:'B', label:'Tên SP',           req:true },
+                { col:'C', label:'Danh mục',         req:true,  tip:'Chưa có → tự tạo' },
+                { col:'D', label:'Giá vốn',          req:true,  tip:'> 0. GỘP: giá/ĐV nhập' },
+                { col:'E', label:'Giá bán',          req:true,  tip:'> 0. GỘP: giá/ĐV nhập' },
+                { col:'F', label:'Tồn kho',          req:false, tip:'Theo ĐV nhập' },
+                { col:'G', label:'Hạn (ngày)',       req:false },
+                { col:'H', label:'Active',           req:false, tip:'TRUE/FALSE' },
+                { col:'I', label:'ĐV nhập',          req:false, tip:'kg/xâu=GỘP, bịch=ATOMIC. Để trống=ATOMIC' },
+                { col:'J', label:'ĐV bán lẻ',        req:true,  tip:'bịch, hộp, gói, hũ...' },
+                { col:'K', label:'Số lẻ/ĐV',         req:false, tip:'VD: 1kg=10bịch → 10. ATOMIC=để trống' },
+                { col:'L', label:'Ghi chú',          req:false },
+                { col:'M', label:'Tồn tối thiểu',    req:false, tip:'Mặc định 5 nếu để trống' },
+              ].map(({ col, label, req, tip }) => (
+                <div key={col} title={tip || ''}
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-xs border ${
+                    req ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-200 text-gray-600'
+                  }`}>
+                  <span className="font-mono font-bold">{col}</span>
+                  <span>{label}</span>
+                  {req && <span className="text-red-500">*</span>}
+                </div>
+              ))}
             </div>
-          )}
-        </div>
-      </div>
+            <p className="text-xs text-blue-600 mt-2">
+              💡 GỘP (kg/xâu): giá nhập = giá/ĐV nhập → hệ thống tự chia. ATOMIC (bịch/hộp): giá = giá/ĐV bán.
+            </p>
+          </div>
 
-      {/* Actions */}
-      <div className="flex justify-end gap-3">
-        <button onClick={onClose} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Đóng</button>
-        <button onClick={handleImport} disabled={!file || loading}
-          className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-60 flex items-center gap-2">
-          {loading ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Đang import...</> : '⬆️ Import Excel'}
-        </button>
-      </div>
+          {/* Upload area */}
+          <div
+            onDragOver={e => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
+            onClick={() => fileRef.current?.click()}
+            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
+              dragging ? 'border-blue-500 bg-blue-50'
+              : file    ? 'border-green-400 bg-green-50'
+              :           'border-gray-300 hover:border-blue-400 hover:bg-blue-50'
+            }`}>
+            <input ref={fileRef} type="file" accept=".xlsx" className="hidden"
+              onChange={e => handleFile(e.target.files?.[0])} />
+            {file ? (
+              <div className="space-y-1">
+                <div className="text-3xl">📄</div>
+                <p className="font-semibold text-green-700">{file.name}</p>
+                <p className="text-xs text-gray-400">{(file.size / 1024).toFixed(1)} KB</p>
+                <button type="button" onClick={e => { e.stopPropagation(); setFile(null) }}
+                  className="text-xs text-red-500 hover:text-red-700 underline">Chọn file khác</button>
+              </div>
+            ) : (
+              <div className="space-y-2 text-gray-500">
+                <div className="text-4xl">📊</div>
+                <p className="font-medium text-gray-700">Kéo thả file .xlsx hoặc click để chọn</p>
+                <p className="text-xs text-gray-400">Chỉ hỗ trợ .xlsx</p>
+              </div>
+            )}
+          </div>
 
-      {/* Kết quả */}
-      {result && (
-        <div className={`rounded-xl border p-5 space-y-4 ${result.successCount > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-          <h4 className="font-bold text-gray-800">📊 Kết quả Import</h4>
+          {/* Action */}
+          <div className="flex justify-end gap-3">
+            <button onClick={onClose} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Đóng</button>
+            <button onClick={handlePreview} disabled={!file || previewing}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2">
+              {previewing
+                ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Đang kiểm tra...</>
+                : '🔍 Kiểm tra & Preview'}
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════
+           BƯỚC 2: PREVIEW
+      ════════════════════════════════════════════════════════════════════ */}
+      {step === 'preview' && preview && (
+        <>
+          {/* KPI summary */}
           <div className="grid grid-cols-4 gap-3">
             {[
-              { label: 'Tổng dòng', value: result.totalRows, color: 'blue' },
-              { label: '✅ Thành công', value: result.successCount, color: 'green' },
-              { label: '⏭️ Bỏ qua', value: result.skipCount, color: 'yellow' },
-              { label: '❌ Lỗi', value: result.errorCount, color: 'red' },
+              { label: 'Tổng dòng',      value: preview.totalRows,  color: 'blue'   },
+              { label: '✅ Hợp lệ',      value: preview.validRows,  color: 'green'  },
+              { label: '⏭️ Bỏ qua',     value: preview.skipRows,   color: 'yellow' },
+              { label: '❌ Lỗi',         value: preview.errorRows,  color: 'red'    },
             ].map(({ label, value, color }) => (
-              <div key={label} className={`bg-${color}-100 rounded-lg p-3 text-center`}>
+              <div key={label} className={`bg-${color}-50 border border-${color}-200 rounded-xl p-3 text-center`}>
                 <div className={`text-2xl font-bold text-${color}-700`}>{value}</div>
-                <div className={`text-xs text-${color}-600 mt-1`}>{label}</div>
+                <div className={`text-xs text-${color}-600 mt-0.5 font-medium`}>{label}</div>
               </div>
             ))}
           </div>
-          {result.errors?.length > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-              <p className="text-sm font-semibold text-red-700 mb-2">Danh sách lỗi:</p>
-              <ul className="space-y-1 max-h-40 overflow-y-auto">
-                {result.errors.map((e, i) => <li key={i} className="text-xs text-red-600">• {e}</li>)}
+
+          {/* Verdict */}
+          {preview.canImport ? (
+            <div className="flex items-center gap-3 bg-green-50 border border-green-300 rounded-xl px-4 py-3">
+              <span className="text-2xl">✅</span>
+              <div>
+                <p className="font-semibold text-green-800">Sẵn sàng import {preview.validRows} sản phẩm</p>
+                {preview.skipRows > 0 && (
+                  <p className="text-xs text-green-600">{preview.skipRows} dòng trùng tên/mã sẽ được bỏ qua</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 bg-red-50 border border-red-300 rounded-xl px-4 py-3">
+              <span className="text-2xl">❌</span>
+              <div>
+                <p className="font-semibold text-red-800">Có {preview.errorRows} lỗi — không thể import</p>
+                <p className="text-xs text-red-600">Vui lòng sửa file Excel rồi upload lại</p>
+              </div>
+            </div>
+          )}
+
+          {/* Warnings */}
+          {preview.warnings?.length > 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              <p className="text-xs font-semibold text-yellow-800 mb-1">⚠️ Cảnh báo ({preview.warnings.length}):</p>
+              <ul className="space-y-0.5 max-h-24 overflow-y-auto">
+                {preview.warnings.map((w, i) => (
+                  <li key={i} className="text-xs text-yellow-700">• {w}</li>
+                ))}
               </ul>
             </div>
           )}
-        </div>
+
+          {/* Filter tabs */}
+          <div className="flex gap-2 flex-wrap">
+            {[
+              { id: 'ALL',             label: `Tất cả (${preview.totalRows})` },
+              { id: 'OK',              label: `✅ Hợp lệ (${preview.rows?.filter(r=>r.status==='OK').length??0})` },
+              { id: 'NEW_CATEGORY',    label: `🆕 DM mới (${preview.rows?.filter(r=>r.status==='NEW_CATEGORY').length??0})` },
+              { id: 'SKIP_DUPLICATE',  label: `⏭️ Bỏ qua (${preview.skipRows})` },
+              { id: 'ERROR',           label: `❌ Lỗi (${preview.errorRows})` },
+            ].map(f => (
+              <button key={f.id} onClick={() => setFilterStatus(f.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                  filterStatus === f.id
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                }`}>{f.label}</button>
+            ))}
+          </div>
+
+          {/* Preview table */}
+          <div className="border rounded-xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto max-h-96 overflow-y-auto">
+              <table className="w-full text-xs" style={{ minWidth: 900 }}>
+                <thead className="sticky top-0 bg-gray-50 border-b">
+                  <tr className="text-gray-600">
+                    <th className="px-3 py-2 text-center w-10">#</th>
+                    <th className="px-3 py-2 text-center w-28">Trạng thái</th>
+                    <th className="px-3 py-2 text-left w-24">Mã SP</th>
+                    <th className="px-3 py-2 text-left min-w-[160px]">Tên SP</th>
+                    <th className="px-3 py-2 text-left w-28">Danh mục</th>
+                    <th className="px-3 py-2 text-right w-24">Giá vốn</th>
+                    <th className="px-3 py-2 text-right w-24">Giá bán</th>
+                    <th className="px-3 py-2 text-right w-16">Tồn</th>
+                    <th className="px-3 py-2 text-left w-16">ĐV bán(J)</th>
+                    <th className="px-3 py-2 text-left w-20">ĐV nhập(I)</th>
+                    <th className="px-3 py-2 text-left min-w-[140px]">Lỗi / Ghi chú</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredRows.length === 0 ? (
+                    <tr><td colSpan={11} className="text-center py-8 text-gray-400">Không có dòng nào</td></tr>
+                  ) : filteredRows.map((row, i) => (
+                    <tr key={i} className={`${
+                      row.status === 'ERROR'          ? 'bg-red-50'
+                      : row.status === 'SKIP_DUPLICATE' ? 'bg-yellow-50 opacity-75'
+                      : row.status === 'NEW_CATEGORY' ? 'bg-blue-50'
+                      : 'bg-white hover:bg-gray-50'
+                    }`}>
+                      <td className="px-3 py-2 text-center text-gray-400">{row.lineNumber}</td>
+                      <td className="px-3 py-2 text-center"><StatusBadge status={row.status} /></td>
+                      <td className="px-3 py-2 font-mono">
+                        <span className="text-gray-700">{row.code || ''}</span>
+                        {row.isAutoCode && <span className="ml-1 text-gray-400 italic text-xs">(tự sinh)</span>}
+                      </td>
+                      <td className="px-3 py-2 font-medium text-gray-800">{row.name || '—'}</td>
+                      <td className="px-3 py-2 text-gray-600">
+                        {row.categoryName || '—'}
+                        {row.isNewCategory && <span className="ml-1 text-blue-500 text-xs">(mới)</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-700">
+                        {row.costPrice != null ? fmt(row.costPrice) + ' ₫' : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right font-semibold text-green-700">
+                        {row.sellPrice != null ? fmt(row.sellPrice) + ' ₫' : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-600">{row.stockQty ?? 0}</td>
+                      <td className="px-3 py-2 text-gray-700 font-medium">{row.sellUnit || '—'}</td>
+                      <td className="px-3 py-2 text-gray-500">
+                        {row.importUnit
+                          ? <span title={row.conversionNote || ''}>
+                              {row.importUnit}{row.piecesPerUnit > 1 ? `→${row.piecesPerUnit}${row.sellUnit||''}` : ''}
+                            </span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-3 py-2">
+                        {row.errorMessage && <span className="text-red-600 font-medium">⚠ {row.errorMessage}</span>}
+                        {!row.errorMessage && row.warningMessage && <span className="text-yellow-600">⚡ {row.warningMessage}</span>}
+                        {!row.errorMessage && !row.warningMessage && row.status === 'SKIP_DUPLICATE' && (
+                          <span className="text-yellow-600">Trùng tên/danh mục → bỏ qua</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex justify-between items-center pt-1">
+            <button onClick={() => { setStep('upload'); setPreview(null) }}
+              className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">← Chọn file khác</button>
+            <div className="flex gap-3">
+              <button onClick={onClose} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Đóng</button>
+              <button onClick={handleImport} disabled={!preview.canImport || importing}
+                className={`px-6 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 ${
+                  preview.canImport ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                } disabled:opacity-60`}>
+                {importing
+                  ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Đang import...</>
+                  : preview.canImport
+                    ? `🚀 Xác nhận import ${preview.validRows} sản phẩm`
+                    : `❌ Không thể import (có lỗi)`}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════
+           BƯỚC 3: KẾT QUẢ
+      ════════════════════════════════════════════════════════════════════ */}
+      {step === 'done' && result && (
+        <>
+          <div className={`rounded-xl border p-5 space-y-4 ${
+            result.successCount > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+          }`}>
+            <div className="flex items-center gap-3">
+              <span className="text-3xl">{result.successCount > 0 ? '🎉' : '😞'}</span>
+              <div>
+                <h4 className="font-bold text-gray-800 text-base">
+                  {result.successCount > 0 ? `Import thành công ${result.successCount} sản phẩm!` : 'Không có sản phẩm nào được import'}
+                </h4>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Tổng {result.totalRows} dòng · {result.successCount} thành công · {result.skipCount} bỏ qua · {result.errorCount} lỗi
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              {[
+                { label: 'Tổng dòng',    value: result.totalRows,    color: 'blue'   },
+                { label: '✅ Thành công', value: result.successCount, color: 'green'  },
+                { label: '⏭️ Bỏ qua',   value: result.skipCount,    color: 'yellow' },
+                { label: '❌ Lỗi',       value: result.errorCount,   color: 'red'    },
+              ].map(({ label, value, color }) => (
+                <div key={label} className={`bg-${color}-100 rounded-lg p-3 text-center`}>
+                  <div className={`text-2xl font-bold text-${color}-700`}>{value}</div>
+                  <div className={`text-xs text-${color}-600 mt-1`}>{label}</div>
+                </div>
+              ))}
+            </div>
+            {result.errors?.length > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-sm font-semibold text-red-700 mb-2">Chi tiết lỗi:</p>
+                <ul className="space-y-1 max-h-40 overflow-y-auto">
+                  {result.errors.map((e, i) => (
+                    <li key={i} className="text-xs text-red-600 flex gap-1"><span>•</span><span>{e}</span></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-3">
+            {result.successCount === 0 && (
+              <button onClick={() => { setStep('upload'); setPreview(null); setResult(null) }}
+                className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">← Thử lại</button>
+            )}
+            <button onClick={onClose}
+              className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">
+              {result.successCount > 0 ? '✅ Đóng' : 'Đóng'}
+            </button>
+          </div>
+        </>
       )}
     </div>
   )
 }
-
 
 // ── VariantManager: quản lý biến thể đóng gói của 1 SP ──────────────────────
 function VariantManager({ product, onClose }) {
@@ -646,8 +926,29 @@ function VariantManager({ product, onClose }) {
             {f('Đơn vị bán lẻ *', 'sellUnit')}
             {f('Đơn vị nhập kho', 'importUnit')}
             {f('Số lẻ / ĐV nhập', 'piecesPerUnit', 'number', { min: 1 })}
-            {f('Giá bán (₫)', 'sellPrice', 'number', { min: 0 })}
-            {f('Giá vốn (₫)', 'costPrice', 'number', { min: 0 })}
+            {/* Giá bán — optional */}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Giá bán (₫)
+                <span className="ml-1 text-gray-400 font-normal">(để trống = điền sau)</span>
+              </label>
+              <input type="number" min={0} placeholder="0" value={form?.sellPrice ?? ''}
+                onChange={e => setForm(p => ({ ...p, sellPrice: e.target.value }))}
+                className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+              {Number(form?.sellPrice) === 0 && (
+                <p className="text-xs text-amber-600 mt-0.5">⚠️ Chưa có giá — SP sẽ hiện 0₫ trên POS</p>
+              )}
+            </div>
+            {/* Giá vốn — optional, tự tính khi nhập kho */}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Giá vốn (₫)
+                <span className="ml-1 text-gray-400 font-normal">(tự tính khi nhập kho)</span>
+              </label>
+              <input type="number" min={0} placeholder="0" value={form?.costPrice ?? ''}
+                onChange={e => setForm(p => ({ ...p, costPrice: e.target.value }))}
+                className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+            </div>
             {f('Tồn kho', 'stockQty', 'number', { min: 0 })}
             {f('Ngưỡng cảnh báo tồn', 'minStockQty', 'number', { min: 0 })}
             {f('Số ngày HSD', 'expiryDays', 'number', { min: 0 })}
@@ -850,12 +1151,20 @@ export default function ProductsPage() {
         </Modal>
       )}
       {showImportModal && (
-        <Modal title="📊 Import sản phẩm từ Excel" onClose={() => setShowImportModal(false)}>
-          <ImportExcelModal
-            onClose={() => setShowImportModal(false)}
-            onSuccess={() => queryClient.invalidateQueries(['products'])}
-          />
-        </Modal>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10">
+              <h3 className="font-bold text-lg text-gray-800">📊 Import sản phẩm từ Excel</h3>
+              <button onClick={() => setShowImportModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+            <div className="p-6">
+              <ImportExcelModal
+                onClose={() => setShowImportModal(false)}
+                onSuccess={() => queryClient.invalidateQueries(['products'])}
+              />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Variant Manager Modal */}

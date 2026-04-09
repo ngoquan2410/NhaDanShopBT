@@ -76,7 +76,9 @@ public final class DtoMapper {
 
         return new SalesInvoiceResponse(
                 inv.getId(), inv.getInvoiceNo(), inv.getInvoiceDate(),
-                inv.getCustomerName(), inv.getNote(),
+                inv.getCustomerName(),
+                inv.getCustomer() != null ? inv.getCustomer().getId() : null,
+                inv.getNote(),
                 inv.getTotalAmount(), discountAmount, finalAmount,
                 inv.getPromotionName(), totalProfit,
                 inv.getCreatedBy() != null ? inv.getCreatedBy().getUsername() : null,

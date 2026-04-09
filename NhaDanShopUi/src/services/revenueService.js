@@ -32,6 +32,13 @@ export const revenueService = {
       params: { from, to, period },
       responseType: 'blob',
     }).then(r => r.data),
+
+  // ── Sprint 2: Top/Slow products ──────────────────────────────────
+  getTopProducts: (from, to, limit = 10) =>
+    api.get(`${BASE}/top-products`, { params: { from, to, limit } }).then(r => r.data),
+
+  getSlowProducts: (days = 30) =>
+    api.get(`${BASE}/slow-products`, { params: { days } }).then(r => r.data),
 }
 
 /** Trigger download blob từ API */

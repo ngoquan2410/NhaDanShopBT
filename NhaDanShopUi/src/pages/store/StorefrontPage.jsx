@@ -1,4 +1,4 @@
-﻿﻿﻿import { useState, useMemo, useCallback, useEffect } from 'react'
+﻿﻿﻿import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProducts } from '../../hooks/useProducts'
 import { useCategories } from '../../hooks/useCategories'
@@ -8,6 +8,7 @@ import { invoiceService } from '../../services/invoiceService'
 import { promotionService } from '../../services/promotionService'
 import { productService } from '../../services/productService'
 import { comboService } from '../../services/comboService'
+import { customerService } from '../../services/customerService'
 import { pendingOrderService, ORDER_STATUS } from '../../services/pendingOrderService'
 import { usePendingOrderMutations, usePendingOrderById } from '../../hooks/usePendingOrders'
 import toast from 'react-hot-toast'
@@ -390,6 +391,10 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [customerName, setCustomerName] = useState(user?.fullName || user?.username || '')
+  const [customerId, setCustomerId]     = useState(null)
+  const [custSearch, setCustSearch]     = useState('')
+  const [custResults, setCustResults]   = useState([])
+  const custTimer = useRef(null)
   const [note, setNote] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [stockConflicts, setStockConflicts] = useState([])
@@ -401,6 +406,27 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
     queryFn: promotionService.getActive,
     staleTime: 60_000,
   })
+
+  // Sprint 2: search customer debounce
+  const handleCustSearch = (val) => {
+    setCustSearch(val)
+    if (!val.trim()) { setCustResults([]); return }
+    clearTimeout(custTimer.current)
+    custTimer.current = setTimeout(async () => {
+      try {
+        const res = await customerService.getAll(val.trim())
+        setCustResults(res.slice(0, 5))
+      } catch { setCustResults([]) }
+    }, 300)
+  }
+  const selectCust = (c) => {
+    setCustomerId(c.id); setCustomerName(c.name)
+    setCustSearch(''); setCustResults([])
+  }
+  const clearCust = () => {
+    setCustomerId(null); setCustomerName(user?.fullName || '')
+    setCustSearch(''); setCustResults([])
+  }
 
   const total = cart.reduce((s, i) => s + (i.sellPrice ?? 0) * i.qty, 0)
 
@@ -455,7 +481,8 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
 
     const method = PAYMENT_METHODS.find(m => m.id === paymentMethod)
     const payload = {
-      customerName,
+      customerName: customerId ? undefined : (customerName || undefined),
+      customerId: customerId || null,
       note: [note, `[${method?.label}]`].filter(Boolean).join(' | '),
       paymentMethod,
       promotionId: selectedPromoId ? Number(selectedPromoId) : null,
@@ -507,11 +534,38 @@ function CheckoutModal({ cart, onClose, onCashSuccess, onPendingCreated }) {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Tên khách hàng</label>
-            <input value={customerName} onChange={e => setCustomerName(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-              placeholder="Họ tên người đặt" />
+          {/* Sprint 2: Customer picker */}
+          <div className="relative">
+            <label className="block text-sm font-medium text-gray-700 mb-1">👤 Khách hàng</label>
+            {customerId ? (
+              <div className="flex items-center gap-2 border rounded-lg px-3 py-2 bg-blue-50">
+                <span className="text-sm font-medium text-blue-800 flex-1">{customerName}</span>
+                <button type="button" onClick={clearCust}
+                  className="text-gray-400 hover:text-red-500 text-lg">&times;</button>
+              </div>
+            ) : (
+              <>
+                <input value={custSearch || customerName}
+                  onChange={e => {
+                    if (custSearch || e.target.value.trim()) handleCustSearch(e.target.value)
+                    else setCustomerName(e.target.value)
+                  }}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  placeholder="Tìm KH (SĐT / tên) hoặc nhập tên khách lẻ" />
+                {custResults.length > 0 && (
+                  <div className="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-xl shadow-xl max-h-44 overflow-y-auto">
+                    {custResults.map(c => (
+                      <button key={c.id} type="button" onClick={() => selectCust(c)}
+                        className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b last:border-0">
+                        <span className="font-mono text-blue-600 mr-2 text-xs">{c.code}</span>
+                        <span className="font-medium">{c.name}</span>
+                        {c.phone && <span className="text-gray-400 ml-2 text-xs">{c.phone}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú</label>

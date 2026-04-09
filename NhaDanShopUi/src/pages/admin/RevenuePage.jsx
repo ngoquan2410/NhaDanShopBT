@@ -28,6 +28,8 @@ const TABS = [
   { id: 'total',    label: '📊 Tổng doanh thu' },
   { id: 'product',  label: '📦 Theo sản phẩm' },
   { id: 'category', label: '🗂️ Theo danh mục' },
+  { id: 'top',      label: '🔥 Bán chạy' },
+  { id: 'slow',     label: '🐢 Chậm bán' },
 ]
 
 // ── Tooltip custom cho BarChart ───────────────────────────────────────────────
@@ -58,6 +60,8 @@ export default function RevenuePage() {
   const [period, setPeriod] = useState('daily')
   const [from, setFrom]     = useState(defaultFrom)
   const [to, setTo]         = useState(defaultTo)
+  const [topLimit, setTopLimit] = useState(10)
+  const [slowDays, setSlowDays] = useState(30)
   const [exporting, setExporting] = useState(false)
 
   // ── Queries ────────────────────────────────────────────────────────────────
@@ -82,6 +86,23 @@ export default function RevenuePage() {
     queryFn: () => revenueService.getByCategory(from, to, period),
     enabled: !!from && !!to && tab === 'category',
     staleTime: 30_000,
+    keepPreviousData: true,
+  })
+
+  // Sprint 2: Top/Slow queries
+  const topQ = useQuery({
+    queryKey: ['revenue-top', from, to, topLimit],
+    queryFn: () => revenueService.getTopProducts(from, to, topLimit),
+    enabled: !!from && !!to && tab === 'top',
+    staleTime: 60_000,
+    keepPreviousData: true,
+  })
+
+  const slowQ = useQuery({
+    queryKey: ['revenue-slow', slowDays],
+    queryFn: () => revenueService.getSlowProducts(slowDays),
+    enabled: tab === 'slow',
+    staleTime: 60_000,
     keepPreviousData: true,
   })
 
@@ -113,11 +134,11 @@ export default function RevenuePage() {
   // ── Xác định data active ───────────────────────────────────────────────────
   // Chỉ check isLoading của query đang active (tab hiện tại)
   // Các query disabled (tab khác) có isFetching=false nhưng isLoading=true → gây loop
-  const isLoading = tab === 'total'
-    ? totalQ.isFetching
-    : tab === 'product'
-      ? productQ.isFetching
-      : categoryQ.isFetching
+  const isLoading = tab === 'total'    ? totalQ.isFetching
+    : tab === 'product'  ? productQ.isFetching
+    : tab === 'category' ? categoryQ.isFetching
+    : tab === 'top'      ? topQ.isFetching
+    : slowQ.isFetching
 
   // Tổng doanh thu
   const totalData   = totalQ.data
@@ -143,6 +164,7 @@ export default function RevenuePage() {
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-2xl font-bold text-gray-800">📈 Quản Lý Doanh Thu</h2>
+        {!['top', 'slow'].includes(tab) && (
         <button
           onClick={handleExport}
           disabled={exporting}
@@ -150,6 +172,7 @@ export default function RevenuePage() {
         >
           {exporting ? '⏳ Đang xuất...' : '📥 Xuất Excel (S1a-HKD)'}
         </button>
+        )}
       </div>
 
       {/* ── Bộ lọc ─────────────────────────────────────────────────────── */}
@@ -523,6 +546,203 @@ export default function RevenuePage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════
+           TAB: BÁN CHẠY (Sprint 2)
+      ════════════════════════════════════════════════════════════════ */}
+      {tab === 'top' && (
+        <div className="space-y-4">
+          {/* Bộ lọc riêng */}
+          <div className="bg-white rounded-xl shadow p-4 flex flex-wrap gap-4 items-end">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1 font-medium">Từ ngày</label>
+              <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1 font-medium">Đến ngày</label>
+              <input type="date" value={to} onChange={e => setTo(e.target.value)}
+                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1 font-medium">Số variant</label>
+              <select value={topLimit} onChange={e => setTopLimit(Number(e.target.value))}
+                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400">
+                {[5, 10, 20, 50].map(n => <option key={n} value={n}>Top {n}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {isLoading ? (
+            <div className="text-center py-12 text-gray-400">
+              <div className="inline-block w-8 h-8 border-4 border-red-400 border-t-transparent rounded-full animate-spin mb-3" />
+              <p>Đang tải...</p>
+            </div>
+          ) : (
+            <>
+              {/* Bar chart */}
+              {(topQ.data || []).length > 0 && (
+                <div className="bg-white rounded-xl shadow p-5">
+                  <h3 className="font-semibold text-gray-700 mb-4">🔥 Top {topLimit} variant bán chạy nhất (theo số lượng)</h3>
+                  <ResponsiveContainer width="100%" height={320}>
+                    <BarChart
+                      data={(topQ.data || []).map(d => ({
+                        name: d.variantCode,
+                        qty: Number(d.totalQty),
+                        rev: Number(d.totalRevenue),
+                      }))}
+                      margin={{ top: 5, right: 20, bottom: 80, left: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" interval={0} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Bar dataKey="qty" name="Số lượng bán" fill="#ef4444" radius={[4,4,0,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              <div className="bg-white rounded-xl shadow overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-red-50 text-red-800">
+                    <tr>
+                      <th className="px-4 py-3 text-center w-12">#</th>
+                      <th className="px-4 py-3 text-left">Mã variant</th>
+                      <th className="px-4 py-3 text-left">Tên variant</th>
+                      <th className="px-4 py-3 text-left">Sản phẩm</th>
+                      <th className="px-4 py-3 text-left">Danh mục</th>
+                      <th className="px-4 py-3 text-right">Số lượng bán</th>
+                      <th className="px-4 py-3 text-right">Doanh thu</th>
+                      <th className="px-4 py-3 text-right">Lợi nhuận</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(topQ.data || []).length === 0 ? (
+                      <tr><td colSpan={8} className="py-10 text-center text-gray-400">
+                        Không có dữ liệu bán hàng trong kỳ này
+                      </td></tr>
+                    ) : (topQ.data || []).map((d, i) => (
+                      <tr key={d.variantId} className={`border-t ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                        <td className="px-4 py-2 text-center">
+                          <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
+                            i === 0 ? 'bg-yellow-400 text-white' :
+                            i === 1 ? 'bg-gray-400 text-white' :
+                            i === 2 ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'
+                          }`}>{d.rank}</span>
+                        </td>
+                        <td className="px-4 py-2 font-mono text-red-700 font-semibold">{d.variantCode}</td>
+                        <td className="px-4 py-2">{d.variantName}</td>
+                        <td className="px-4 py-2 text-gray-600">{d.productName}</td>
+                        <td className="px-4 py-2 text-gray-500">{d.categoryName}</td>
+                        <td className="px-4 py-2 text-right font-bold text-red-700">
+                          {Number(d.totalQty).toLocaleString('vi-VN')} {d.sellUnit}
+                        </td>
+                        <td className="px-4 py-2 text-right font-semibold text-green-700">
+                          {fmt(d.totalRevenue)} ₫
+                        </td>
+                        <td className={`px-4 py-2 text-right font-semibold ${Number(d.totalProfit) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {fmt(d.totalProfit)} ₫
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════
+           TAB: CHẬM BÁN (Sprint 2)
+      ════════════════════════════════════════════════════════════════ */}
+      {tab === 'slow' && (
+        <div className="space-y-4">
+          {/* Bộ lọc */}
+          <div className="bg-white rounded-xl shadow p-4 flex flex-wrap gap-4 items-end">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1 font-medium">Không có GD trong (ngày)</label>
+              <div className="flex items-center gap-2">
+                <input type="number" min={1} max={365} value={slowDays}
+                  onChange={e => setSlowDays(Math.max(1, Number(e.target.value)))}
+                  className="w-24 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400" />
+                <span className="text-sm text-gray-500">ngày</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              {[7, 14, 30, 60, 90].map(d => (
+                <button key={d} onClick={() => setSlowDays(d)}
+                  className={`text-xs border rounded-lg px-3 py-1.5 font-medium ${
+                    slowDays === d ? 'bg-gray-700 text-white border-gray-700' : 'hover:bg-gray-50 text-gray-600'
+                  }`}>{d} ngày</button>
+              ))}
+            </div>
+          </div>
+
+          {isLoading ? (
+            <div className="text-center py-12 text-gray-400">
+              <div className="inline-block w-8 h-8 border-4 border-gray-400 border-t-transparent rounded-full animate-spin mb-3" />
+              <p>Đang tải...</p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="px-5 py-3 bg-gray-50 border-b flex items-center gap-2">
+                <span className="text-base font-semibold text-gray-700">🐢 Hàng chậm bán</span>
+                <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
+                  {(slowQ.data || []).length} variant
+                </span>
+                <span className="text-xs text-gray-400 ml-2">— không có GD trong {slowDays} ngày, còn tồn kho</span>
+              </div>
+              {(slowQ.data || []).length === 0 ? (
+                <div className="py-12 text-center text-gray-400">
+                  ✅ Không có hàng chậm bán trong {slowDays} ngày qua
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Mã variant</th>
+                      <th className="px-4 py-3 text-left">Tên variant</th>
+                      <th className="px-4 py-3 text-left">Sản phẩm</th>
+                      <th className="px-4 py-3 text-left">Danh mục</th>
+                      <th className="px-4 py-3 text-right">Tồn kho</th>
+                      <th className="px-4 py-3 text-left">Lần bán cuối</th>
+                      <th className="px-4 py-3 text-right">Số ngày</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(slowQ.data || []).map((d, i) => (
+                      <tr key={d.variantId} className={`border-t ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                        <td className="px-4 py-2 font-mono font-semibold text-gray-700">{d.variantCode}</td>
+                        <td className="px-4 py-2">{d.variantName}</td>
+                        <td className="px-4 py-2 text-gray-600">{d.productName}</td>
+                        <td className="px-4 py-2 text-gray-500">{d.categoryName}</td>
+                        <td className="px-4 py-2 text-right font-semibold">{d.stockQty} {d.sellUnit}</td>
+                        <td className="px-4 py-2 text-gray-500">
+                          {d.lastSaleDate
+                            ? dayjs(d.lastSaleDate).format('DD/MM/YYYY')
+                            : <span className="text-red-500 font-medium">Chưa bán bao giờ</span>}
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          {d.daysWithoutSale != null ? (
+                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                              d.daysWithoutSale > 60 ? 'bg-red-100 text-red-700' :
+                              d.daysWithoutSale > 30 ? 'bg-orange-100 text-orange-700' :
+                              'bg-yellow-100 text-yellow-700'
+                            }`}>{d.daysWithoutSale} ngày</span>
+                          ) : (
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">∞</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

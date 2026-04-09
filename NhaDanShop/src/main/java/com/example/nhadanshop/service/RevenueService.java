@@ -1,11 +1,14 @@
 package com.example.nhadanshop.service;
 
 import com.example.nhadanshop.dto.*;
+import com.example.nhadanshop.entity.ProductVariant;
+import com.example.nhadanshop.repository.ProductVariantRepository;
 import com.example.nhadanshop.repository.SalesInvoiceRepository;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.xssf.usermodel.*;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -23,12 +26,14 @@ import java.util.stream.Collectors;
  *  - Theo danh mục
  *  - Tổng hợp (daily / weekly / monthly / yearly)
  *  - Xuất Excel theo mẫu Sổ Doanh Thu S1a-HKD
+ *  - Top/Slow product report (Sprint 2)
  */
 @Service
 @RequiredArgsConstructor
 public class RevenueService {
 
     private final SalesInvoiceRepository invoiceRepo;
+    private final ProductVariantRepository variantRepo; // Sprint 2 — slow products
 
     private static final DateTimeFormatter DAY_FMT   = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("MM/yyyy");
@@ -519,5 +524,114 @@ public class RevenueService {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         wb.write(out);
         return out.toByteArray();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SPRINT 2 — TOP PRODUCTS / SLOW PRODUCTS
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Top N variant bán chạy nhất trong kỳ — sắp xếp theo tổng số lượng bán giảm dần.
+     *
+     * @param from  ngày bắt đầu (inclusive)
+     * @param to    ngày kết thúc (inclusive)
+     * @param limit số variant muốn lấy (mặc định 10)
+     */
+    public List<TopProductDto> getTopProducts(LocalDate from, LocalDate to, int limit) {
+        LocalDateTime fromDt = from.atStartOfDay();
+        LocalDateTime toDt   = to.atTime(LocalTime.MAX);
+
+        List<Object[]> raw = invoiceRepo.topProducts(fromDt, toDt, PageRequest.of(0, Math.min(limit, 100)));
+        List<TopProductDto> result = new ArrayList<>();
+        for (int i = 0; i < raw.size(); i++) {
+            Object[] r = raw.get(i);
+            result.add(new TopProductDto(
+                    i + 1,
+                    toLong(r[0]),   // variantId
+                    str(r[1]),      // variantCode
+                    str(r[2]),      // variantName
+                    toLong(r[3]),   // productId
+                    str(r[4]),      // productCode
+                    str(r[5]),      // productName
+                    r[6] != null ? str(r[6]) : "Không phân loại", // categoryName
+                    r[7] != null ? str(r[7]) : "cai",             // sellUnit
+                    toLong(r[8]),   // totalQty
+                    toBD(r[9]),     // totalRevenue
+                    toBD(r[10])     // totalProfit
+            ));
+        }
+        return result;
+    }
+
+    /**
+     * Danh sách variant không có giao dịch bán trong N ngày gần nhất.
+     * Chỉ bao gồm variant đang active và còn tồn kho > 0.
+     *
+     * @param days số ngày không có giao dịch (VD: 30 = không bán trong 30 ngày)
+     */
+    public List<SlowProductDto> getSlowProducts(int days) {
+        LocalDateTime threshold = LocalDateTime.now().minusDays(Math.max(1, days));
+
+        // Load tất cả active variants còn hàng
+        List<ProductVariant> allVariants = variantRepo.findAll().stream()
+                .filter(v -> Boolean.TRUE.equals(v.getActive())
+                        && v.getStockQty() != null && v.getStockQty() > 0
+                        && v.getProduct() != null && Boolean.TRUE.equals(v.getProduct().getActive())
+                        && !v.getProduct().isCombo())
+                .toList();
+
+        if (allVariants.isEmpty()) return List.of();
+
+        // Load map variantId → lastSaleDate
+        Map<Long, LocalDateTime> lastSaleMap = new HashMap<>();
+        invoiceRepo.lastSaleDateByVariant().forEach(r -> {
+            Long vid  = toLong(r[0]);
+            LocalDateTime dt = r[1] != null ? (LocalDateTime) r[1] : null;
+            if (vid != null) lastSaleMap.put(vid, dt);
+        });
+
+        List<SlowProductDto> result = new ArrayList<>();
+        for (ProductVariant v : allVariants) {
+            LocalDateTime lastSale = lastSaleMap.get(v.getId());
+            // Slow nếu: chưa bán bao giờ, HOẶC lần bán cuối < threshold
+            if (lastSale == null || lastSale.isBefore(threshold)) {
+                long daysWithout = lastSale == null ? -1L
+                        : Duration.between(lastSale, LocalDateTime.now()).toDays();
+                result.add(new SlowProductDto(
+                        v.getId(), v.getVariantCode(), v.getVariantName(),
+                        v.getProduct().getId(), v.getProduct().getCode(), v.getProduct().getName(),
+                        v.getProduct().getCategory() != null ? v.getProduct().getCategory().getName() : "Không phân loại",
+                        v.getSellUnit(), v.getStockQty(),
+                        lastSale,
+                        lastSale == null ? null : daysWithout
+                ));
+            }
+        }
+
+        // Sort: chưa bán bao giờ lên trước, sau đó theo lastSaleDate cũ nhất
+        result.sort(Comparator
+                .comparing((SlowProductDto d) -> d.lastSaleDate() != null)
+                .thenComparing(d -> d.lastSaleDate() == null ? LocalDateTime.MIN : d.lastSaleDate()));
+
+        return result;
+    }
+
+    // ── Internal helpers ──────────────────────────────────────────────────────
+
+    private Long toLong(Object o) {
+        if (o == null) return null;
+        if (o instanceof Long l) return l;
+        if (o instanceof Number n) return n.longValue();
+        return null;
+    }
+
+    private String str(Object o) {
+        return o != null ? o.toString() : null;
+    }
+
+    private BigDecimal toBD(Object o) {
+        if (o == null) return BigDecimal.ZERO;
+        if (o instanceof BigDecimal bd) return bd;
+        return new BigDecimal(o.toString());
     }
 }

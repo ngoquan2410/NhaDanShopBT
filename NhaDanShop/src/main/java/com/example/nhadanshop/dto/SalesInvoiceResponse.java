@@ -9,6 +9,8 @@ public record SalesInvoiceResponse(
         String invoiceNo,
         LocalDateTime invoiceDate,
         String customerName,
+        /** FK → customers.id (Sprint 2). Null = khách vãng lai */
+        Long customerId,
         String note,
         /** Tổng tiền trước KM */
         BigDecimal totalAmount,

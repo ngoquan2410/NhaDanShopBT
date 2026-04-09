@@ -39,7 +39,15 @@ export const productService = {
   deleteImage: (url) => api.delete(`/api/images?url=${encodeURIComponent(url)}`),
 
   // ── Import Excel ──────────────────────────────────────────────────────────
-  /** Import sản phẩm hàng loạt từ file .xlsx */
+  /** Pass 1: Preview validate file Excel — KHÔNG ghi DB */
+  previewExcel: (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api.post('/api/products/preview-excel', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+  /** Pass 2: Import thật sự — chỉ ghi DB khi preview không có lỗi */
   importExcel: (file) => {
     const formData = new FormData()
     formData.append('file', file)

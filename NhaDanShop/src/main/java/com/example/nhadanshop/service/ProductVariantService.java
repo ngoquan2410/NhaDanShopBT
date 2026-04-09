@@ -119,7 +119,8 @@ public class ProductVariantService {
         v.setSellUnit(req.sellUnit());
         v.setImportUnit(req.importUnit());
         if (req.piecesPerUnit() != null) v.setPiecesPerUnit(req.piecesPerUnit());
-        v.setSellPrice(req.sellPrice());
+        // sellPrice và costPrice đều optional — null = không thay đổi; 0 = chấp nhận (điền sau)
+        if (req.sellPrice() != null) v.setSellPrice(req.sellPrice());
         if (req.costPrice() != null) v.setCostPrice(req.costPrice());
         if (req.stockQty() != null) v.setStockQty(req.stockQty());
         if (req.minStockQty() != null) v.setMinStockQty(req.minStockQty());
@@ -284,7 +285,8 @@ public class ProductVariantService {
         v.setSellUnit(req.sellUnit());
         v.setImportUnit(req.importUnit());
         v.setPiecesPerUnit(req.piecesPerUnit() != null ? req.piecesPerUnit() : 1);
-        v.setSellPrice(req.sellPrice());
+        // Giá bán và giá vốn đều optional — null → 0 (sẽ cập nhật sau khi nhập kho)
+        v.setSellPrice(req.sellPrice() != null ? req.sellPrice() : BigDecimal.ZERO);
         v.setCostPrice(req.costPrice() != null ? req.costPrice() : BigDecimal.ZERO);
         v.setStockQty(req.stockQty() != null ? req.stockQty() : 0);
         v.setMinStockQty(req.minStockQty() != null ? req.minStockQty() : 5);

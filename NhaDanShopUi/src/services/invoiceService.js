@@ -8,4 +8,7 @@ export const invoiceService = {
   getOne: (id) => api.get(`/api/invoices/${id}`).then(r => r.data),
   create: (data) => api.post('/api/invoices', data).then(r => r.data),
   delete: (id) => api.delete(`/api/invoices/${id}`),
+  // Sprint 2: lịch sử HĐ theo KH
+  getByCustomer: (customerId, page = 0, size = 10) =>
+    api.get(`/api/invoices?customerId=${customerId}&page=${page}&size=${size}`).then(r => r.data),
 }

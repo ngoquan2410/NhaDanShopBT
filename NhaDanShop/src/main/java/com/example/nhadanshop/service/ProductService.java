@@ -4,7 +4,9 @@ import com.example.nhadanshop.dto.ProductRequest;
 import com.example.nhadanshop.dto.ProductResponse;
 import com.example.nhadanshop.entity.Category;
 import com.example.nhadanshop.entity.Product;
+import com.example.nhadanshop.entity.ProductImportUnit;
 import com.example.nhadanshop.repository.CategoryRepository;
+import com.example.nhadanshop.repository.ProductImportUnitRepository;
 import com.example.nhadanshop.repository.ProductRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,7 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
+    private final ProductImportUnitRepository importUnitRepository;
     @org.springframework.context.annotation.Lazy
     private final ProductVariantService variantService;
 
@@ -95,6 +98,28 @@ public class ProductService {
                         );
                     }
                     variantService.createVariant(saved.getId(), vReq);
+
+                    // Task 2: tạo ProductImportUnit cho variant có importUnit
+                    if (vReq.importUnit() != null && !vReq.importUnit().isBlank()) {
+                        boolean isDefault = Boolean.TRUE.equals(vReq.isDefault()) || (!hasDefault && i == 0);
+                        // Kiểm tra không tạo trùng (cùng product + importUnit)
+                        boolean exists = importUnitRepository
+                                .findByProductIdAndImportUnitIgnoreCase(saved.getId(), vReq.importUnit().trim())
+                                .isPresent();
+                        if (!exists) {
+                            int pieces = vReq.piecesPerUnit() != null && vReq.piecesPerUnit() > 0
+                                    ? vReq.piecesPerUnit() : 1;
+                            String sellUnit = vReq.sellUnit() != null ? vReq.sellUnit() : "cai";
+                            ProductImportUnit piu = new ProductImportUnit();
+                            piu.setProduct(saved);
+                            piu.setImportUnit(vReq.importUnit().trim());
+                            piu.setSellUnit(sellUnit);
+                            piu.setPiecesPerUnit(pieces);
+                            piu.setIsDefault(isDefault);
+                            piu.setNote(vReq.conversionNote());
+                            importUnitRepository.save(piu);
+                        }
+                    }
                 }
             } else {
                 // Backward compat: tạo 1 default variant rỗng

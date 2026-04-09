@@ -106,4 +106,13 @@ public class InventoryReceiptItem {
      */
     @Column(name = "expiry_date_override")
     private LocalDate expiryDateOverride;
+
+    /**
+     * Snapshot đơn vị bán lẻ tại thời điểm nhập — bất biến.
+     * VD: "bịch 200g", "bịch 500g", "gói", "hộp"...
+     * Dùng để hiển thị đúng đơn vị trong lịch sử phiếu nhập
+     * kể cả khi admin đổi variant.sellUnit sau này.
+     */
+    @Column(name = "sell_unit_snapshot", length = 20)
+    private String sellUnitSnapshot;
 }

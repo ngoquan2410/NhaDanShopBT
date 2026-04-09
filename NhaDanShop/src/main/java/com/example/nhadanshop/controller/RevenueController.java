@@ -113,4 +113,30 @@ public class RevenueController {
         headers.setContentLength(bytes.length);
         return ResponseEntity.ok().headers(headers).body(bytes);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // SPRINT 2 — TOP PRODUCTS / SLOW PRODUCTS
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * GET /api/revenue/top-products?from=2026-01-01&to=2026-04-08&limit=10
+     * Trả về Top N variant bán chạy nhất theo số lượng trong kỳ.
+     */
+    @GetMapping("/top-products")
+    public List<TopProductDto> topProducts(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "10") int limit) {
+        return revenueService.getTopProducts(from, to, Math.min(limit, 100));
+    }
+
+    /**
+     * GET /api/revenue/slow-products?days=30
+     * Trả về danh sách variant không có GD trong N ngày gần nhất (còn tồn kho).
+     */
+    @GetMapping("/slow-products")
+    public List<SlowProductDto> slowProducts(
+            @RequestParam(defaultValue = "30") int days) {
+        return revenueService.getSlowProducts(Math.max(1, days));
+    }
 }

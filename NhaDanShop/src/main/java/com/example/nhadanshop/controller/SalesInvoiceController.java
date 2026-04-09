@@ -23,15 +23,20 @@ public class SalesInvoiceController {
     private final InvoiceService invoiceService;
 
     /**
-     * Lấy danh sách hóa đơn, hỗ trợ lọc theo ngày.
+     * Lấy danh sách hóa đơn, hỗ trợ lọc theo ngày hoặc theo KH.
      * Ví dụ: GET /api/invoices?from=2026-01-01&to=2026-03-31&page=0&size=10
+     *        GET /api/invoices?customerId=5&page=0&size=10
      */
     @GetMapping
     public Page<SalesInvoiceResponse> list(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) Long customerId,
             @PageableDefault(size = 20) Pageable pageable) {
 
+        if (customerId != null) {
+            return invoiceService.listInvoicesByCustomer(customerId, pageable);
+        }
         if (from != null && to != null) {
             return invoiceService.listInvoicesByDateRange(
                     from.atStartOfDay(), to.atTime(LocalTime.MAX), pageable);

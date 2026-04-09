@@ -36,74 +36,77 @@ public class ExcelTemplateService {
 
     /**
      * Tạo file Excel template import sản phẩm.
-     * Columns: A-code | B-name | C-category | D-unit | E-costPrice | F-sellPrice
-     *          G-stockQty | H-expiryDays | I-active | J-importUnit | K-sellUnit
-     *          L-piecesPerImportUnit | M-conversionNote
+     * Layout 13 cột A-M (bỏ cột "Đơn vị" cũ — redundant với cột J ĐV bán lẻ):
+     *   A=Mã SP | B=Tên SP(*) | C=Danh mục(*) | D=Giá vốn(*) | E=Giá bán(*)
+     *   F=Tồn kho | G=Hạn dùng | H=Hoạt động | I=ĐV nhập kho
+     *   J=ĐV bán lẻ(*) | K=Số lẻ/ĐV | L=Ghi chú | M=Tồn kho tối thiểu
      */
     public byte[] buildProductTemplate() throws IOException {
         try (XSSFWorkbook wb = new XSSFWorkbook()) {
 
-            // ── Styles ───────────────────────────────────────────────────────
-            CellStyle headerStyle  = buildHeaderStyle(wb, new byte[]{(byte)34,(byte)139,(byte)34});   // green
-            CellStyle required     = buildHeaderStyle(wb, new byte[]{(byte)220,(byte)80,(byte)50});    // red-ish required
+            CellStyle headerStyle  = buildHeaderStyle(wb, new byte[]{(byte)34,(byte)139,(byte)34});
+            CellStyle required     = buildHeaderStyle(wb, new byte[]{(byte)220,(byte)80,(byte)50});
+            CellStyle optionalHdr  = buildHeaderStyle(wb, new byte[]{(byte)70,(byte)130,(byte)180});
             CellStyle dataStyle    = buildDataStyle(wb);
             CellStyle numberStyle  = buildNumberStyle(wb);
             CellStyle noteStyle    = buildNoteStyle(wb);
             CellStyle titleStyle   = buildTitleStyle(wb);
             CellStyle sectionStyle = buildSectionStyle(wb, new byte[]{(byte)34,(byte)139,(byte)34});
 
-            // ── Sheet 1: Data ─────────────────────────────────────────────────
             XSSFSheet data = wb.createSheet("Du lieu San pham");
             data.setDefaultColumnWidth(18);
-            data.setColumnWidth(1, 35 * 256);   // B: Tên SP
-            data.setColumnWidth(2, 20 * 256);   // C: Danh mục
-            data.setColumnWidth(12, 30 * 256);  // M: Ghi chú
+            data.setColumnWidth(1, 35 * 256);  // B: Tên SP
+            data.setColumnWidth(2, 20 * 256);  // C: Danh mục
+            data.setColumnWidth(9, 14 * 256);  // J: ĐV bán lẻ
+            data.setColumnWidth(11, 30 * 256); // L: Ghi chú
+            data.setColumnWidth(12, 18 * 256); // M: Tồn tối thiểu
 
-            // Title row
-            Row titleRow = data.createRow(0);
-            titleRow.setHeightInPoints(28);
+            Row titleRow = data.createRow(0); titleRow.setHeightInPoints(28);
             Cell titleCell = titleRow.createCell(0);
-            titleCell.setCellValue("TEMPLATE IMPORT SAN PHAM - NHA DAN SHOP");
+            titleCell.setCellValue("TEMPLATE IMPORT SAN PHAM - NHA DAN SHOP (13 COT A-M)");
             titleCell.setCellStyle(titleStyle);
             data.addMergedRegion(new CellRangeAddress(0, 0, 0, 12));
 
-            // Sub-title
             Row subRow = data.createRow(1);
             Cell subCell = subRow.createCell(0);
-            subCell.setCellValue("(*) = bat buoc | De trong cot A = tu dong tao ma SP | importUnit: bich/hop/chai = ATOMIC, kg/xau = GOP (tu chia gia)");
+            subCell.setCellValue(
+                "(*) = bat buoc | De trong cot A = tu dong tao ma SP | " +
+                "I=DV nhap (kg/xau=GOP tu chia gia, bich/hop=ATOMIC) | J=DV ban le (*) | M=ton toi thieu (mac dinh 5)");
             subCell.setCellStyle(noteStyle);
             data.addMergedRegion(new CellRangeAddress(1, 1, 0, 12));
 
-            // Header row (row index 2)
+            // Headers — 13 cột A-M
+            // required: B(1), C(2), D(3), E(4), J(9); optional-blue: M(12)
             String[] headers = {
-                "A: Ma SP", "B: Ten SP (*)", "C: Danh muc (*)", "D: Don vi (*)",
-                "E: Gia von (*)", "F: Gia ban (*)", "G: Ton kho ban dau",
-                "H: Han su dung (ngay)", "I: Hoat dong (TRUE/FALSE)",
-                "J: Don vi nhap", "K: Don vi ban le",
-                "L: So le/DV nhap", "M: Ghi chu quy doi"
+                "A: Ma SP",        "B: Ten SP (*)",    "C: Danh muc (*)",
+                "D: Gia von (*)",  "E: Gia ban (*)",   "F: Ton kho ban dau",
+                "G: Han su dung (ngay)", "H: Hoat dong (TRUE/FALSE)",
+                "I: DV nhap kho",  "J: DV ban le (*)", "K: So le/DV nhap",
+                "L: Ghi chu quy doi",   "M: Ton kho toi thieu"
             };
-            Row hRow = data.createRow(2);
-            hRow.setHeightInPoints(20);
+            int[] reqIdx = {1, 2, 3, 4, 9};
+            Row hRow = data.createRow(2); hRow.setHeightInPoints(20);
             for (int i = 0; i < headers.length; i++) {
                 Cell c = hRow.createCell(i);
                 c.setCellValue(headers[i]);
-                // Cột bắt buộc (B,C,D,E,F) dùng màu khác
-                c.setCellStyle((i >= 1 && i <= 5) ? required : headerStyle);
+                boolean isReq = false;
+                for (int r : reqIdx) if (r == i) { isReq = true; break; }
+                c.setCellStyle(i == 12 ? optionalHdr : isReq ? required : headerStyle);
             }
 
-            // ── Dummy data: 10 sản phẩm thực tế của Nhà Đan Shop ─────────────
+            // Dummy data — 13 cột: code,name,cat, costPrice,sellPrice, stockQty,
+            //                       expiryDays,active, importUnit,sellUnit,pieces,conversionNote,minStock
             Object[][] rows = {
-                // code, name, category, unit, costPrice, sellPrice, stockQty, expiryDays, active, importUnit, sellUnit, pieces, note
-                {"BT001","Banh Trang Rong Bien","Banh Trang","bich", 6500, 9000, 100, 180, "TRUE","kg","bich", 10,"1kg=10 bich"},
-                {"BT002","Banh Trang Cuon Tep","Banh Trang","hop",  38000,55000,  50, 180, "TRUE","hop","hop",  1, ""},
-                {"BT003","Banh Trang Nuong Phomát","Banh Trang","goi",12000,18000, 80, 120, "TRUE","goi","goi",  1, ""},
-                {"BT004","Banh Trang Tron Sa Te","Banh Trang","bich", 8000,12000,  60, 90,  "TRUE","kg","bich", 8, "1kg=8 bich"},
-                {"M001","Muoi Bien Khanh Hoa","Muoi","goi",   5000, 8000, 200, 365, "TRUE","goi","goi",  1, ""},
-                {"M002","Muoi Hong Himalaya","Muoi","hop",   35000,55000,  30, 730, "TRUE","hop","hop",  1, ""},
-                {"M003","Muoi Toi Ot","Muoi","hu",    18000,28000,  40, 180, "TRUE","hu","hu",   1, ""},
-                {"CC001","Com Chay Nam Huong","Com Chay","hop",45000,65000, 20, 90, "TRUE","hop","hop",  1, ""},
-                {"CC002","Com Chay Hat Sen","Com Chay","goi", 55000,80000, 15, 120, "TRUE","goi","goi",  1, ""},
-                {"TCS001","Trai Cay Say Xoan","Trai Cay Say","goi",25000,38000, 50, 365, "TRUE","kg","goi", 5, "1kg=5 goi"},
+                {"BT001","Banh Trang Rong Bien","Banh Trang", 6500,  9000, 100,180,"TRUE","kg",  "bich",10,"1kg=10 bich",10},
+                {"BT002","Banh Trang Cuon Tep", "Banh Trang",38000,55000,  50,180,"TRUE","hop", "hop", 1, "",             5},
+                {"BT003","Banh Trang Nuong Phomat","Banh Trang",12000,18000,80,120,"TRUE","goi","goi", 1, "",             5},
+                {"BT004","Banh Trang Tron Sa Te","Banh Trang",8000, 12000,  60, 90,"TRUE","kg",  "bich",8,"1kg=8 bich",  8},
+                {"M001", "Muoi Bien Khanh Hoa", "Muoi",       5000,  8000,200,365,"TRUE","goi", "goi", 1, "",            20},
+                {"M002", "Muoi Hong Himalaya",  "Muoi",      35000, 55000, 30,730,"TRUE","hop", "hop", 1, "",             5},
+                {"M003", "Muoi Toi Ot",         "Muoi",      18000, 28000, 40,180,"TRUE","hu",  "hu",  1, "",             5},
+                {"CC001","Com Chay Nam Huong",   "Com Chay",  45000,65000, 20, 90,"TRUE","hop", "hop", 1, "",             3},
+                {"CC002","Com Chay Hat Sen",     "Com Chay",  55000,80000, 15,120,"TRUE","goi", "goi", 1, "",             3},
+                {"TCS001","Trai Cay Say Xoan",  "Trai Cay Say",25000,38000,50,365,"TRUE","kg", "goi", 5,"1kg=5 goi",     5},
             };
 
             int rowNum = 3;
@@ -121,35 +124,42 @@ public class ExcelTemplateService {
                 }
             }
 
-            // Auto filter
             data.setAutoFilter(new CellRangeAddress(2, 2, 0, 12));
-            // Freeze panes: đóng băng 3 dòng đầu (title + subtitle + header)
             data.createFreezePane(0, 3);
 
-            // ── Sheet 2: Hướng dẫn ───────────────────────────────────────────
             XSSFSheet guide = wb.createSheet("Huong dan");
             guide.setColumnWidth(0, 25 * 256);
-            guide.setColumnWidth(1, 50 * 256);
-            guide.setColumnWidth(2, 40 * 256);
+            guide.setColumnWidth(1, 60 * 256);
+            guide.setColumnWidth(2, 35 * 256);
 
             addGuideHeader(guide, wb, sectionStyle, noteStyle, dataStyle,
-                "HUONG DAN IMPORT SAN PHAM",
+                "HUONG DAN IMPORT SAN PHAM (13 COT A-M)",
                 new String[][]{
                     {"Cot","Mo ta","Vi du"},
-                    {"A: Ma SP","BAT BUOC nhap ma san pham. Phai duy nhat, in hoa.\nHe thong KHONG tu dong tao ma.","BT001"},
-                    {"B: Ten SP (*)","Ten day du cua san pham, bat buoc","Banh Trang Rong Bien"},
-                    {"C: Danh muc (*)","Ten danh muc. Chua co → tu dong tao moi","Banh Trang"},
-                    {"D: Don vi (*)","Don vi ban le: bich, hop, goi, chai, hu...","bich"},
-                    {"E: Gia von (*)","Gia nhap (dong). Neu GOP: nhap gia/DV nhap","65000"},
-                    {"F: Gia ban (*)","Gia ban le (dong). Neu GOP: nhap gia/DV nhap","90000"},
-                    {"G: Ton kho","So luong ton kho ban dau (DV nhap). Mac dinh 0","100"},
-                    {"H: Han su dung","So ngay han su dung tinh tu ngay nhap kho","180"},
-                    {"I: Hoat dong","TRUE=dang ban, FALSE=an khoi cua hang","TRUE"},
-                    {"J: Don vi nhap","ATOMIC: bich/hop/chai/goi/hu (1 DV = 1 le)\nGOP: kg/xau (1 DV = nhieu le)","kg hoac bich"},
-                    {"K: Don vi ban le","Don vi khi ban cho khach: bich, goi...","bich"},
-                    {"L: So le/DV nhap","ATOMIC=1. GOP: so bich/DV nhap (VD: 1kg=10 bich → 10)","10"},
-                    {"M: Ghi chu","Mo ta quy doi don vi (tuy chon)","1kg=10 bich"},
-                    {"LUU Y","- File phai la .xlsx\n- Dong 1-2 la title (bo qua tu dong)\n- Dong 3 la header\n- Du lieu tu dong 4\n- Ma trung → bo qua (skip), khong bao loi","-"},
+                    {"A: Ma SP","TUY CHON. De trong = tu sinh ma theo danh muc.\nNhap tay = phai unique (khong trung SP khac va variant khac).","BT001 hoac de trong"},
+                    {"B: Ten SP (*)","Ten day du, bat buoc.","Banh Trang Rong Bien"},
+                    {"C: Danh muc (*)","Ten danh muc. Chua co → tu dong tao moi.","Banh Trang"},
+                    {"D: Gia von (*)","Gia nhap > 0. GOP: gia/DV nhap (VD: 65000/kg). ATOMIC: gia/1 DV ban.","6500"},
+                    {"E: Gia ban (*)","Gia ban > 0. GOP: gia/DV nhap → he thong tu chia cho K.","9000"},
+                    {"F: Ton kho","So luong theo DV NHAP. GOP→nhan K→ton le. Mac dinh 0.","100"},
+                    {"G: Han su dung","So ngay HSD tu ngay nhap kho. De trong = khong HSD.","180"},
+                    {"H: Hoat dong","TRUE=dang ban, FALSE=an. Mac dinh TRUE.","TRUE"},
+                    {"I: DV nhap kho","ATOMIC: bich/hop/chai/goi/hu (1 DV nhap = 1 DV ban)\nGOP: kg/xau/thung (1 DV nhap = K DV ban).\nDe trong = mac dinh la DV ban (ATOMIC).","kg hoac de trong"},
+                    {"J: DV ban le (*)","BAT BUOC. Don vi khi ban cho khach: bich, goi, hu, hop...\nDay la don vi tren nhan hang ban le.","bich"},
+                    {"K: So le/DV nhap","So DV ban / 1 DV nhap. ATOMIC: de trong hoac 1.\nGOP: phai > 1. VD: 1kg=10 bich → K=10.","10"},
+                    {"L: Ghi chu","Mo ta quy doi (tuy chon). VD: 1kg=10 bich.","1kg=10 bich"},
+                    {"M: Ton kho toi thieu","Nguong canh bao ton kho thap. De trong = mac dinh 5.","5"},
+                    {"QUY TAC GIA",
+                     "ATOMIC (I=bich/hop/goi): D=gia/1 DV ban, E=gia ban/1 DV ban.\n" +
+                     "  VD: BT002, I=hop → D=38000/hop, E=55000/hop\n\n" +
+                     "GOP (I=kg/xau): D=gia/1 DV nhap, E=gia ban/1 DV nhap → HE THONG CHIA CHO K:\n" +
+                     "  VD: BT001, I=kg, K=10 → costPerBich=D/K=6500, sellPerBich=E/K=9000",""},
+                    {"LUU Y",
+                     "1. PHAI PREVIEW truoc (nut 'Kiem tra & Preview') — co loi → khoa nut import\n" +
+                     "2. Ma SP trung DB → ERROR (trong preview)\n" +
+                     "3. Ten SP trung trong danh muc → SKIP (khong loi)\n" +
+                     "4. Variant duoc tao qua service (co validate namespace)\n" +
+                     "5. ProductImportUnit duoc tao tu dong khi co cot I",""},
                 }
             );
 
@@ -160,9 +170,6 @@ public class ExcelTemplateService {
         }
     }
 
-    // ════════════════════════════════════════════════════��═════════════════════
-    // 2. TEMPLATE IMPORT PHIẾU NHẬP KHO
-    // ══════════════════════════════════════════════════════════════════════════
 
     /**
      * Tạo file Excel template import phiếu nhập kho.

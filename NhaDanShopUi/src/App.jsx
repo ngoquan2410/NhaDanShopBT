@@ -17,6 +17,7 @@ import UsersPage from './pages/admin/UsersPage'
 import SecuritySettingsPage from './pages/admin/SecuritySettingsPage'
 import PromotionsPage from './pages/admin/PromotionsPage'
 import CombosPage from './pages/admin/CombosPage'
+import CustomersPage from './pages/admin/CustomersPage'
 import SuppliersPage from './pages/admin/SuppliersPage'
 import StockAdjustmentPage from './pages/admin/StockAdjustmentPage'
 import StorefrontPage from './pages/store/StorefrontPage'
@@ -61,6 +62,7 @@ export default function App() {
             <Route path="revenue" element={<RevenuePage />} />
             <Route path="promotions" element={<PromotionsPage />} />
             <Route path="combos" element={<CombosPage />} />
+            <Route path="customers" element={<CustomersPage />} />
             <Route path="suppliers" element={<SuppliersPage />} />
             <Route path="stock-adjustments" element={<StockAdjustmentPage />} />
             <Route path="users" element={<UsersPage />} />

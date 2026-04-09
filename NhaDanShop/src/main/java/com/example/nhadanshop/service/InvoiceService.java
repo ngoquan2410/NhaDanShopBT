@@ -36,17 +36,30 @@ public class InvoiceService {
     private final ProductVariantRepository variantRepo; // Sprint 0 — explicit save
     private final ProductComboRepository comboItemRepo; // Combo KiotViet
     private final ProductComboService comboService;     // Combo KiotViet — refreshVirtualStock
+    private final CustomerRepository customerRepository; // Sprint 2
+    private final CustomerService customerService;       // Sprint 2
 
     @Transactional
     public SalesInvoiceResponse createInvoice(SalesInvoiceRequest req) {
         SalesInvoice invoice = new SalesInvoice();
         invoice.setInvoiceNo(numberGen.nextInvoiceNo());
-        invoice.setCustomerName(req.customerName());
         invoice.setNote(req.note());
         invoice.setInvoiceDate(LocalDateTime.now());
 
         String currentUsername = SecurityContextHolder.getContext().getAuthentication().getName();
         userRepo.findByUsername(currentUsername).ifPresent(invoice::setCreatedBy);
+
+        // Sprint 2: set customer FK + snapshot name
+        if (req.customerId() != null) {
+            customerRepository.findById(req.customerId()).ifPresent(customer -> {
+                invoice.setCustomer(customer);
+                invoice.setCustomerName(customer.getName()); // snapshot
+            });
+        }
+        // Fallback: nhập tay tên KH (khách vãng lai)
+        if (invoice.getCustomerName() == null && req.customerName() != null) {
+            invoice.setCustomerName(req.customerName());
+        }
 
         Promotion promo = null;
         if (req.promotionId() != null) {
@@ -144,6 +157,12 @@ public class InvoiceService {
 
         // ── Refresh virtual stock của tất cả combo chứa SP bị ảnh hưởng ──────
         affectedProductIds.forEach(comboService::refreshCombosContaining);
+
+        // Sprint 2: cộng total_spend cho KH nếu có
+        if (saved.getCustomer() != null) {
+            customerService.addSpend(saved.getCustomer().getId(),
+                    saved.getTotalAmount().subtract(saved.getDiscountAmount()));
+        }
 
         return DtoMapper.toResponse(saved);
     }
@@ -333,6 +352,11 @@ public class InvoiceService {
 
     public Page<SalesInvoiceResponse> listInvoicesByDateRange(LocalDateTime from, LocalDateTime to, Pageable pageable) {
         return invoiceRepo.findByInvoiceDateBetweenOrderByInvoiceDateDesc(from, to, pageable).map(DtoMapper::toResponse);
+    }
+
+    /** Sprint 2: lịch sử HĐ theo khách hàng */
+    public Page<SalesInvoiceResponse> listInvoicesByCustomer(Long customerId, Pageable pageable) {
+        return invoiceRepo.findByCustomerIdOrderByInvoiceDateDesc(customerId, pageable).map(DtoMapper::toResponse);
     }
 
     @Transactional

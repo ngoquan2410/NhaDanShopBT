@@ -1,6 +1,6 @@
-﻿﻿﻿﻿import { useState, useRef } from 'react'
+﻿import { useState, useRef } from 'react'
 import { useReceipts, useReceiptMutations } from '../../hooks/useReceipts'
-import { useProducts } from '../../hooks/useProducts'
+import { useProducts, useVariants } from '../../hooks/useProducts'
 import { useSort } from '../../hooks/useSort'
 import { receiptService } from '../../services/receiptService'
 import { comboService } from '../../services/comboService'
@@ -24,13 +24,187 @@ function Modal({ title, onClose, children }) {
   )
 }
 
+// ── VariantReceiptRow: 1 dòng nhập hàng với dropdown variant + piecesOverride ──
+function VariantReceiptRow({ idx, item, products, onSet, onRemove }) {
+  const product   = products.find(pr => String(pr.id) === String(item.productId))
+  // Lấy variants của SP đang chọn
+  const { data: variants = [] } = useVariants(product?.id)
+  const hasMultiVariant = variants.length > 1
+
+  // Khi chọn SP → auto chọn default variant, pre-fill importUnit + piecesOverride
+  const handleProductChange = (productId) => {
+    onSet(idx, 'productId', productId)
+    onSet(idx, 'variantId', '')
+    onSet(idx, 'importUnit', '')
+    onSet(idx, 'piecesOverride', '')
+  }
+
+  // Khi chọn variant → pre-fill importUnit và piecesOverride từ variant
+  const handleVariantChange = (variantId) => {
+    const v = variants.find(v => String(v.id) === String(variantId))
+    onSet(idx, 'variantId', variantId)
+    if (v) {
+      onSet(idx, 'importUnit', v.importUnit || '')
+      onSet(idx, 'piecesOverride', v.piecesPerUnit > 1 ? String(v.piecesPerUnit) : '')
+    }
+  }
+
+  // Resolve variant hiện tại để hiển thị thông tin
+  const selectedVariant = variants.find(v => String(v.id) === String(item.variantId))
+    || variants.find(v => v.isDefault)
+
+  // Live preview: số bịch sẽ nhập + giá vốn/bịch
+  const qty        = Number(item.quantity) || 0
+  const unitCost   = Number(item.unitCost) || 0
+  const pieces     = Number(item.piecesOverride) || selectedVariant?.piecesPerUnit || 1
+  const importUnit = item.importUnit || selectedVariant?.importUnit || ''
+  const sellUnit   = selectedVariant?.sellUnit || 'cái'
+  const isGop      = pieces > 1
+  const retailQty  = qty * pieces
+  const costPerRetail = isGop && unitCost > 0 ? (unitCost / pieces) : unitCost
+  const disc       = Number(item.discountPercent) || 0
+  const afterDisc  = qty * unitCost * (1 - disc / 100)
+
+  return (
+    <div className="border border-gray-100 rounded-xl p-3 mb-3 bg-gray-50 space-y-2">
+      {/* Row 1: SP + Variant */}
+      <div className="flex gap-2 items-end flex-wrap">
+        <div className="flex-1 min-w-[200px]">
+          {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Sản phẩm *</label>}
+          <select value={item.productId} onChange={e => handleProductChange(e.target.value)}
+            required
+            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+            <option value="">-- Chọn sản phẩm --</option>
+            {products.filter(pr => pr.productType !== 'COMBO').map(pr => (
+              <option key={pr.id} value={pr.id}>{pr.code} — {pr.name}</option>
+            ))}
+          </select>
+        </div>
+        {/* Variant dropdown — hiện khi có nhiều variant */}
+        {product && hasMultiVariant && (
+          <div className="w-48">
+            {idx === 0 && <label className="block text-xs text-purple-600 mb-1 font-medium">📦 Biến thể *</label>}
+            <select value={item.variantId || ''}
+              onChange={e => handleVariantChange(e.target.value)}
+              className="w-full border-2 border-purple-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 bg-purple-50">
+              <option value="">-- Chọn biến thể --</option>
+              {variants.map(v => (
+                <option key={v.id} value={v.id}>
+                  {v.variantCode} ({v.sellUnit}){v.isDefault ? ' ⭐' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {/* Nếu chỉ có 1 variant: hiện badge */}
+        {product && !hasMultiVariant && selectedVariant && (
+          <div className="pb-1">
+            <span className="text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded-full">
+              {selectedVariant.sellUnit}
+            </span>
+          </div>
+        )}
+        <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600 pb-1 text-xl leading-none">×</button>
+      </div>
+
+      {/* Row 2: Số lượng + Giá + CK + ĐV nhập + Số bịch/ĐV + HSD */}
+      <div className="flex gap-2 items-end flex-wrap">
+        <div className="w-24">
+          <label className="block text-xs text-gray-500 mb-1">
+            SL <span className="text-gray-400">({importUnit || 'ĐV nhập'})</span>
+          </label>
+          <input type="number" min={1} value={item.quantity}
+            onChange={e => onSet(idx, 'quantity', e.target.value)}
+            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+        </div>
+        <div className="w-32">
+          <label className="block text-xs text-gray-500 mb-1">
+            Giá/{importUnit || 'ĐV'} (₫)
+          </label>
+          <input type="number" min={0} step={100} value={item.unitCost}
+            onChange={e => onSet(idx, 'unitCost', e.target.value)}
+            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+        </div>
+        <div className="w-20">
+          <label className="block text-xs text-gray-500 mb-1">CK %</label>
+          <input type="number" min={0} max={100} step={0.1} value={item.discountPercent}
+            onChange={e => onSet(idx, 'discountPercent', e.target.value)}
+            placeholder="0"
+            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+        </div>
+        <div className="w-24">
+          <label className="block text-xs text-gray-500 mb-1">ĐV nhập</label>
+          <input value={item.importUnit || importUnit}
+            onChange={e => onSet(idx, 'importUnit', e.target.value)}
+            placeholder={importUnit || 'kg, hộp...'}
+            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+        </div>
+        <div className="w-28">
+          <label className="block text-xs text-blue-600 mb-1 font-medium">
+            {sellUnit}/{importUnit || 'ĐV'} lần này
+          </label>
+          <input type="number" min={1} value={item.piecesOverride}
+            onChange={e => onSet(idx, 'piecesOverride', e.target.value)}
+            placeholder={String(selectedVariant?.piecesPerUnit || 1)}
+            className="w-full border-2 border-blue-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-blue-50"
+            title="Số đơn vị bán lẻ / 1 đơn vị nhập lần này. Để trống = dùng gợi ý mặc định của biến thể." />
+        </div>
+        <div className="w-32">
+          <label className="block text-xs text-gray-500 mb-1">HSD <span className="text-gray-400">(ghi đè)</span></label>
+          <input type="date" value={item.expiryDateOverride || ''}
+            onChange={e => onSet(idx, 'expiryDateOverride', e.target.value || null)}
+            className="w-full border rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-green-500"
+            title="Để trống → tự tính từ số ngày HSD của biến thể" />
+        </div>
+      </div>
+
+      {/* Live preview */}
+      {product && qty > 0 && unitCost > 0 && (
+        <div className={`rounded-lg px-3 py-2 text-xs flex flex-wrap gap-x-4 gap-y-1 ${
+          isGop ? 'bg-blue-50 border border-blue-200 text-blue-800'
+                : 'bg-green-50 border border-green-200 text-green-800'
+        }`}>
+          <span className="font-semibold">
+            {isGop ? '🔀 GỘP' : '📦 ATOMIC'}
+          </span>
+          <span>
+            {qty} {importUnit || 'ĐV'} × {pieces} {sellUnit} = <b>{retailQty} {sellUnit}</b> vào kho
+          </span>
+          <span>
+            Giá vốn/<b>{sellUnit}</b>: <b className="text-green-700">{Math.round(costPerRetail).toLocaleString('vi-VN')} ₫</b>
+          </span>
+          {disc > 0 && (
+            <span className="text-amber-700">
+              Sau CK {disc}%: {Math.round(afterDisc).toLocaleString('vi-VN')} ₫
+            </span>
+          )}
+          {selectedVariant && (
+            <span className="text-gray-500">
+              Tồn hiện tại: {selectedVariant.stockQty} {sellUnit}
+            </span>
+          )}
+        </div>
+      )}
+      {/* Warning khi chưa chọn variant (multi-variant product) */}
+      {product && hasMultiVariant && !item.variantId && (
+        <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">
+          ⚠️ Vui lòng chọn biến thể — SP này có {variants.length} biến thể (VD: 200g / 500g)
+        </p>
+      )}
+    </div>
+  )
+}
+
 function ReceiptForm({ products, onSubmit, loading }) {
   const [supplierName, setSupplierName] = useState('')
   const [supplierId, setSupplierId] = useState(null)
   const [note, setNote] = useState('')
   const [shippingFee, setShippingFee] = useState(0)
   const [vatPercent, setVatPercent] = useState(0)
-  const [items, setItems] = useState([{ productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
+  const [items, setItems] = useState([{
+    productId: '', variantId: '', quantity: 1, unitCost: 0,
+    discountPercent: 0, piecesOverride: '', importUnit: '', expiryDateOverride: null
+  }])
   const [comboItems, setComboItems] = useState([])
 
   const { data: suppliers = [] } = useQuery({
@@ -46,7 +220,10 @@ function ReceiptForm({ products, onSubmit, loading }) {
   })
   const activeCombos = combos.filter(c => c.active)
 
-  const addItem = () => setItems(i => [...i, { productId: '', quantity: 1, unitCost: 0, discountPercent: 0 }])
+  const addItem = () => setItems(i => [...i, {
+    productId: '', variantId: '', quantity: 1, unitCost: 0,
+    discountPercent: 0, piecesOverride: '', importUnit: '', expiryDateOverride: null
+  }])
   const removeItem = (idx) => setItems(i => i.filter((_, j) => j !== idx))
   const setItem = (idx, key, val) =>
     setItems(i => i.map((it, j) => j === idx ? { ...it, [key]: val } : it))
@@ -68,11 +245,13 @@ function ReceiptForm({ products, onSubmit, loading }) {
       shippingFee:  Number(shippingFee),
       vatPercent:   Number(vatPercent) || 0,
       items: validItems.map(it => ({
-        productId:       Number(it.productId),
-        quantity:        Number(it.quantity),
-        unitCost:        Number(it.unitCost),
-        discountPercent: Number(it.discountPercent) || 0,
-        variantId:       null,
+        productId:          Number(it.productId),
+        quantity:           Number(it.quantity),
+        unitCost:           Number(it.unitCost),
+        discountPercent:    Number(it.discountPercent) || 0,
+        variantId:          it.variantId ? Number(it.variantId) : null,
+        importUnit:         it.importUnit || null,
+        piecesOverride:     it.piecesOverride ? Number(it.piecesOverride) : null,
         expiryDateOverride: it.expiryDateOverride || null,
       })),
       comboItems: validCombos.map(it => ({
@@ -162,61 +341,16 @@ function ReceiptForm({ products, onSubmit, loading }) {
           <button type="button" onClick={addItem}
             className="text-green-600 hover:text-green-700 text-sm font-medium">+ Thêm dòng</button>
         </div>
-        {items.map((item, idx) => {
-          const p = products.find(pr => String(pr.id) === String(item.productId))
-          return (
-            <div key={idx} className="flex gap-2 mb-2 items-end flex-wrap">
-              <div className="flex-1 min-w-[180px]">
-                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Sản phẩm *</label>}
-                <select value={item.productId}
-                  onChange={e => setItem(idx, 'productId', e.target.value)}
-                  required className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                  <option value="">-- Chọn sản phẩm --</option>
-                  {products.filter(pr => pr.productType !== 'COMBO').map(pr => (
-                    <option key={pr.id} value={pr.id}>{pr.code} - {pr.name}</option>
-                  ))}
-                </select>
-                {p && (
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Variant tự động — điền K/L/M trong Excel để chọn cụ thể
-                  </p>
-                )}
-              </div>
-              <div className="w-24">
-                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">So luong</label>}
-                <input type="number" min={1} value={item.quantity} onChange={e => setItem(idx, 'quantity', e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-              </div>
-              <div className="w-32">
-                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Gia nhap (d)</label>}
-                <input type="number" min={0} step={100} value={item.unitCost} onChange={e => setItem(idx, 'unitCost', e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-              </div>
-              <div className="w-24">
-                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">CK %</label>}
-                <div className="relative">
-                  <input type="number" min={0} max={100} step={0.1} value={item.discountPercent} onChange={e => setItem(idx, 'discountPercent', e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 pr-6" placeholder="0" />
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
-                </div>
-              </div>
-              <div className="w-32">
-                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Ngày HSD <span className="text-gray-400">(ghi đè)</span></label>}
-                <input type="date" value={item.expiryDateOverride || ''}
-                  onChange={e => setItem(idx, 'expiryDateOverride', e.target.value || null)}
-                  className="w-full border rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-green-500"
-                  title="Để trống → tự tính từ số ngày HSD của variant" />
-              </div>
-              <div className="w-28 text-right pb-2">
-                {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Sau CK</label>}
-                <span className={`text-xs font-semibold ${Number(item.discountPercent) > 0 ? 'text-green-600' : 'text-gray-500'}`}>
-                  {(Number(item.quantity) * Number(item.unitCost) * (1 - (Number(item.discountPercent) || 0) / 100)).toLocaleString('vi-VN')} d
-                </span>
-              </div>
-              <button type="button" onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-700 pb-2 text-lg">&times;</button>
-            </div>
-          )
-        })}
+        {items.map((item, idx) => (
+          <VariantReceiptRow
+            key={idx}
+            idx={idx}
+            item={item}
+            products={products}
+            onSet={setItem}
+            onRemove={() => removeItem(idx)}
+          />
+        ))}
 
         {/* Summary */}
         <div className="mt-4 bg-green-50 rounded-lg p-3 space-y-1.5 text-sm">
@@ -662,7 +796,7 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
               </div>
             ) : (
               <button onClick={handleImport}
- cho nhungwex sa                disabled={(!supplierId && !supplierName.trim()) || importing}
+                disabled={(!supplierId && !supplierName.trim()) || importing}
                 className="flex-1 py-2.5 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2">
                 {importing
                   ? <><span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"/>Đang tạo phiếu...</>
