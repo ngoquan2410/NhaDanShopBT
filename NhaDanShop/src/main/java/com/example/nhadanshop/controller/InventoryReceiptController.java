@@ -3,6 +3,7 @@ package com.example.nhadanshop.controller;
 import com.example.nhadanshop.dto.ExcelPreviewResponse;
 import com.example.nhadanshop.dto.InventoryReceiptRequest;
 import com.example.nhadanshop.dto.InventoryReceiptResponse;
+import com.example.nhadanshop.dto.ReceiptMetaUpdateRequest;
 import com.example.nhadanshop.service.ExcelReceiptImportService;
 import com.example.nhadanshop.service.ExcelTemplateService;
 import com.example.nhadanshop.service.InventoryReceiptService;
@@ -70,6 +71,25 @@ public class InventoryReceiptController {
     @ResponseStatus(HttpStatus.CREATED)
     public InventoryReceiptResponse create(@Valid @RequestBody InventoryReceiptRequest req) {
         return receiptService.createReceipt(req);
+    }
+
+    /**
+     * PATCH /api/receipts/{id}/meta
+     * Chỉ cho sửa metadata: ghi chú, nhà cung cấp.
+     * Không ảnh hưởng tồn kho hay giá vốn.
+     */
+    @PatchMapping("/{id}/meta")
+    public InventoryReceiptResponse updateMeta(
+            @PathVariable Long id,
+            @Valid @RequestBody ReceiptMetaUpdateRequest req) {
+        return receiptService.updateReceiptMeta(id, req);
+    }
+
+    /** DELETE /api/receipts/{id} */
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable Long id) {
+        receiptService.deleteReceipt(id);
     }
 
     /**

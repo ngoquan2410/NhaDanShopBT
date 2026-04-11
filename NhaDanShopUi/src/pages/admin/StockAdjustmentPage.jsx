@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { stockAdjustmentService } from '../../services/stockAdjustmentService'
 import { productService } from '../../services/productService'
 import toast from 'react-hot-toast'
+import { AdminTable, AdminPageHeader, AdminCard } from '../../components/admin/AdminTable'
 import dayjs from 'dayjs'
 
 const REASONS = [
@@ -150,79 +151,71 @@ export default function StockAdjustmentPage() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-gray-800">⚖️ Điều chỉnh tồn kho</h2>
-        <button onClick={() => setShowCreate(true)}
-          className="bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-orange-600">
-          + Tạo phiếu kiểm kê
-        </button>
-      </div>
+      <AdminPageHeader
+        title="⚖️ Điều chỉnh tồn kho"
+        actions={
+          <button onClick={() => setShowCreate(true)}
+            className="bg-orange-500 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-orange-600">
+            + Tạo phiếu kiểm kê
+          </button>
+        }
+      />
 
-      {/* Danh sách phiếu */}
-      <div className="bg-white rounded-xl shadow overflow-hidden">
-        {isLoading ? (
-          <div className="p-8 text-center text-gray-400">Đang tải...</div>
-        ) : adjs.length === 0 ? (
-          <div className="p-8 text-center text-gray-400">
-            Chưa có phiếu điều chỉnh nào.{' '}
-            <button onClick={() => setShowCreate(true)} className="text-orange-500 underline">Tạo phi��u mới</button>
-          </div>
-        ) : (
-          <>
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600">
-                <tr>
-                  <th className="px-4 py-3 text-left">Số phiếu</th>
-                  <th className="px-4 py-3 text-left">Ngày</th>
-                  <th className="px-4 py-3 text-left">Lý do</th>
-                  <th className="px-4 py-3 text-left">Ghi chú</th>
-                  <th className="px-4 py-3 text-center">TT</th>
-                  <th className="px-4 py-3 text-center">Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {adjs.map((adj, i) => (
-                  <tr key={adj.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                    <td className="px-4 py-2">
-                      <button onClick={() => openDetail(adj)}
-                        className="text-orange-600 hover:underline font-mono font-semibold text-xs">
-                        {adj.adjNo}
-                      </button>
-                    </td>
-                    <td className="px-4 py-2 text-gray-600 text-xs">
-                      {dayjs(adj.adjDate).format('DD/MM/YYYY HH:mm')}
-                    </td>
-                    <td className="px-4 py-2">{REASON_LABEL[adj.reason] || adj.reason}</td>
-                    <td className="px-4 py-2 text-gray-500 max-w-[200px] truncate">{adj.note || '—'}</td>
-                    <td className="px-4 py-2 text-center">{statusBadge(adj.status)}</td>
-                    <td className="px-4 py-2 text-center space-x-2">
-                      {adj.status === 'DRAFT' && (
-                        <>
-                          <button onClick={() => handleConfirm(adj)}
-                            className="text-green-600 hover:underline text-xs font-medium">Xác nhận</button>
-                          <button onClick={() => handleDelete(adj)}
-                            className="text-red-500 hover:underline text-xs font-medium">Xóa</button>
-                        </>
-                      )}
-                      <button onClick={() => openDetail(adj)}
-                        className="text-blue-500 hover:underline text-xs">Xem</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {/* Pagination */}
-            <div className="flex justify-center items-center gap-3 py-3 border-t text-sm">
-              <button disabled={page === 0} onClick={() => setPage(p => p - 1)}
-                className="px-3 py-1 border rounded disabled:opacity-40">← Trước</button>
-              <span className="text-gray-500">Trang {page + 1}/{totalPages}</span>
-              <button disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}
-                className="px-3 py-1 border rounded disabled:opacity-40">Sau →</button>
+      <AdminCard>
+        <AdminTable
+          loading={isLoading}
+          rows={adjs}
+          emptyText="Chưa có phiếu điều chỉnh nào"
+          columns={[
+            { key: 'adjNo', label: 'Số phiếu', tdClassName: 'font-mono',
+              render: adj => <button onClick={() => openDetail(adj)} className="text-orange-600 hover:underline font-semibold text-xs">{adj.adjNo}</button> },
+            { key: 'adjDate', label: 'Ngày', tdClassName: 'text-gray-600 text-xs',
+              render: adj => dayjs(adj.adjDate).format('DD/MM/YYYY HH:mm') },
+            { key: 'reason', label: 'Lý do', render: adj => REASON_LABEL[adj.reason] || adj.reason },
+            { key: 'note', label: 'Ghi chú', tdClassName: 'text-gray-500 max-w-[180px] truncate', render: adj => adj.note || '—' },
+            { key: 'status', label: 'Trạng thái', thClassName: 'text-center', tdClassName: 'text-center',
+              render: adj => statusBadge(adj.status) },
+            { key: 'actions', label: 'Thao tác', isAction: true, thClassName: 'text-center', tdClassName: 'text-center',
+              render: adj => (
+                <div className="flex items-center justify-center gap-1.5">
+                  {adj.status === 'DRAFT' && <>
+                    <button onClick={() => handleConfirm(adj)} className="text-green-600 hover:underline text-xs font-medium px-1.5 py-1 rounded hover:bg-green-50">✅ XN</button>
+                    <button onClick={() => handleDelete(adj)} className="text-red-500 hover:underline text-xs font-medium px-1.5 py-1 rounded hover:bg-red-50">🗑️</button>
+                  </>}
+                  <button onClick={() => openDetail(adj)} className="text-blue-500 hover:underline text-xs px-1.5 py-1 rounded hover:bg-blue-50">👁️</button>
+                </div>
+              )},
+          ]}
+          mobileCard={adj => (
+            <div>
+              <div className="flex items-start justify-between mb-1.5">
+                <div>
+                  <button onClick={() => openDetail(adj)} className="font-mono font-bold text-orange-600 text-sm hover:underline">{adj.adjNo}</button>
+                  <p className="text-xs text-gray-500 mt-0.5">{dayjs(adj.adjDate).format('DD/MM/YYYY HH:mm')}</p>
+                </div>
+                {statusBadge(adj.status)}
+              </div>
+              <p className="text-sm text-gray-700 mb-0.5">{REASON_LABEL[adj.reason] || adj.reason}</p>
+              {adj.note && <p className="text-xs text-gray-400 mb-2">{adj.note}</p>}
+              <div className="flex gap-2 pt-2 border-t border-gray-100">
+                <button onClick={() => openDetail(adj)}
+                  className="flex-1 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 py-1.5 rounded-lg font-medium text-center">👁️ Xem</button>
+                {adj.status === 'DRAFT' && <>
+                  <button onClick={() => handleConfirm(adj)}
+                    className="flex-1 text-xs bg-green-50 text-green-600 hover:bg-green-100 py-1.5 rounded-lg font-medium text-center">✅ Xác nhận</button>
+                  <button onClick={() => handleDelete(adj)}
+                    className="flex-1 text-xs bg-red-50 text-red-600 hover:bg-red-100 py-1.5 rounded-lg font-medium text-center">🗑️ Xóa</button>
+                </>}
+              </div>
             </div>
-          </>
-        )}
-      </div>
+          )}
+        />
+        <div className="flex justify-center items-center gap-3 pt-3 border-t text-sm">
+          <button disabled={page===0} onClick={() => setPage(p => p-1)} className="px-3 py-1.5 border rounded-lg disabled:opacity-40 hover:bg-gray-100">← Trước</button>
+          <span className="text-gray-500">Trang {page+1}/{totalPages}</span>
+          <button disabled={page>=totalPages-1} onClick={() => setPage(p => p+1)} className="px-3 py-1.5 border rounded-lg disabled:opacity-40 hover:bg-gray-100">Sau →</button>
+        </div>
+      </AdminCard>
 
       {/* Modal tạo phiếu */}
       {showCreate && (

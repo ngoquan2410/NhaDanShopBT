@@ -9,13 +9,14 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
-// Sprint 2: Customer FK
-
 @Getter
 @Setter
 @Entity
 @Table(name = "sales_invoices")
 public class SalesInvoice {
+
+    /** Trạng thái hóa đơn */
+    public enum Status { COMPLETED, CANCELLED }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -30,7 +31,6 @@ public class SalesInvoice {
     @Column(name = "customer_name", length = 150)
     private String customerName;
 
-    /** FK → customers (Sprint 2). Null = khách vãng lai. */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "customer_id")
     private Customer customer;
@@ -38,22 +38,33 @@ public class SalesInvoice {
     @Column(name = "note", length = 500)
     private String note;
 
-    /** Tổng tiền trước khi áp dụng khuyến mãi */
     @Column(name = "total_amount", nullable = false, precision = 18, scale = 2)
     private BigDecimal totalAmount = BigDecimal.ZERO;
 
-    /** ID chương trình khuyến mãi đã áp dụng (nullable) */
     @Column(name = "promotion_id")
     private Long promotionId;
 
-    /** Tên chương trình KM (snapshot, tránh mất data khi KM bị xóa) */
     @Column(name = "promotion_name", length = 200)
     private String promotionName;
 
-    /** Số tiền được giảm từ KM (= totalAmount - finalAmount) */
     @Column(name = "discount_amount", nullable = false, precision = 18, scale = 2)
     private BigDecimal discountAmount = BigDecimal.ZERO;
 
+    // ── Soft Cancel fields ────────────────────────────────────────────────────
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private Status status = Status.COMPLETED;
+
+    @Column(name = "cancelled_at")
+    private LocalDateTime cancelledAt;
+
+    @Column(name = "cancelled_by", length = 100)
+    private String cancelledBy;
+
+    @Column(name = "cancel_reason", length = 500)
+    private String cancelReason;
+
+    // ── Audit fields ──────────────────────────────────────────────────────────
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -67,17 +78,18 @@ public class SalesInvoice {
     @OneToMany(mappedBy = "invoice", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<SalesInvoiceItem> items = new ArrayList<>();
 
+    public boolean isCancelled() { return Status.CANCELLED.equals(status); }
+
     @PrePersist
     void prePersist() {
         LocalDateTime now = LocalDateTime.now();
         if (invoiceDate == null) invoiceDate = now;
-        if (createdAt == null) createdAt = now;
-        if (updatedAt == null) updatedAt = now;
+        if (createdAt  == null) createdAt  = now;
+        if (updatedAt  == null) updatedAt  = now;
         if (totalAmount == null) totalAmount = BigDecimal.ZERO;
+        if (status == null) status = Status.COMPLETED;
     }
 
     @PreUpdate
-    void preUpdate() {
-        updatedAt = LocalDateTime.now();
-    }
+    void preUpdate() { updatedAt = LocalDateTime.now(); }
 }

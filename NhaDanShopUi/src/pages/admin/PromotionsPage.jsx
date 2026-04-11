@@ -127,27 +127,37 @@ function PromotionForm({ initial, categories, products, onSubmit, loading, onClo
             {form.type === 'PERCENT_DISCOUNT' ? 'Giảm (%)' :
              form.type === 'FIXED_DISCOUNT'   ? 'Giảm (₫)' : 'Giá trị'}
           </label>
-          <input type="number" min={0} max={form.type === 'PERCENT_DISCOUNT' ? 100 : undefined}
-            step={form.type === 'PERCENT_DISCOUNT' ? 0.1 : 100}
-            value={form.discountValue} onChange={e => set('discountValue', e.target.value)}
-            placeholder={form.type === 'PERCENT_DISCOUNT' ? '10' : '50000'}
-            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
+          {form.type === 'PERCENT_DISCOUNT' ? (
+            <input type="text" inputMode="decimal"
+              value={form.discountValue} onChange={e => { const r=e.target.value.replace(/[^\d.]/g,''); set('discountValue',r) }}
+              placeholder="10"
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
+          ) : (
+            <input type="text" inputMode="numeric"
+              value={form.discountValue === '' || form.discountValue === 0 ? '' : Number(form.discountValue).toLocaleString('vi-VN')}
+              onChange={e => { const r=e.target.value.replace(/\./g,'').replace(/,/g,''); if(r===''||/^\d+$/.test(r)) set('discountValue',r===''?0:Number(r)) }}
+              placeholder="50.000"
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
+          )}
         </div>
 
         {/* Đơn hàng tối thiểu */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Đơn hàng tối thiểu (₫)</label>
-          <input type="number" min={0} step={1000} value={form.minOrderValue}
-            onChange={e => set('minOrderValue', e.target.value)}
+          <input type="text" inputMode="numeric"
+            value={form.minOrderValue === '' || form.minOrderValue === 0 ? '' : Number(form.minOrderValue).toLocaleString('vi-VN')}
+            onChange={e => { const r=e.target.value.replace(/\./g,'').replace(/,/g,''); if(r===''||/^\d+$/.test(r)) set('minOrderValue',r===''?0:Number(r)) }}
+            placeholder="0"
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
         </div>
 
-        {/* Giảm tối đa (với PERCENT_DISCOUNT) */}
+        {/* Giảm tối đa */}
         {form.type === 'PERCENT_DISCOUNT' && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Giảm tối đa (₫, để trống = không giới hạn)</label>
-            <input type="number" min={0} step={1000} value={form.maxDiscount}
-              onChange={e => set('maxDiscount', e.target.value)}
+            <label className="block text-sm font-medium text-gray-700 mb-1">Giảm tối đa (₫)</label>
+            <input type="text" inputMode="numeric"
+              value={form.maxDiscount === '' || form.maxDiscount === 0 ? '' : Number(form.maxDiscount).toLocaleString('vi-VN')}
+              onChange={e => { const r=e.target.value.replace(/\./g,'').replace(/,/g,''); if(r===''||/^\d+$/.test(r)) set('maxDiscount',r===''?'':Number(r)) }}
               placeholder="Không giới hạn"
               className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
           </div>
@@ -421,21 +431,18 @@ export default function PromotionsPage() {
   })
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-800">🎉 Quản lý Khuyến mãi</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Tạo & quản lý các chương trình ưu đãi cho khách hàng</p>
-        </div>
+      <div className="flex items-center justify-between min-w-0 gap-3">
+        <h2 className="text-lg sm:text-2xl font-bold text-gray-800 truncate">🎉 Quản lý Khuyến mãi</h2>
         <button onClick={() => setShowCreate(true)}
-          className="bg-amber-500 text-white px-5 py-2.5 rounded-lg hover:bg-amber-600 font-semibold flex items-center gap-2 shadow">
+          className="flex-shrink-0 bg-amber-500 text-white px-3 sm:px-5 py-2 rounded-lg hover:bg-amber-600 font-semibold flex items-center gap-1.5 shadow text-sm">
           + Tạo khuyến mãi
         </button>
       </div>
 
-      {/* Stats cards */}
-      <div className="grid grid-cols-4 gap-4">
+      {/* Stats cards — 2 cols mobile, 4 cols desktop */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Tổng chương trình', value: data?.totalElements ?? '...', color: 'blue', icon: '📋' },
           { label: 'Đang chạy',        value: promotions.filter(p => p.currentlyActive).length, color: 'green', icon: '▶️' },

@@ -14,13 +14,29 @@ export const useInvoiceMutations = () => {
   const invalidate = () => qc.invalidateQueries(['invoices'])
 
   const create = useMutation(invoiceService.create, {
-    onSuccess: () => { invalidate(); toast.success('Đã tạo hóa đơn bán') },
+    onSuccess: () => { invalidate() },
     onError: (e) => toast.error(e?.response?.data?.message || 'Lỗi tạo hóa đơn'),
   })
+
+  /** Soft Cancel — PATCH /api/invoices/{id}/cancel */
+  const cancel = useMutation(
+    ({ id, reason }) => invoiceService.cancel(id, reason),
+    {
+      onSuccess: (data) => {
+        invalidate()
+        toast.success(`✅ Đã hủy hóa đơn ${data.invoiceNo}`)
+      },
+      onError: (e) => {
+        const msg = e?.response?.data?.message || e?.response?.data?.detail || 'Lỗi hủy hóa đơn'
+        toast.error(`❌ ${msg}`)
+      },
+    }
+  )
+
   const remove = useMutation(invoiceService.delete, {
     onSuccess: () => { invalidate(); toast.success('Đã xóa hóa đơn') },
-    onError: () => toast.error('Lỗi khi xóa'),
+    onError: (e) => toast.error(e?.response?.data?.message || 'Lỗi khi xóa'),
   })
 
-  return { create, remove }
+  return { create, cancel, remove }
 }

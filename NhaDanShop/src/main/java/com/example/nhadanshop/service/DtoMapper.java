@@ -67,12 +67,17 @@ public final class DtoMapper {
     public static SalesInvoiceResponse toResponse(SalesInvoice inv) {
         BigDecimal discountAmount = inv.getDiscountAmount() != null ? inv.getDiscountAmount() : BigDecimal.ZERO;
         BigDecimal finalAmount    = inv.getTotalAmount().subtract(discountAmount);
-        BigDecimal grossProfit = inv.getItems().stream()
-                .map(i -> i.getUnitPrice()
-                        .subtract(i.getUnitCostSnapshot())
-                        .multiply(BigDecimal.valueOf(i.getQuantity())))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalProfit = grossProfit.subtract(discountAmount);
+
+        // Lợi nhuận = 0 nếu hóa đơn bị hủy
+        BigDecimal totalProfit = BigDecimal.ZERO;
+        if (!inv.isCancelled()) {
+            BigDecimal grossProfit = inv.getItems().stream()
+                    .map(i -> i.getUnitPrice()
+                            .subtract(i.getUnitCostSnapshot())
+                            .multiply(BigDecimal.valueOf(i.getQuantity())))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            totalProfit = grossProfit.subtract(discountAmount);
+        }
 
         return new SalesInvoiceResponse(
                 inv.getId(), inv.getInvoiceNo(), inv.getInvoiceDate(),
@@ -83,7 +88,10 @@ public final class DtoMapper {
                 inv.getPromotionName(), totalProfit,
                 inv.getCreatedBy() != null ? inv.getCreatedBy().getUsername() : null,
                 inv.getItems().stream().map(DtoMapper::toResponse).collect(Collectors.toList()),
-                inv.getCreatedAt(), inv.getUpdatedAt()
+                inv.getCreatedAt(), inv.getUpdatedAt(),
+                // cancel fields
+                inv.getStatus() != null ? inv.getStatus().name() : "COMPLETED",
+                inv.getCancelledAt(), inv.getCancelledBy(), inv.getCancelReason()
         );
     }
 

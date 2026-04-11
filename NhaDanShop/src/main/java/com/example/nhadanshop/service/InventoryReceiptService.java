@@ -292,6 +292,29 @@ public class InventoryReceiptService {
         return DtoMapper.toResponse(r);
     }
 
+    /**
+     * Chỉ cho sửa metadata: ghi chú và nhà cung cấp.
+     * Không thay đổi tồn kho, giá vốn, hay bất kỳ dữ liệu nghiệp vụ nào khác.
+     */
+    @Transactional
+    public InventoryReceiptResponse updateReceiptMeta(Long id, com.example.nhadanshop.dto.ReceiptMetaUpdateRequest req) {
+        InventoryReceipt receipt = receiptRepo.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy phiếu nhập ID: " + id));
+        // Chỉ update note và supplier — không được sửa items/amount
+        if (req.note() != null) {
+            receipt.setNote(req.note().isBlank() ? null : req.note().trim());
+        }
+        if (req.supplierId() != null) {
+            Supplier supplier = supplierRepository.findById(req.supplierId())
+                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy NCC ID: " + req.supplierId()));
+            receipt.setSupplier(supplier);
+            receipt.setSupplierName(supplier.getName());
+        } else if (req.supplierName() != null) {
+            receipt.setSupplierName(req.supplierName().isBlank() ? null : req.supplierName().trim());
+        }
+        return DtoMapper.toResponse(receiptRepo.save(receipt));
+    }
+
     public Page<InventoryReceiptResponse> listReceipts(Pageable pageable) {
         return receiptRepo.findAllByOrderByReceiptDateDesc(pageable).map(DtoMapper::toResponse);
     }
@@ -300,6 +323,40 @@ public class InventoryReceiptService {
             LocalDateTime from, LocalDateTime to, Pageable pageable) {
         return receiptRepo.findByReceiptDateBetweenOrderByReceiptDateDesc(from, to, pageable)
                 .map(DtoMapper::toResponse);
+    }
+
+    /**
+     * Xóa phiếu nhập kho.
+     * - Nếu lô hàng đã bán một phần (remainingQty < importQty) → KHÔNG cho xóa.
+     * - Nếu chưa bán → xóa batch, rollback stockQty variant, xóa phiếu.
+     */
+    @Transactional
+    public void deleteReceipt(Long id) {
+        InventoryReceipt receipt = receiptRepo.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy phiếu nhập ID: " + id));
+
+        List<ProductBatch> batches = batchRepo.findByReceiptIdOrderByExpiryDateAsc(id);
+
+        // Kiểm tra lô đã bán chưa
+        boolean hasSoldBatches = batches.stream()
+                .anyMatch(b -> b.getRemainingQty() < b.getImportQty());
+        if (hasSoldBatches) {
+            throw new IllegalStateException(
+                "Không thể xóa phiếu nhập — một số lô hàng đã được bán. " +
+                "Hãy tạo phiếu điều chỉnh tồn kho thay thế.");
+        }
+
+        // Rollback tồn kho variant
+        for (ProductBatch batch : batches) {
+            if (batch.getVariant() != null) {
+                ProductVariant v = batch.getVariant();
+                v.setStockQty(Math.max(0, v.getStockQty() - batch.getImportQty()));
+                variantRepo.save(v);
+            }
+            batchRepo.delete(batch);
+        }
+
+        receiptRepo.delete(receipt);
     }
 
     private String buildBatchCode(String receiptNo, String productCode) {

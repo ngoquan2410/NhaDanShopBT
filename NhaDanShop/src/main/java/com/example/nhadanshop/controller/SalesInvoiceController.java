@@ -55,6 +55,24 @@ public class SalesInvoiceController {
         return invoiceService.createInvoice(req);
     }
 
+    /**
+     * PATCH /api/invoices/{id}/cancel
+     * Soft Cancel: đánh trạng thái CANCELLED, hoàn tồn kho, ghi audit.
+     * Không xóa vật lý — hóa đơn vẫn còn trong lịch sử với badge "Đã hủy".
+     */
+    @PatchMapping("/{id}/cancel")
+    public SalesInvoiceResponse cancel(
+            @PathVariable Long id,
+            @RequestBody(required = false) @Valid com.example.nhadanshop.dto.CancelInvoiceRequest req) {
+        String actor = org.springframework.security.core.context.SecurityContextHolder
+                .getContext().getAuthentication() != null
+                ? org.springframework.security.core.context.SecurityContextHolder
+                    .getContext().getAuthentication().getName()
+                : "unknown";
+        String reason = req != null ? req.reason() : null;
+        return invoiceService.cancelInvoice(id, reason, actor);
+    }
+
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long id) {

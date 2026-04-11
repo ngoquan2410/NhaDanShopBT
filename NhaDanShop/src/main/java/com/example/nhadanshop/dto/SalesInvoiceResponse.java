@@ -9,20 +9,22 @@ public record SalesInvoiceResponse(
         String invoiceNo,
         LocalDateTime invoiceDate,
         String customerName,
-        /** FK → customers.id (Sprint 2). Null = khách vãng lai */
         Long customerId,
         String note,
-        /** Tổng tiền trước KM */
         BigDecimal totalAmount,
-        /** Số tiền được giảm từ KM */
         BigDecimal discountAmount,
-        /** Tổng tiền THỰC TẾ phải trả = totalAmount - discountAmount */
         BigDecimal finalAmount,
-        /** Tên chương trình KM đã áp dụng (null nếu không có) */
         String promotionName,
         BigDecimal totalProfit,
         String createdBy,
         List<SalesInvoiceItemResponse> items,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        // ── Soft Cancel ────────────────────────────────────────
+        String status,          // "COMPLETED" | "CANCELLED"
+        LocalDateTime cancelledAt,
+        String cancelledBy,
+        String cancelReason
 ) {}
+
+

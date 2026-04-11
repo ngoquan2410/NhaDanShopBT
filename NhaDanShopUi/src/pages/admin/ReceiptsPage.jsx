@@ -9,6 +9,7 @@ import { useQueryClient, useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import dayjs from 'dayjs'
 import BarcodeLabelPrinter from '../../components/BarcodeLabelPrinter'
+import { AdminTable, AdminPageHeader, AdminCard } from '../../components/admin/AdminTable'
 
 function Modal({ title, onClose, children }) {
   return (
@@ -108,65 +109,62 @@ function VariantReceiptRow({ idx, item, products, onSet, onRemove }) {
       </div>
 
       {/* Row 2: Số lượng + Giá + CK + ĐV nhập + Số bịch/ĐV + HSD */}
-      <div className="flex gap-2 items-end flex-wrap">
-        <div className="w-24">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-wrap gap-2 items-end">
+        <div>
           <label className="block text-xs text-gray-500 mb-1">
-            SL <span className="text-gray-400">({importUnit || 'ĐV nhập'})</span>
+            Số lượng <span className="text-gray-400">({importUnit || 'ĐV'})</span>
           </label>
-          <input type="number" min={1} value={item.quantity}
-            onChange={e => onSet(idx, 'quantity', e.target.value)}
+          <input type="text" inputMode="numeric" value={item.quantity}
+            onChange={e => { const r=e.target.value.replace(/\D/g,''); onSet(idx,'quantity',r||1) }}
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
         </div>
-        <div className="w-32">
+        <div>
           <label className="block text-xs text-gray-500 mb-1">
-            Giá/{importUnit || 'ĐV'} (₫)
+            Đơn giá (₫/{importUnit || 'ĐV'})
           </label>
-          <input type="number" min={0} step={100} value={item.unitCost}
-            onChange={e => onSet(idx, 'unitCost', e.target.value)}
+          <input type="text" inputMode="numeric"
+            value={item.unitCost === 0 || item.unitCost === '' ? '' : Number(item.unitCost).toLocaleString('vi-VN')}
+            placeholder="0"
+            onChange={e => {
+              const raw = e.target.value.replace(/\./g, '').replace(/,/g, '')
+              if (raw === '' || /^\d+$/.test(raw)) onSet(idx, 'unitCost', raw === '' ? 0 : Number(raw))
+            }}
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
         </div>
-        <div className="w-20">
-          <label className="block text-xs text-gray-500 mb-1">CK %</label>
-          <input type="number" min={0} max={100} step={0.1} value={item.discountPercent}
-            onChange={e => onSet(idx, 'discountPercent', e.target.value)}
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Chiết khấu %</label>
+          <input type="text" inputMode="decimal" value={item.discountPercent}
+            onChange={e => { const r=e.target.value.replace(/[^\d.]/g,''); onSet(idx,'discountPercent',r) }}
             placeholder="0"
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
         </div>
-        <div className="w-24">
-          <label className="block text-xs text-gray-500 mb-1">ĐV nhập</label>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">ĐV nhập kho</label>
           <input value={item.importUnit || importUnit}
             onChange={e => onSet(idx, 'importUnit', e.target.value)}
-            placeholder={importUnit || 'kg, hộp...'}
+            placeholder="kg, thùng..."
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
         </div>
-        <div className="w-28">
+        <div>
           <label className="block text-xs text-blue-600 mb-1 font-medium">
-            {sellUnit}/{importUnit || 'ĐV'} lần này
+            {sellUnit}/{importUnit || 'ĐV'}
           </label>
-          <input type="number" min={1} value={item.piecesOverride}
-            onChange={e => onSet(idx, 'piecesOverride', e.target.value)}
+          <input type="text" inputMode="numeric" value={item.piecesOverride}
+            onChange={e => { const r=e.target.value.replace(/\D/g,''); onSet(idx,'piecesOverride',r) }}
             placeholder={String(selectedVariant?.piecesPerUnit || 1)}
-            className="w-full border-2 border-blue-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-blue-50"
-            title="Số đơn vị bán lẻ / 1 đơn vị nhập lần này. Để trống = dùng gợi ý mặc định của biến thể." />
+            className="w-full border-2 border-blue-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-blue-50" />
         </div>
-        <div className="w-32">
-          <label className="block text-xs text-gray-500 mb-1">HSD <span className="text-gray-400">(ghi đè)</span></label>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Hạn sử dụng</label>
           <input type="date" value={item.expiryDateOverride || ''}
             onChange={e => onSet(idx, 'expiryDateOverride', e.target.value || null)}
-            className="w-full border rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-green-500"
-            title="Để trống → tự tính từ số ngày HSD của biến thể" />
+            className="w-full border rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-green-500" />
         </div>
       </div>
 
       {/* Live preview */}
       {product && qty > 0 && unitCost > 0 && (
-        <div className={`rounded-lg px-3 py-2 text-xs flex flex-wrap gap-x-4 gap-y-1 ${
-          isGop ? 'bg-blue-50 border border-blue-200 text-blue-800'
-                : 'bg-green-50 border border-green-200 text-green-800'
-        }`}>
-          <span className="font-semibold">
-            {isGop ? '🔀 GỘP' : '📦 ATOMIC'}
-          </span>
+        <div className={`rounded-lg px-3 py-2 text-xs flex flex-wrap gap-x-4 gap-y-1 bg-green-50 border border-green-200 text-green-800`}>
           <span>
             {qty} {importUnit || 'ĐV'} × {pieces} {sellUnit} = <b>{retailQty} {sellUnit}</b> vào kho
           </span>
@@ -314,10 +312,16 @@ function ReceiptForm({ products, onSubmit, loading }) {
             🚚 Phí vận chuyển (₫)
             <span className="ml-1 text-xs text-gray-400 font-normal">— chia đều vào giá vốn</span>
           </label>
-          <input type="number" min={0} step={1000} value={shippingFee}
-            onChange={e => setShippingFee(e.target.value)}
-            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-            placeholder="0" />
+          <input
+            type="text"
+            inputMode="numeric"
+            value={shippingFee === 0 || shippingFee === '' ? '' : Number(shippingFee).toLocaleString('vi-VN')}
+            placeholder="0"
+            onChange={e => {
+              const raw = e.target.value.replace(/\./g, '').replace(/,/g, '')
+              if (raw === '' || /^\d+$/.test(raw)) setShippingFee(raw === '' ? 0 : Number(raw))
+            }}
+            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -388,9 +392,6 @@ function ReceiptForm({ products, onSubmit, loading }) {
         <div className="flex items-center justify-between mb-2">
           <div>
             <h4 className="font-semibold text-gray-700">📦 Nhập theo Combo <span className="text-xs text-gray-400 font-normal">(tuỳ chọn)</span></h4>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Chọn combo → hệ thống tự expand thành phần, phân bổ chi phí theo tỷ lệ qty. Tồn kho ảo tự cập nhật sau khi nhập.
-            </p>
           </div>
           {activeCombos.length > 0 && (
             <button type="button" onClick={addComboItem}
@@ -465,7 +466,7 @@ function ReceiptForm({ products, onSubmit, loading }) {
 
         {comboItems.filter(c => c.comboId).length > 0 && (
           <div className="mt-1 bg-purple-50 border border-purple-100 rounded-lg p-2 text-xs text-purple-700">
-            💡 Chi phí combo được phân bổ đều vào từng SP thành phần. Phí ship + VAT phân bổ tiếp theo giá trị dòng.
+            💡 Chi phí combo được phân bổ đều vào từng SP thành phần.
           </div>
         )}
       </div>
@@ -580,8 +581,8 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
       <div className="flex gap-3">
         <div className="flex-1 bg-gradient-to-r from-green-600 to-green-700 rounded-xl p-4 flex items-center justify-between">
           <div className="text-white min-w-0">
-            <p className="font-bold text-sm">📥 Template Excel — 2 sheets</p>
-            <p className="text-green-200 text-xs mt-0.5">Sheet 1: SP Đơn (14 cột A–N) | Sheet 2: Hướng dẫn | Combo nhập qua form thủ công</p>
+            <p className="font-bold text-sm">📥 Template Excel nhập kho</p>
+            <p className="text-green-200 text-xs mt-0.5">Tải template · Điền dữ liệu · Upload để import</p>
           </div>
           <button onClick={handleDownload} disabled={downloading}
             className="bg-white text-green-700 font-bold px-3 py-2 rounded-lg text-xs shrink-0 disabled:opacity-70">
@@ -734,14 +735,17 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">🚚 Phí vận chuyển (₫)</label>
-                <input type="number" min={0} step={1000} value={shippingFee}
-                  onChange={e => setShippingFee(e.target.value)} placeholder="0"
+                <input type="text" inputMode="numeric"
+                  value={shippingFee === 0 || shippingFee === '' ? '' : Number(shippingFee).toLocaleString('vi-VN')}
+                  onChange={e => { const r=e.target.value.replace(/\./g,'').replace(/,/g,''); if(r===''||/^\d+$/.test(r)) setShippingFee(r===''?0:Number(r)) }}
+                  placeholder="0"
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">🧾 Thuế GTGT — VAT %</label>
-                <input type="number" min={0} max={100} step={0.1} value={vatPercent}
-                  onChange={e => setVatPercent(e.target.value)} placeholder="0"
+                <label className="block text-xs font-medium text-gray-700 mb-1">🧾 Thuế GTGT (VAT %)</label>
+                <input type="text" inputMode="decimal" value={vatPercent}
+                  onChange={e => { const r=e.target.value.replace(/[^\d.]/g,''); setVatPercent(r) }}
+                  placeholder="0"
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
               </div>
             </div>
@@ -819,6 +823,121 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
 }
 
 
+// ── EditMetaModal — Sửa ghi chú + NCC (không ảnh hưởng tồn kho) ─────────────
+function EditMetaModal({ receipt, onClose, onSave, saving }) {
+  const [note, setNote] = useState(receipt.note || '')
+  const [supplierName, setSupplierName] = useState(receipt.supplierName || '')
+  const [supplierId, setSupplierId] = useState(receipt.supplierId || null)
+  const [supplierSearch, setSupplierSearch] = useState('')
+  const [supplierResults, setSupplierResults] = useState([])
+  const searchTimer = useRef(null)
+
+  const handleSupplierSearch = (val) => {
+    setSupplierSearch(val)
+    setSupplierName(val)
+    setSupplierId(null)
+    clearTimeout(searchTimer.current)
+    if (!val.trim()) { setSupplierResults([]); return }
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const res = await supplierService.getAll({ q: val.trim() })
+        setSupplierResults((res.content || res).slice(0, 6))
+      } catch { setSupplierResults([]) }
+    }, 300)
+  }
+
+  const selectSupplier = (s) => {
+    setSupplierId(s.id)
+    setSupplierName(s.name)
+    setSupplierSearch('')
+    setSupplierResults([])
+  }
+
+  const handleSubmit = () => {
+    onSave({ note: note.trim() || null, supplierId: supplierId || null, supplierName: supplierName.trim() || null })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <div>
+            <h3 className="font-bold text-gray-800">✏️ Sửa thông tin phiếu</h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              <span className="font-mono text-blue-600">{receipt.receiptNo}</span>
+              {' · '}Chỉ sửa được ghi chú và nhà cung cấp
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Nhà cung cấp */}
+          <div className="relative">
+            <label className="block text-sm font-medium text-gray-700 mb-1">🏭 Nhà cung cấp</label>
+            {supplierId ? (
+              <div className="flex items-center gap-2 border border-green-300 rounded-lg px-3 py-2 bg-green-50">
+                <span className="flex-1 text-sm font-medium text-green-800">{supplierName}</span>
+                <button type="button" onClick={() => { setSupplierId(null); setSupplierName('') }}
+                  className="text-gray-400 hover:text-red-500">&times;</button>
+              </div>
+            ) : (
+              <>
+                <input
+                  value={supplierSearch || supplierName}
+                  onChange={e => handleSupplierSearch(e.target.value)}
+                  placeholder="Tìm hoặc nhập tên NCC..."
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                />
+                {supplierResults.length > 0 && (
+                  <div className="absolute z-10 left-0 right-0 mt-1 bg-white border rounded-xl shadow-lg max-h-40 overflow-y-auto">
+                    {supplierResults.map(s => (
+                      <button key={s.id} type="button" onClick={() => selectSupplier(s)}
+                        className="w-full text-left px-3 py-2 hover:bg-green-50 text-sm border-b last:border-0">
+                        <span className="font-medium">{s.name}</span>
+                        {s.phone && <span className="text-gray-400 text-xs ml-2">{s.phone}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Ghi chú */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">📝 Ghi chú</label>
+            <textarea
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              rows={3}
+              placeholder="VD: Nhập hàng tháng 4 từ NCC Hải Hà"
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 resize-none"
+            />
+          </div>
+
+          {/* Thông báo */}
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
+            ⚠️ <b>Lưu ý</b>: Không thể sửa số lượng, giá vốn hay sản phẩm sau khi phiếu đã tạo.
+            Những thay đổi này ảnh hưởng đến tồn kho và giá vốn FEFO.
+          </div>
+        </div>
+
+        <div className="flex gap-3 px-5 pb-5">
+          <button onClick={onClose}
+            className="flex-1 py-2.5 border rounded-xl text-sm text-gray-600 hover:bg-gray-50 font-medium">
+            Hủy
+          </button>
+          <button onClick={handleSubmit} disabled={saving}
+            className="flex-1 py-2.5 bg-green-600 text-white rounded-xl text-sm font-semibold hover:bg-green-700 disabled:opacity-60">
+            {saving ? '⏳ Đang lưu...' : '💾 Lưu thay đổi'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ReceiptsPage() {
   const [page, setPage] = useState(0)
   const [from, setFrom] = useState('')
@@ -826,12 +945,13 @@ export default function ReceiptsPage() {
   const [showModal, setShowModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [detail, setDetail] = useState(null)
-  const [printReceipt, setPrintReceipt] = useState(null) // receipt vừa tạo → in nhãn
+  const [editMeta, setEditMeta] = useState(null)   // receipt đang sửa metadata
+  const [printReceipt, setPrintReceipt] = useState(null)
   const queryClient = useQueryClient()
 
   const { data, isLoading } = useReceipts(page, from || undefined, to || undefined)
   const { data: products = [] } = useProducts()
-  const { create, remove } = useReceiptMutations()
+  const { create, updateMeta, remove } = useReceiptMutations()
 
   const receipts = data?.content || []
   const totalPages = data?.totalPages || 1
@@ -840,97 +960,120 @@ export default function ReceiptsPage() {
   const handleCreate = async (formData) => {
     const newReceipt = await create.mutateAsync(formData)
     setShowModal(false)
-    // Prompt in nhãn ngay sau khi tạo phiếu nhập
     setPrintReceipt(newReceipt)
   }
 
+  const handleDelete = async (r) => {
+    if (!window.confirm(`Xóa phiếu ${r.receiptNo}?\n\nLưu ý: Chỉ xóa được nếu hàng chưa được bán.`)) return
+    try {
+      await remove.mutateAsync(r.id)
+    } catch (e) {
+      const msg = e?.response?.data?.message || e?.response?.data?.detail || ''
+      if (msg.includes('đã được bán') || msg.includes('sold')) {
+        toast.error(`❌ Không thể xóa phiếu ${r.receiptNo} — hàng đã được bán một phần. Hãy tạo phiếu điều chỉnh tồn kho thay thế.`, { duration: 5000 })
+      } else {
+        toast.error(msg || 'Lỗi khi xóa phiếu nhập')
+      }
+    }
+  }
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-800">Phiếu Nhập Kho</h2>
-        <div className="flex gap-2">
+    <div className="space-y-4">
+      <AdminPageHeader
+        title="Phiếu Nhập Kho"
+        actions={<>
           <button onClick={() => setShowImportModal(true)}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm">
+            className="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-1.5 text-sm font-medium">
             📊 Import Excel
           </button>
           <button onClick={() => setShowModal(true)}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+            className="bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 text-sm font-medium">
             + Tạo phiếu nhập
           </button>
-        </div>
-      </div>
+        </>}
+      />
 
-      <div className="bg-white rounded-xl shadow p-4 space-y-4">
-        <div className="flex flex-wrap gap-3 items-end">
-          <div>
+      <AdminCard>
+        {/* Filters */}
+        <div className="flex flex-col sm:flex-row gap-2 mb-4">
+          <div className="flex-1">
             <label className="block text-xs text-gray-500 mb-1">Từ ngày</label>
             <input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(0) }}
-              className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
           </div>
-          <div>
+          <div className="flex-1">
             <label className="block text-xs text-gray-500 mb-1">Đến ngày</label>
             <input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(0) }}
-              className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
           </div>
           {(from || to) && (
-            <button onClick={() => { setFrom(''); setTo('') }}
-              className="text-gray-500 hover:text-gray-700 text-sm">✕ Xóa lọc</button>
+            <div className="flex items-end">
+              <button onClick={() => { setFrom(''); setTo('') }}
+                className="px-3 py-2 border rounded-lg text-sm text-gray-500 hover:text-gray-700">✕ Xóa lọc</button>
+            </div>
           )}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 text-gray-600 border-b text-sm">
-                <SortHeader field="receiptNo" className="text-left px-4 py-3">Số phiếu</SortHeader>
-                <SortHeader field="supplierName" className="text-left px-4 py-3">Nhà cung cấp</SortHeader>
-                <SortHeader field="receiptDate" className="text-left px-4 py-3">Ngày nhập</SortHeader>
-                <SortHeader field="totalAmount" className="text-right px-4 py-3">Tổng thực trả</SortHeader>
-                <th className="text-left px-4 py-3">Ghi chú</th>
-                <th className="text-center px-4 py-3">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr><td colSpan={6} className="text-center py-8 text-gray-400">Đang tải...</td></tr>
-              ) : sortedReceipts.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-8 text-gray-400">Chưa có phiếu nhập</td></tr>
-              ) : sortedReceipts.map(r => (
-                <tr key={r.id} className="border-b hover:bg-gray-50 transition">
-                  <td className="px-4 py-3 font-mono text-blue-600 cursor-pointer hover:underline"
-                    onClick={() => setDetail(r)}>{r.receiptNo}</td>
-                  <td className="px-4 py-3">{r.supplierName || '—'}</td>
-                  <td className="px-4 py-3">{dayjs(r.receiptDate).format('DD/MM/YYYY HH:mm')}</td>
-                  <td className="px-4 py-3 text-right font-medium text-green-700">
-                    {Number(r.totalAmount).toLocaleString('vi-VN')} ₫
-                  </td>
-                  <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{r.note || '—'}</td>
-                  <td className="px-4 py-3 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      <button
-                        onClick={() => setPrintReceipt({ ...r, showPrinter: true })}
-                        className="text-amber-600 hover:text-amber-800 text-xs font-medium"
-                        title="In nhãn mã vạch"
-                      >🏷️ In nhãn</button>
-                      <button onClick={() => { if (window.confirm('Xóa phiếu nhập này?')) remove.mutate(r.id) }}
-                        className="text-red-600 hover:text-red-800 text-xs">🗑️ Xóa</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <AdminTable
+          loading={isLoading}
+          rows={sortedReceipts}
+          emptyText="Chưa có phiếu nhập nào"
+          columns={[
+            { key: 'receiptNo', label: 'Số phiếu', tdClassName: 'font-mono text-blue-600 cursor-pointer hover:underline',
+              render: r => <span onClick={() => setDetail(r)}>{r.receiptNo}</span> },
+            { key: 'supplierName', label: 'Nhà cung cấp', render: r => r.supplierName || '—' },
+            { key: 'receiptDate', label: 'Ngày nhập', render: r => dayjs(r.receiptDate).format('DD/MM/YYYY HH:mm') },
+            { key: 'totalAmount', label: 'Tổng thực trả', thClassName: 'text-right', tdClassName: 'text-right font-medium text-green-700',
+              render: r => Number(r.totalAmount).toLocaleString('vi-VN') + ' ₫' },
+            { key: 'note', label: 'Ghi chú', render: r => r.note || '—' },
+            { key: 'actions', label: 'Thao tác', isAction: true, thClassName: 'text-center', tdClassName: 'text-center',
+              render: r => (
+                <div className="flex items-center justify-center gap-1.5">
+                  <button onClick={() => setEditMeta(r)}
+                    className="text-blue-600 hover:text-blue-800 text-xs font-medium px-2 py-1 rounded hover:bg-blue-50" title="Sửa ghi chú / NCC">✏️ Sửa</button>
+                  <button onClick={() => setPrintReceipt({ ...r, showPrinter: true })}
+                    className="text-amber-600 hover:text-amber-800 text-xs font-medium px-2 py-1 rounded hover:bg-amber-50">🏷️ In nhãn</button>
+                  <button onClick={() => handleDelete(r)}
+                    className="text-red-600 hover:text-red-800 text-xs px-2 py-1 rounded hover:bg-red-50">🗑️ Xóa</button>
+                </div>
+              )},
+          ]}
+          mobileCard={r => (
+            <div>
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <button onClick={() => setDetail(r)}
+                    className="font-mono text-blue-600 font-bold text-sm hover:underline">{r.receiptNo}</button>
+                  <p className="text-xs text-gray-500 mt-0.5">{dayjs(r.receiptDate).format('DD/MM/YYYY HH:mm')}</p>
+                </div>
+                <span className="text-base font-bold text-green-700">{Number(r.totalAmount).toLocaleString('vi-VN')} ₫</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs mb-3 text-gray-600">
+                <span>🏭 {r.supplierName || 'Không có NCC'}</span>
+                {r.note && <span className="text-gray-400">· {r.note}</span>}
+              </div>
+              <div className="flex gap-2 pt-2 border-t border-gray-100">
+                <button onClick={() => setDetail(r)}
+                  className="flex-1 text-xs bg-gray-50 text-gray-700 hover:bg-gray-100 py-1.5 rounded-lg font-medium text-center">👁️ Chi tiết</button>
+                <button onClick={() => setEditMeta(r)}
+                  className="flex-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 py-1.5 rounded-lg font-medium text-center">✏️ Sửa</button>
+                <button onClick={() => setPrintReceipt({ ...r, showPrinter: true })}
+                  className="flex-1 text-xs bg-amber-50 text-amber-700 hover:bg-amber-100 py-1.5 rounded-lg font-medium text-center">🏷️ In nhãn</button>
+                <button onClick={() => handleDelete(r)}
+                  className="flex-1 text-xs bg-red-50 text-red-600 hover:bg-red-100 py-1.5 rounded-lg font-medium text-center">🗑️ Xóa</button>
+              </div>
+            </div>
+          )}
+        />
 
-        {/* Pagination */}
-        <div className="flex items-center justify-between pt-2">
-          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-            className="px-3 py-1 border rounded-lg text-sm disabled:opacity-40 hover:bg-gray-100">← Trước</button>
-          <span className="text-sm text-gray-500">Trang {page + 1} / {totalPages}</span>
-          <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
-            className="px-3 py-1 border rounded-lg text-sm disabled:opacity-40 hover:bg-gray-100">Sau →</button>
+        <div className="flex items-center justify-between pt-3 border-t mt-3">
+          <button onClick={() => setPage(p => Math.max(0, p-1))} disabled={page===0}
+            className="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-40 hover:bg-gray-100">← Trước</button>
+          <span className="text-sm text-gray-500">Trang {page+1} / {totalPages}</span>
+          <button onClick={() => setPage(p => Math.min(totalPages-1, p+1))} disabled={page>=totalPages-1}
+            className="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-40 hover:bg-gray-100">Sau →</button>
         </div>
-      </div>
+      </AdminCard>
 
       {/* Create modal (nhập tay) */}
       {showModal && (
@@ -1091,6 +1234,19 @@ export default function ReceiptsPage() {
           </div>
         )
       })()}
+
+      {/* ── Modal sửa metadata phiếu nhập (ghi chú + NCC) ── */}
+      {editMeta && (
+        <EditMetaModal
+          receipt={editMeta}
+          onClose={() => setEditMeta(null)}
+          onSave={async (data) => {
+            await updateMeta.mutateAsync({ id: editMeta.id, data })
+            setEditMeta(null)
+          }}
+          saving={updateMeta.isLoading}
+        />
+      )}
 
       {/* ── BarcodeLabelPrinter ─────────────────────────────────────────── */}
       {printReceipt?.showPrinter && (() => {

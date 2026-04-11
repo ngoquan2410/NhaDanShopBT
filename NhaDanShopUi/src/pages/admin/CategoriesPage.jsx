@@ -1,6 +1,7 @@
 ﻿import { useState } from 'react'
 import { useCategories, useCategoryMutations } from '../../hooks/useCategories'
 import { useSort } from '../../hooks/useSort'
+import { AdminTable, AdminPageHeader, AdminCard } from '../../components/admin/AdminTable'
 
 function Modal({ title, onClose, children }) {
   return (
@@ -91,69 +92,70 @@ export default function CategoriesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-800">Quản lý Danh mục</h2>
-        <button onClick={handleNew}
-          className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2">
-          + Thêm danh mục
-        </button>
-      </div>
+    <div className="space-y-4">
+      <AdminPageHeader
+        title="Quản lý Danh mục"
+        actions={
+          <button onClick={handleNew}
+            className="bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 text-sm font-medium">
+            + Thêm danh mục
+          </button>
+        }
+      />
 
-      <div className="bg-white rounded-xl shadow p-4">
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
+      <AdminCard>
+        <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="🔍 Tìm danh mục..."
-          className="border rounded-lg px-3 py-2 w-full max-w-xs focus:outline-none focus:ring-2 focus:ring-green-500 mb-4"
+          className="border rounded-lg px-3 py-2 w-full sm:max-w-xs text-sm focus:outline-none focus:ring-2 focus:ring-green-500 mb-3" />
+
+        <AdminTable
+          loading={isLoading}
+          rows={sorted}
+          emptyText="Không có danh mục nào"
+          columns={[
+            { key: 'id', label: 'ID', thClassName: 'w-12', tdClassName: 'text-gray-500 text-xs' },
+            { key: 'name', label: 'Tên danh mục', tdClassName: 'font-medium text-gray-800' },
+            { key: 'description', label: 'Mô tả', tdClassName: 'text-gray-500 text-sm', render: c => c.description || '—' },
+            { key: 'active', label: 'Trạng thái', thClassName: 'text-center', tdClassName: 'text-center',
+              render: c => (
+                <span className={`px-2 py-1 rounded-full text-xs font-medium ${c.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  {c.active ? 'Hoạt động' : 'Ẩn'}
+                </span>
+              )},
+            { key: 'actions', label: 'Thao tác', isAction: true, thClassName: 'text-center', tdClassName: 'text-center',
+              render: c => (
+                <div className="flex items-center justify-center gap-2">
+                  <button onClick={() => handleEdit(c)} className="text-blue-600 hover:text-blue-800 text-xs font-medium px-2 py-1 rounded hover:bg-blue-50">✏️ Sửa</button>
+                  <button onClick={() => handleDelete(c.id)} className="text-red-600 hover:text-red-800 text-xs font-medium px-2 py-1 rounded hover:bg-red-50">🗑️ Xóa</button>
+                </div>
+              )},
+          ]}
+          mobileCard={cat => (
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-gray-800 text-sm">{cat.name}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${cat.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {cat.active ? 'Hoạt động' : 'Ẩn'}
+                  </span>
+                </div>
+                {cat.description && <p className="text-xs text-gray-500 mt-0.5 truncate">{cat.description}</p>}
+              </div>
+              <div className="flex gap-1.5 shrink-0">
+                <button onClick={() => handleEdit(cat)}
+                  className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg font-medium">✏️</button>
+                <button onClick={() => handleDelete(cat.id)}
+                  className="text-xs bg-red-50 text-red-600 hover:bg-red-100 px-2.5 py-1.5 rounded-lg font-medium">🗑️</button>
+              </div>
+            </div>
+          )}
         />
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 text-gray-600 border-b text-sm">
-                <SortHeader field="id" className="text-left px-4 py-3">ID</SortHeader>
-                <SortHeader field="name" className="text-left px-4 py-3">Tên danh mục</SortHeader>
-                <th className="text-left px-4 py-3">Mô tả</th>
-                <SortHeader field="active" className="text-center px-4 py-3">Trạng thái</SortHeader>
-                <th className="text-center px-4 py-3">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr><td colSpan={5} className="text-center py-8 text-gray-400">Đang tải...</td></tr>
-              ) : sorted.length === 0 ? (
-                <tr><td colSpan={5} className="text-center py-8 text-gray-400">Không có dữ liệu</td></tr>
-              ) : sorted.map(cat => (
-                <tr key={cat.id} className="border-b hover:bg-gray-50 transition">
-                  <td className="px-4 py-3 text-gray-500">{cat.id}</td>
-                  <td className="px-4 py-3 font-medium text-gray-800">{cat.name}</td>
-                  <td className="px-4 py-3 text-gray-500">{cat.description || '—'}</td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${cat.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                      {cat.active ? 'Hoạt động' : 'Ẩn'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <button onClick={() => handleEdit(cat)} className="text-blue-600 hover:text-blue-800 mr-3 text-xs font-medium">✏️ Sửa</button>
-                    <button onClick={() => handleDelete(cat.id)} className="text-red-600 hover:text-red-800 text-xs font-medium">🗑️ Xóa</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      </AdminCard>
 
       {showModal && (
-        <Modal
-          title={editing ? 'Chỉnh sửa danh mục' : 'Thêm danh mục mới'}
-          onClose={() => { setShowModal(false); setEditing(null) }}
-        >
-          <CategoryForm
-            initial={editing}
-            onSubmit={handleSubmit}
-            loading={create.isLoading || update.isLoading}
-          />
+        <Modal title={editing ? 'Chỉnh sửa danh mục' : 'Thêm danh mục mới'}
+          onClose={() => { setShowModal(false); setEditing(null) }}>
+          <CategoryForm initial={editing} onSubmit={handleSubmit} loading={create.isLoading || update.isLoading} />
         </Modal>
       )}
     </div>

@@ -1,10 +1,11 @@
-﻿﻿﻿﻿import { useState, useEffect, useRef } from 'react'
+﻿import { useState, useEffect, useRef } from 'react'
 import { useProducts, useProductMutations, useVariants, useVariantMutations } from '../../hooks/useProducts'
 import { useCategories } from '../../hooks/useCategories'
 import { productService } from '../../services/productService'
 import { useSort } from '../../hooks/useSort'
 import { useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
+import { AdminTable, AdminPageHeader, AdminCard } from '../../components/admin/AdminTable'
 
 function Modal({ title, onClose, children }) {
   return (
@@ -68,45 +69,27 @@ function ImageUploader({ imageUrl, onUrlChange }) {
   const isBase64 = preview?.startsWith('data:')
   const isR2 = preview?.includes('.r2.dev')
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-gray-700">Hình ảnh sản phẩm</label>
-        {r2Status === null ? <span className="text-xs text-gray-400 animate-pulse">Đang kiểm tra R2...</span>
-          : r2Status.configured
-            ? <span className="text-xs text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full">Cloudflare R2 sẵn sàng</span>
-            : <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">Lưu base64 (R2 chưa cấu hình)</span>}
-      </div>
+    <div className="space-y-2">
+      <label className="block text-sm font-medium text-gray-700">Hình ảnh sản phẩm</label>
       {preview && (
         <div className="relative inline-block">
-          <img src={preview} alt="preview" className="w-32 h-32 object-cover rounded-xl border-2 border-orange-200 shadow-md" onError={e => { e.target.style.display = 'none' }} />
+          <img src={preview} alt="preview" className="w-28 h-28 object-cover rounded-xl border-2 border-orange-200 shadow-md" onError={e => { e.target.style.display = 'none' }} />
           <button type="button" onClick={handleRemove} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow hover:bg-red-600">×</button>
-          <div className="mt-1 text-xs px-2 py-0.5 rounded border inline-block text-orange-700 bg-orange-50 border-orange-200">
-            {isR2 ? 'Cloudflare R2' : isBase64 ? 'Base64 (DB)' : 'URL ngoài'}
-          </div>
         </div>
       )}
       <div onDragOver={e => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
-        className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all select-none ${dragging ? 'border-orange-500 bg-orange-50 scale-105' : 'border-gray-300 hover:border-orange-400 hover:bg-orange-50'} ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+        className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all select-none ${dragging ? 'border-orange-500 bg-orange-50 scale-105' : 'border-gray-300 hover:border-orange-400 hover:bg-orange-50'} ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={e => handleFile(e.target.files?.[0])} />
         {uploading
-          ? <div className="flex flex-col items-center gap-2 text-orange-700"><div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" /><span className="text-sm">{r2Status?.configured ? 'Đang upload lên Cloudflare R2...' : 'Đang xử lý ảnh...'}</span></div>
-          : <div className="flex flex-col items-center gap-2 text-gray-500"><span className="text-4xl">{r2Status?.configured ? '☁️' : '📁'}</span><p className="text-sm font-medium text-gray-700">Kéo thả ảnh vào đây hoặc click để chọn</p><p className="text-xs text-gray-400">JPG, PNG, WEBP – tối đa 10MB</p>{r2Status?.configured && <p className="text-xs text-orange-600 font-medium mt-1">Upload trực tiếp lên Cloudflare R2 – CDN toàn cầu</p>}</div>}
+          ? <div className="flex flex-col items-center gap-2 text-orange-700"><div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" /><span className="text-sm">Đang tải ảnh...</span></div>
+          : <div className="flex flex-col items-center gap-1 text-gray-400"><span className="text-3xl">🖼️</span><p className="text-sm text-gray-600">Kéo thả hoặc click để chọn ảnh</p><p className="text-xs">JPG, PNG, WEBP – tối đa 10MB</p></div>}
       </div>
-      <div>
-        <label className="block text-xs text-gray-500 mb-1">Hoặc nhập URL ảnh trực tiếp:</label>
-        <div className="flex gap-2">
-          <input type="url" value={manualUrl} onChange={e => setManualUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleManualUrl()}
-            placeholder="https://pub-xxx.r2.dev/..., https://i.imgur.com/..."
-            className="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
-          {manualUrl && <button type="button" onClick={handleManualUrl} className="px-3 py-2 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600 whitespace-nowrap">Áp dụng</button>}
-        </div>
-      </div>
-      <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-xs text-orange-800 space-y-1">
-        <p className="font-semibold">Cách thêm ảnh:</p>
-        {r2Status?.configured
-          ? <><p>Kéo thả / chọn file – upload lên Cloudflare R2 (CDN, nhanh, bền vững)</p><p>Nhập URL – dán link từ bất kỳ nguồn nào</p></>
-          : <><p>Kéo thả / chọn file – lưu base64 trong DB</p><p>Nhập URL – upload lên imgur.com rồi dán link</p><p className="text-orange-600">Để dùng R2: cấu hình r2.* trong application.properties</p></>}
+      <div className="flex gap-2">
+        <input type="url" value={manualUrl} onChange={e => setManualUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleManualUrl()}
+          placeholder="Hoặc dán URL ảnh trực tiếp..."
+          className="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+        {manualUrl && <button type="button" onClick={handleManualUrl} className="px-3 py-2 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600 whitespace-nowrap">Dùng URL</button>}
       </div>
     </div>
   )
@@ -350,8 +333,8 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Số lẻ / ĐV nhập</label>
-                      <input type="number" value={v.piecesPerUnit} min={1}
-                        onChange={e => setV(idx, 'piecesPerUnit', e.target.value)}
+                      <input type="text" inputMode="numeric" value={v.piecesPerUnit}
+                        onChange={e => { const v2 = e.target.value.replace(/\D/g,''); setV(idx, 'piecesPerUnit', v2||1) }}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
                     <div>
@@ -359,9 +342,19 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
                         Giá bán (₫)
                         <span className="ml-1 text-gray-400 font-normal">(để trống = điền sau)</span>
                       </label>
-                      <input type="number" value={v.sellPrice} min={0} placeholder="0"
-                        onChange={e => setV(idx, 'sellPrice', e.target.value)}
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={v.sellPrice === 0 || v.sellPrice === '' ? '' : Number(v.sellPrice).toLocaleString('vi-VN')}
+                        placeholder="0"
+                        onChange={e => {
+                          const raw = e.target.value.replace(/\./g, '').replace(/,/g, '')
+                          if (raw === '' || /^\d+$/.test(raw)) setV(idx, 'sellPrice', raw === '' ? 0 : Number(raw))
+                        }}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                      {Number(v.sellPrice) > 0 && Number(v.sellPrice) % 1000 !== 0 && (
+                        <p className="text-xs text-amber-600 mt-0.5">⚠️ Giá nên là bội số của 1.000₫</p>
+                      )}
                       {Number(v.sellPrice) === 0 && (
                         <p className="text-xs text-amber-600 mt-0.5">⚠️ Chưa có giá bán — SP sẽ hiện 0₫ trên POS</p>
                       )}
@@ -371,32 +364,39 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
                         Giá vốn (₫)
                         <span className="ml-1 text-gray-400 font-normal">(để trống = tự tính khi nhập kho)</span>
                       </label>
-                      <input type="number" value={v.costPrice} min={0} placeholder="0"
-                        onChange={e => setV(idx, 'costPrice', e.target.value)}
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={v.costPrice === 0 || v.costPrice === '' ? '' : Number(v.costPrice).toLocaleString('vi-VN')}
+                        placeholder="0"
+                        onChange={e => {
+                          const raw = e.target.value.replace(/\./g, '').replace(/,/g, '')
+                          if (raw === '' || /^\d+$/.test(raw)) setV(idx, 'costPrice', raw === '' ? 0 : Number(raw))
+                        }}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Tồn kho ban đầu</label>
-                      <input type="number" value={v.stockQty} min={0}
-                        onChange={e => setV(idx, 'stockQty', e.target.value)}
+                      <input type="text" inputMode="numeric" value={v.stockQty}
+                        onChange={e => { const r = e.target.value.replace(/\D/g,''); setV(idx, 'stockQty', r===''?0:Number(r)) }}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Ngưỡng cảnh báo tồn</label>
-                      <input type="number" value={v.minStockQty} min={0}
-                        onChange={e => setV(idx, 'minStockQty', e.target.value)}
+                      <input type="text" inputMode="numeric" value={v.minStockQty}
+                        onChange={e => { const r = e.target.value.replace(/\D/g,''); setV(idx, 'minStockQty', r===''?0:Number(r)) }}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Số ngày HSD</label>
-                      <input type="number" value={v.expiryDays} min={0} placeholder="để trống nếu không có"
-                        onChange={e => setV(idx, 'expiryDays', e.target.value)}
+                      <input type="text" inputMode="numeric" value={v.expiryDays||''} placeholder="Không có"
+                        onChange={e => { const r = e.target.value.replace(/\D/g,''); setV(idx, 'expiryDays', r===''?0:Number(r)) }}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Ghi chú quy đổi</label>
-                    <input type="text" value={v.conversionNote} placeholder="VD: 1 kg = 10 bịch 100g"
+                    <input type="text" value={v.conversionNote} placeholder="VD: 1 kg = 10 bịch"
                       onChange={e => setV(idx, 'conversionNote', e.target.value)}
                       className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                   </div>
@@ -581,16 +581,16 @@ function ImportExcelModal({ onClose, onSuccess }) {
                 { col:'A', label:'Mã SP',           req:false, tip:'Để trống → tự sinh mã' },
                 { col:'B', label:'Tên SP',           req:true },
                 { col:'C', label:'Danh mục',         req:true,  tip:'Chưa có → tự tạo' },
-                { col:'D', label:'Giá vốn',          req:true,  tip:'> 0. GỘP: giá/ĐV nhập' },
-                { col:'E', label:'Giá bán',          req:true,  tip:'> 0. GỘP: giá/ĐV nhập' },
-                { col:'F', label:'Tồn kho',          req:false, tip:'Theo ĐV nhập' },
+                { col:'D', label:'Giá vốn',          req:true },
+                { col:'E', label:'Giá bán',          req:true },
+                { col:'F', label:'Tồn kho',          req:false },
                 { col:'G', label:'Hạn (ngày)',       req:false },
                 { col:'H', label:'Active',           req:false, tip:'TRUE/FALSE' },
-                { col:'I', label:'ĐV nhập',          req:false, tip:'kg/xâu=GỘP, bịch=ATOMIC. Để trống=ATOMIC' },
-                { col:'J', label:'ĐV bán lẻ',        req:true,  tip:'bịch, hộp, gói, hũ...' },
-                { col:'K', label:'Số lẻ/ĐV',         req:false, tip:'VD: 1kg=10bịch → 10. ATOMIC=để trống' },
+                { col:'I', label:'ĐV nhập',          req:false },
+                { col:'J', label:'ĐV bán lẻ',        req:true },
+                { col:'K', label:'Số lẻ/ĐV',         req:false },
                 { col:'L', label:'Ghi chú',          req:false },
-                { col:'M', label:'Tồn tối thiểu',    req:false, tip:'Mặc định 5 nếu để trống' },
+                { col:'M', label:'Tồn tối thiểu',    req:false },
               ].map(({ col, label, req, tip }) => (
                 <div key={col} title={tip || ''}
                   className={`flex items-center gap-1 px-2 py-1 rounded text-xs border ${
@@ -602,9 +602,6 @@ function ImportExcelModal({ onClose, onSuccess }) {
                 </div>
               ))}
             </div>
-            <p className="text-xs text-blue-600 mt-2">
-              💡 GỘP (kg/xâu): giá nhập = giá/ĐV nhập → hệ thống tự chia. ATOMIC (bịch/hộp): giá = giá/ĐV bán.
-            </p>
           </div>
 
           {/* Upload area */}
@@ -925,35 +922,62 @@ function VariantManager({ product, onClose }) {
             {f('Tên biến thể *', 'variantName')}
             {f('Đơn vị bán lẻ *', 'sellUnit')}
             {f('Đơn vị nhập kho', 'importUnit')}
-            {f('Số lẻ / ĐV nhập', 'piecesPerUnit', 'number', { min: 1 })}
-            {/* Giá bán — optional */}
             <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Giá bán (₫)
-                <span className="ml-1 text-gray-400 font-normal">(để trống = điền sau)</span>
-              </label>
-              <input type="number" min={0} placeholder="0" value={form?.sellPrice ?? ''}
-                onChange={e => setForm(p => ({ ...p, sellPrice: e.target.value }))}
+              <label className="block text-xs text-gray-500 mb-1">Số lẻ / ĐV nhập</label>
+              <input type="text" inputMode="numeric" value={form?.piecesPerUnit||1}
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,piecesPerUnit:r||1})) }}
                 className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+            </div>
+            {/* Giá bán */}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Giá bán (₫)</label>
+              <input type="text" inputMode="numeric"
+                value={form?.sellPrice === 0 || form?.sellPrice === '' ? '' : Number(form?.sellPrice).toLocaleString('vi-VN')}
+                placeholder="0"
+                onChange={e => {
+                  const raw = e.target.value.replace(/\./g, '').replace(/,/g, '')
+                  if (raw === '' || /^\d+$/.test(raw)) setForm(p => ({ ...p, sellPrice: raw === '' ? 0 : Number(raw) }))
+                }}
+                className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+              {Number(form?.sellPrice) > 0 && Number(form?.sellPrice) % 1000 !== 0 && (
+                <p className="text-xs text-amber-600 mt-0.5">⚠️ Nên là bội số 1.000₫</p>
+              )}
               {Number(form?.sellPrice) === 0 && (
-                <p className="text-xs text-amber-600 mt-0.5">⚠️ Chưa có giá — SP sẽ hiện 0₫ trên POS</p>
+                <p className="text-xs text-amber-600 mt-0.5">⚠️ Chưa có giá — hiện 0₫ trên POS</p>
               )}
             </div>
-            {/* Giá vốn — optional, tự tính khi nhập kho */}
+            {/* Giá vốn */}
             <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Giá vốn (₫)
-                <span className="ml-1 text-gray-400 font-normal">(tự tính khi nhập kho)</span>
-              </label>
-              <input type="number" min={0} placeholder="0" value={form?.costPrice ?? ''}
-                onChange={e => setForm(p => ({ ...p, costPrice: e.target.value }))}
+              <label className="block text-xs text-gray-500 mb-1">Giá vốn (₫)</label>
+              <input type="text" inputMode="numeric"
+                value={form?.costPrice === 0 || form?.costPrice === '' ? '' : Number(form?.costPrice).toLocaleString('vi-VN')}
+                placeholder="0"
+                onChange={e => {
+                  const raw = e.target.value.replace(/\./g, '').replace(/,/g, '')
+                  if (raw === '' || /^\d+$/.test(raw)) setForm(p => ({ ...p, costPrice: raw === '' ? 0 : Number(raw) }))
+                }}
                 className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
             </div>
-            {f('Tồn kho', 'stockQty', 'number', { min: 0 })}
-            {f('Ngưỡng cảnh báo tồn', 'minStockQty', 'number', { min: 0 })}
-            {f('Số ngày HSD', 'expiryDays', 'number', { min: 0 })}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Tồn kho</label>
+              <input type="text" inputMode="numeric" value={form?.stockQty||0}
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,stockQty:r===''?0:Number(r)})) }}
+                className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Ngưỡng cảnh báo tồn</label>
+              <input type="text" inputMode="numeric" value={form?.minStockQty||5}
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,minStockQty:r===''?0:Number(r)})) }}
+                className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Số ngày HSD</label>
+              <input type="text" inputMode="numeric" value={form?.expiryDays||''} placeholder="Không có"
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,expiryDays:r===''?null:Number(r)})) }}
+                className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+            </div>
           </div>
-          {f('Ghi chú quy đổi (VD: 1 kg = 10 hủ 100g)', 'conversionNote')}
+          {f('Ghi chú quy đổi', 'conversionNote')}
           <div className="flex items-center gap-2">
             <input type="checkbox" id="vd_default" checked={!!form.isDefault}
               onChange={e => setForm(p => ({ ...p, isDefault: e.target.checked }))} />
@@ -979,7 +1003,7 @@ function VariantManager({ product, onClose }) {
                 <th className="text-left px-3 py-2">Tên</th>
                 <th className="text-center px-3 py-2">ĐV bán</th>
                 <th className="text-center px-3 py-2">ĐV nhập</th>
-                <th className="text-center px-3 py-2">Pieces</th>
+                <th className="text-center px-3 py-2">Số lẻ/ĐV</th>
                 <th className="text-right px-3 py-2">Giá bán</th>
                 <th className="text-right px-3 py-2">Tồn kho</th>
                 <th className="text-center px-3 py-2">Mặc định</th>
@@ -1051,99 +1075,119 @@ export default function ProductsPage() {
   const handleDelete = (id) => { if (window.confirm('Xóa sản phẩm này?')) remove.mutate(id) }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-800">Quản lý Sản phẩm</h2>
-        <div className="flex gap-2">
+    <div className="space-y-4">
+      {/* ── Header ── */}
+      <AdminPageHeader
+        title="Quản lý Sản phẩm"
+        actions={<>
           <button onClick={() => setShowImportModal(true)}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm">
+            className="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-1.5 text-sm font-medium">
             📊 Import Excel
           </button>
           <button onClick={() => { setEditing(null); setShowModal(true) }}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+            className="bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 flex items-center gap-1.5 text-sm font-medium">
             + Thêm sản phẩm
           </button>
-        </div>
-      </div>
+        </>}
+      />
 
-      <div className="bg-white rounded-xl shadow p-4 space-y-3">
-        <div className="flex flex-wrap gap-3">
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Tìm theo tên, mã..."
-            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 flex-1 min-w-[200px]" />
+      <AdminCard>
+        {/* ── Filters ── */}
+        <div className="flex flex-col sm:flex-row gap-2 mb-3">
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Tìm theo tên, mã..."
+            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 flex-1" />
           <select value={catFilter} onChange={e => setCatFilter(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 sm:w-44">
             <option value="">Tất cả danh mục</option>
             {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
-        <p className="text-sm text-gray-500">Hiển thị {sorted.length} / {products.length} sản phẩm</p>
+        <p className="text-xs text-gray-500 mb-3">Hiển thị {sorted.length} / {products.length} sản phẩm</p>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm" style={{ minWidth: '900px' }}>
-            <thead>
-              <tr className="bg-gray-50 text-gray-600 border-b">
-                <th className="text-left px-3 py-3 w-12">Ảnh</th>
-                <SortHeader field="code" className="text-left px-3 py-3 w-28">Mã SP</SortHeader>
-                <SortHeader field="name" className="text-left px-3 py-3">Tên sản phẩm</SortHeader>
-                <SortHeader field="categoryName" className="text-left px-3 py-3 w-32">Danh mục</SortHeader>
-                <SortHeader field="costPrice" className="text-right px-3 py-3 w-28">Giá vốn</SortHeader>
-                <SortHeader field="sellPrice" className="text-right px-3 py-3 w-28">Giá bán</SortHeader>
-                <SortHeader field="stockQty" className="text-right px-3 py-3 w-24">Tồn kho</SortHeader>
-                <SortHeader field="expiryDays" className="text-center px-3 py-3 w-24">Hạn (ngày)</SortHeader>
-                <SortHeader field="active" className="text-center px-3 py-3 w-24">Trạng thái</SortHeader>
-                <th className="text-center px-3 py-3 w-28">Biến thể</th>
-                <th className="text-center px-3 py-3 w-24">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading
-                ? <tr><td colSpan={10} className="text-center py-8 text-gray-400">Đang tải...</td></tr>
-                : sorted.length === 0
-                  ? <tr><td colSpan={10} className="text-center py-8 text-gray-400">Không có sản phẩm</td></tr>
-                  : sorted.map(p => {
-                    const dv = p.variants?.find(v => v.isDefault) || p.variants?.[0]
-                    return (
-                    <tr key={p.id} className="border-b hover:bg-gray-50 transition">
-                      <td className="px-3 py-2">
-                        {p.imageUrl
-                          ? <img src={p.imageUrl} alt={p.name} className="w-10 h-10 object-cover rounded-lg border" onError={e => { e.target.style.display = 'none' }} />
-                          : <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center text-lg font-bold text-green-600">P</div>}
-                      </td>
-                      <td className="px-3 py-3 font-mono text-xs text-gray-500 whitespace-nowrap">{p.code}</td>
-                      <td className="px-3 py-3 font-medium text-gray-800">{p.name}</td>
-                      <td className="px-3 py-3 text-gray-500 text-xs">{p.categoryName}</td>
-                      <td className="px-3 py-3 text-right whitespace-nowrap">{dv ? Number(dv.costPrice).toLocaleString('vi-VN') + ' ₫' : '—'}</td>
-                      <td className="px-3 py-3 text-right text-green-700 font-medium whitespace-nowrap">{dv ? Number(dv.sellPrice).toLocaleString('vi-VN') + ' ₫' : '—'}</td>
-                      <td className="px-3 py-3 text-right whitespace-nowrap">
-                        <span className={dv && dv.stockQty <= 5 ? 'text-red-600 font-bold' : 'text-gray-800'}>
-                          {dv ? `${dv.stockQty} ${dv.sellUnit || ''}` : '—'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-center">{dv?.expiryDays || '—'}</td>
-                      <td className="px-3 py-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                          {p.active ? 'Đang bán' : 'Ẩn'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        {p.productType === 'SINGLE' && (
-                          <button onClick={() => setShowVariantModal(p)}
-                            className="text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 px-2 py-1 rounded-lg font-medium whitespace-nowrap">
-                            🔀 {p.variants?.length > 0 ? `${p.variants.length} biến thể` : 'Thêm'}
-                          </button>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-center whitespace-nowrap">
-                        <button onClick={() => handleEdit(p)} className="text-blue-600 hover:text-blue-800 mr-2 text-xs font-medium">Sửa</button>
-                        <button onClick={() => handleDelete(p.id)} className="text-red-600 hover:text-red-800 text-xs font-medium">Xóa</button>
-                      </td>
-                    </tr>
-                    )
-                  })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        {/* ── Table (desktop) / Cards (mobile) ── */}
+        <AdminTable
+          loading={isLoading}
+          rows={sorted}
+          emptyText="Không có sản phẩm nào"
+          columns={[
+            { key: 'img', label: 'Ảnh', thClassName: 'w-12', render: p => (
+              p.imageUrl
+                ? <img src={p.imageUrl} alt={p.name} className="w-10 h-10 object-cover rounded-lg border" onError={e => { e.target.style.display='none' }} />
+                : <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center text-base font-bold text-green-600">P</div>
+            )},
+            { key: 'code', label: 'Mã SP', mobileLabel: 'Mã', thClassName: 'w-28', tdClassName: 'font-mono text-xs text-gray-500 whitespace-nowrap' },
+            { key: 'name', label: 'Tên sản phẩm', mobileLabel: false, tdClassName: 'font-medium text-gray-800' },
+            { key: 'categoryName', label: 'Danh mục', tdClassName: 'text-gray-500 text-xs', thClassName: 'w-28' },
+            { key: 'sellPrice', label: 'Giá bán', thClassName: 'w-28 text-right', tdClassName: 'text-right text-green-700 font-medium whitespace-nowrap',
+              render: p => { const dv = p.variants?.find(v=>v.isDefault)||p.variants?.[0]; return dv ? Number(dv.sellPrice).toLocaleString('vi-VN')+' ₫' : '—' }},
+            { key: 'stockQty', label: 'Tồn kho', thClassName: 'w-24 text-right', tdClassName: 'text-right whitespace-nowrap',
+              render: p => { const dv = p.variants?.find(v=>v.isDefault)||p.variants?.[0]; return dv ? <span className={dv.stockQty<=5?'text-red-600 font-bold':''}>{dv.stockQty} {dv.sellUnit}</span> : '—' }},
+            { key: 'active', label: 'Trạng thái', thClassName: 'w-24 text-center', tdClassName: 'text-center',
+              render: p => <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.active?'bg-green-100 text-green-700':'bg-gray-100 text-gray-500'}`}>{p.active?'Đang bán':'Ẩn'}</span>},
+            { key: 'actions', label: 'Thao tác', isAction: true, thClassName: 'w-32 text-center', tdClassName: 'text-center whitespace-nowrap',
+              render: p => (
+                <div className="flex items-center justify-center gap-2 flex-wrap">
+                  {p.productType === 'SINGLE' && (
+                    <button onClick={() => setShowVariantModal(p)}
+                      className="text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 px-2 py-1 rounded-lg font-medium">
+                      🔀 {p.variants?.length > 0 ? p.variants.length : 'Thêm'}
+                    </button>
+                  )}
+                  <button onClick={() => handleEdit(p)} className="text-blue-600 hover:text-blue-800 text-xs font-medium">Sửa</button>
+                  <button onClick={() => handleDelete(p.id)} className="text-red-600 hover:text-red-800 text-xs font-medium">Xóa</button>
+                </div>
+              )},
+          ]}
+          mobileCard={p => {
+            const dv = p.variants?.find(v=>v.isDefault)||p.variants?.[0]
+            return (
+              <div className="flex gap-3">
+                {/* Thumbnail */}
+                <div className="shrink-0">
+                  {p.imageUrl
+                    ? <img src={p.imageUrl} alt={p.name} className="w-14 h-14 object-cover rounded-xl border" onError={e=>{e.target.style.display='none'}} />
+                    : <div className="w-14 h-14 bg-green-100 rounded-xl flex items-center justify-center text-xl font-bold text-green-600">P</div>}
+                </div>
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-1">
+                    <div>
+                      <p className="font-semibold text-gray-800 text-sm leading-tight">{p.name}</p>
+                      <p className="text-xs text-gray-400 font-mono mt-0.5">{p.code}</p>
+                    </div>
+                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium ${p.active?'bg-green-100 text-green-700':'bg-gray-100 text-gray-500'}`}>
+                      {p.active?'Đang bán':'Ẩn'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{p.categoryName}</span>
+                    {dv && <span className="text-sm font-bold text-green-700">{Number(dv.sellPrice).toLocaleString('vi-VN')} ₫</span>}
+                    {dv && <span className={`text-xs font-medium ${dv.stockQty<=5?'text-red-600':'text-gray-600'}`}>Tồn: {dv.stockQty} {dv.sellUnit}</span>}
+                  </div>
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100">
+                    {p.productType === 'SINGLE' && (
+                      <button onClick={() => setShowVariantModal(p)}
+                        className="text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 px-2.5 py-1.5 rounded-lg font-medium flex items-center gap-1">
+                        🔀 {p.variants?.length > 0 ? `${p.variants.length} biến thể` : 'Biến thể'}
+                      </button>
+                    )}
+                    <button onClick={() => handleEdit(p)}
+                      className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg font-medium">
+                      ✏️ Sửa
+                    </button>
+                    <button onClick={() => handleDelete(p.id)}
+                      className="text-xs bg-red-50 text-red-600 hover:bg-red-100 px-2.5 py-1.5 rounded-lg font-medium">
+                      🗑️ Xóa
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          }}
+        />
+      </AdminCard>
 
       {showModal && (
         <Modal title={editing ? 'Chỉnh sửa sản phẩm' : '➕ Thêm sản phẩm mới'} onClose={() => { setShowModal(false); setEditing(null) }}>
@@ -1157,17 +1201,12 @@ export default function ProductsPage() {
               <h3 className="font-bold text-lg text-gray-800">📊 Import sản phẩm từ Excel</h3>
               <button onClick={() => setShowImportModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
             </div>
-            <div className="p-6">
-              <ImportExcelModal
-                onClose={() => setShowImportModal(false)}
-                onSuccess={() => queryClient.invalidateQueries(['products'])}
-              />
+            <div className="p-4 sm:p-6">
+              <ImportExcelModal onClose={() => setShowImportModal(false)} onSuccess={() => queryClient.invalidateQueries(['products'])} />
             </div>
           </div>
         </div>
       )}
-
-      {/* Variant Manager Modal */}
       {showVariantModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -1175,7 +1214,7 @@ export default function ProductsPage() {
               <h3 className="font-bold text-lg text-gray-800">🔀 Quản lý Biến thể Đóng gói</h3>
               <button onClick={() => setShowVariantModal(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
             </div>
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
               <VariantManager product={showVariantModal} onClose={() => setShowVariantModal(null)} />
             </div>
           </div>

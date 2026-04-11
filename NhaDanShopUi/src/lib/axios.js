@@ -1,17 +1,29 @@
 import axios from 'axios'
 import toast from 'react-hot-toast'
 
-// Khi VITE_API_BASE_URL không set → dùng relative URL (Docker: Nginx proxy /api/ → backend)
-// Khi dev local → fallback về http://localhost:8080
-// Strip trailing /api nếu secret được set kèm /api (vd: http://host/api → http://host)
-const _envBase = import.meta.env.VITE_API_BASE_URL
-const _rawBase = (_envBase !== undefined && _envBase !== null && _envBase !== '')
-  ? _envBase
-  : (import.meta.env.PROD ? '' : 'http://localhost:8080')
-export const API_BASE = _rawBase.replace(/\/api\/?$/, '')
+// ── Quy tắc xác định baseURL ──────────────────────────────────────────────────
+//
+//  VITE_API_BASE_URL được set  → dùng giá trị đó (AWS production)
+//  VITE_API_BASE_URL KHÔNG set → dùng '' (relative URL)
+//    • Dev local : /api/* → Vite proxy (vite.config.js) → localhost:8080
+//    • Production: /api/* → Nginx proxy → backend container
+//
+const _envBase = import.meta.env.VITE_API_BASE_URL ?? ''
+const _rawBase = _envBase.trim().replace(/\/api\/?$/, '').replace(/\/$/, '')
+
+// Sanity check: nếu đang chạy ở localhost:5173 mà env vẫn chứa localhost:8080
+// → reset về '' để dùng Vite proxy, tránh gọi thẳng backend bypass proxy
+export const API_BASE = (
+  typeof window !== 'undefined' &&
+  window.location.hostname === 'localhost' &&
+  _rawBase === 'http://localhost:8080'
+) ? '' : _rawBase
+
+// _resolvedBase = API_BASE (alias nội bộ)
+const _resolvedBase = API_BASE
 
 const api = axios.create({
-  baseURL: API_BASE,
+  baseURL: _resolvedBase,
   headers: { 'Content-Type': 'application/json' },
   withCredentials: false,
 })
@@ -73,7 +85,7 @@ api.interceptors.response.use(
       isRefreshing = true
 
       try {
-        const res = await axios.post(`${API_BASE}/api/auth/refresh`, { refreshToken })
+        const res = await axios.post(`${_resolvedBase}/api/auth/refresh`, { refreshToken })
         const { accessToken, refreshToken: newRefresh } = res.data
 
         localStorage.setItem('nds_access_token',  accessToken)
@@ -104,9 +116,13 @@ api.interceptors.response.use(
       }
     }
 
-    // ── 403: không có quyền ───────────────────────────────────────────────────
+    // ── 403: không có quyền — chỉ hiện toast khi đã đăng nhập (bỏ qua trang công khai)
     if (status === 403) {
-      toast.error('Bạn không có quyền thực hiện thao tác này!')
+      const token = localStorage.getItem('nds_access_token')
+      // Chỉ báo lỗi khi đang đăng nhập (có token), tránh spam toast ở trang cửa hàng công khai
+      if (token) {
+        toast.error('Bạn không có quyền thực hiện thao tác này!')
+      }
     }
 
     return Promise.reject(err)

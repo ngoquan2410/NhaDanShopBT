@@ -17,10 +17,20 @@ export const useReceiptMutations = () => {
     onSuccess: () => { invalidate(); toast.success('Đã tạo phiếu nhập') },
     onError: (e) => toast.error(e?.response?.data?.message || 'Lỗi tạo phiếu nhập'),
   })
+  const updateMeta = useMutation(
+    ({ id, data }) => receiptService.updateMeta(id, data),
+    {
+      onSuccess: () => { invalidate(); toast.success('Đã cập nhật thông tin phiếu') },
+      onError: (e) => toast.error(e?.response?.data?.message || 'Lỗi cập nhật phiếu'),
+    }
+  )
   const remove = useMutation(receiptService.delete, {
     onSuccess: () => { invalidate(); toast.success('Đã xóa phiếu nhập') },
-    onError: () => toast.error('Lỗi khi xóa'),
+    onError: (e) => {
+      const msg = e?.response?.data?.message || e?.response?.data?.detail || 'Lỗi khi xóa'
+      toast.error(msg)
+    },
   })
 
-  return { create, remove }
+  return { create, updateMeta, remove }
 }

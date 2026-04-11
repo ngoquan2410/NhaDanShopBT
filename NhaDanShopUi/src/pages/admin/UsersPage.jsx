@@ -1,6 +1,7 @@
 ﻿import { useState } from 'react'
 import { useUsers, useUserMutations } from '../../hooks/useUsers'
 import dayjs from 'dayjs'
+import { AdminTable, AdminPageHeader, AdminCard } from '../../components/admin/AdminTable'
 
 function Modal({ title, onClose, children }) {
   return (
@@ -106,81 +107,92 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-800">Quản lý Người dùng</h2>
-        <button onClick={() => { setEditing(null); setShowModal(true) }}
-          className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
-          + Thêm người dùng
-        </button>
-      </div>
+    <div className="space-y-4">
+      <AdminPageHeader
+        title="Quản lý Người dùng"
+        actions={
+          <button onClick={() => { setEditing(null); setShowModal(true) }}
+            className="bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 text-sm font-medium">
+            + Thêm người dùng
+          </button>
+        }
+      />
 
-      <div className="bg-white rounded-xl shadow p-4">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 text-gray-600 border-b">
-                <th className="text-left px-4 py-3">ID</th>
-                <th className="text-left px-4 py-3">Tên đăng nhập</th>
-                <th className="text-left px-4 py-3">Họ tên</th>
-                <th className="text-left px-4 py-3">Vai trò</th>
-                <th className="text-center px-4 py-3">Trạng thái</th>
-                <th className="text-left px-4 py-3">Ngày tạo</th>
-                <th className="text-center px-4 py-3">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr><td colSpan={7} className="text-center py-8 text-gray-400">Đang tải...</td></tr>
-              ) : users.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-8 text-gray-400">Không có người dùng</td></tr>
-              ) : users.map(u => (
-                <tr key={u.id} className="border-b hover:bg-gray-50 transition">
-                  <td className="px-4 py-3 text-gray-500">{u.id}</td>
-                  <td className="px-4 py-3 font-medium text-gray-800">{u.username}</td>
-                  <td className="px-4 py-3">{u.fullName || '—'}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {[...u.roles].map(r => (
-                        <span key={r} className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                          r === 'ROLE_ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
-                        }`}>{r.replace('ROLE_', '')}</span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                      u.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                    }`}>
-                      {u.isActive ? 'Hoạt động' : 'Vô hiệu'}
+      <AdminCard>
+        <AdminTable
+          loading={isLoading}
+          rows={users}
+          emptyText="Không có người dùng nào"
+          columns={[
+            { key: 'username', label: 'Đăng nhập', tdClassName: 'font-medium text-gray-800' },
+            { key: 'fullName', label: 'Họ tên', render: u => u.fullName || '—' },
+            { key: 'roles', label: 'Vai trò',
+              render: u => (
+                <div className="flex flex-wrap gap-1">
+                  {[...u.roles].map(r => (
+                    <span key={r} className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${r === 'ROLE_ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                      {r.replace('ROLE_', '')}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">
-                    {dayjs(u.createdAt).format('DD/MM/YYYY')}
-                  </td>
-                  <td className="px-4 py-3 text-center whitespace-nowrap">
-                    <button onClick={() => handleEdit(u)} className="text-blue-600 hover:text-blue-800 mr-2 text-xs">✏️ Sửa</button>
-                    <button onClick={() => handleDelete(u.id)} className="text-red-600 hover:text-red-800 text-xs">🗑️ Xóa</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  ))}
+                </div>
+              )},
+            { key: 'isActive', label: 'Trạng thái', thClassName: 'text-center', tdClassName: 'text-center',
+              render: u => (
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${u.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  {u.isActive ? 'Hoạt động' : 'Vô hiệu'}
+                </span>
+              )},
+            { key: 'createdAt', label: 'Ngày tạo', tdClassName: 'text-gray-500 text-xs',
+              render: u => dayjs(u.createdAt).format('DD/MM/YYYY') },
+            { key: 'actions', label: 'Thao tác', isAction: true, thClassName: 'text-center', tdClassName: 'text-center whitespace-nowrap',
+              render: u => (
+                <div className="flex items-center justify-center gap-2">
+                  <button onClick={() => handleEdit(u)} className="text-blue-600 hover:text-blue-800 text-xs px-2 py-1 rounded hover:bg-blue-50">✏️ Sửa</button>
+                  <button onClick={() => handleDelete(u.id)} className="text-red-600 hover:text-red-800 text-xs px-2 py-1 rounded hover:bg-red-50">🗑️ Xóa</button>
+                </div>
+              )},
+          ]}
+          mobileCard={u => (
+            <div>
+              <div className="flex items-start justify-between mb-1.5">
+                <div>
+                  <p className="font-semibold text-gray-800 text-sm">{u.username}</p>
+                  <p className="text-xs text-gray-500">{u.fullName || '—'}</p>
+                </div>
+                <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium ${u.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  {u.isActive ? 'Hoạt động' : 'Vô hiệu'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                {[...u.roles].map(r => (
+                  <span key={r} className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${r === 'ROLE_ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                    {r.replace('ROLE_', '')}
+                  </span>
+                ))}
+                <span className="text-xs text-gray-400">{dayjs(u.createdAt).format('DD/MM/YYYY')}</span>
+              </div>
+              <div className="flex gap-2 pt-2 border-t border-gray-100">
+                <button onClick={() => handleEdit(u)}
+                  className="flex-1 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 py-1.5 rounded-lg font-medium text-center">✏️ Sửa</button>
+                <button onClick={() => handleDelete(u.id)}
+                  className="flex-1 text-xs bg-red-50 text-red-600 hover:bg-red-100 py-1.5 rounded-lg font-medium text-center">🗑️ Xóa</button>
+              </div>
+            </div>
+          )}
+        />
+
+        <div className="flex items-center justify-between pt-3 border-t mt-2">
+          <button onClick={() => setPage(p => Math.max(0, p-1))} disabled={page===0}
+            className="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-40 hover:bg-gray-100">← Trước</button>
+          <span className="text-sm text-gray-500">Trang {page+1} / {totalPages}</span>
+          <button onClick={() => setPage(p => Math.min(totalPages-1, p+1))} disabled={page>=totalPages-1}
+            className="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-40 hover:bg-gray-100">Sau →</button>
         </div>
-        <div className="flex items-center justify-between pt-3">
-          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-            className="px-3 py-1 border rounded-lg text-sm disabled:opacity-40 hover:bg-gray-100">← Trước</button>
-          <span className="text-sm text-gray-500">Trang {page + 1} / {totalPages}</span>
-          <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
-            className="px-3 py-1 border rounded-lg text-sm disabled:opacity-40 hover:bg-gray-100">Sau →</button>
-        </div>
-      </div>
+      </AdminCard>
 
       {showModal && (
-        <Modal
-          title={editing ? 'Chỉnh sửa người dùng' : 'Thêm người dùng mới'}
-          onClose={() => { setShowModal(false); setEditing(null) }}
-        >
+        <Modal title={editing ? 'Chỉnh sửa người dùng' : 'Thêm người dùng mới'}
+          onClose={() => { setShowModal(false); setEditing(null) }}>
           <UserForm initial={editing} onSubmit={handleSubmit} loading={create.isLoading || update.isLoading} />
         </Modal>
       )}

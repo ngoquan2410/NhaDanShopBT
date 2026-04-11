@@ -7,6 +7,8 @@ export const receiptService = {
     api.get(`/api/receipts?from=${from}&to=${to}&page=${page}&size=${size}`).then(r => r.data),
   getOne: (id) => api.get(`/api/receipts/${id}`).then(r => r.data),
   create: (data) => api.post('/api/receipts', data).then(r => r.data),
+  /** PATCH /api/receipts/{id}/meta — chỉ sửa ghi chú và nhà cung cấp */
+  updateMeta: (id, data) => api.patch(`/api/receipts/${id}/meta`, data).then(r => r.data),
   delete: (id) => api.delete(`/api/receipts/${id}`),
 
   // ── Import Excel ──────────────────────────────────────────────────────────

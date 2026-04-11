@@ -1,4 +1,4 @@
-﻿﻿﻿import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+﻿﻿﻿﻿import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProducts } from '../../hooks/useProducts'
 import { useCategories } from '../../hooks/useCategories'
@@ -13,7 +13,7 @@ import { pendingOrderService, ORDER_STATUS } from '../../services/pendingOrderSe
 import { usePendingOrderMutations, usePendingOrderById } from '../../hooks/usePendingOrders'
 import toast from 'react-hot-toast'
 
-// ── ComboCard — Combo không cần chọn variant, hiển thị giá combo trực tiếp ───
+// ── ComboCard — responsive mobile/iPad/desktop ──────────────────────────────
 function ComboCard({ combo, onAddToCart }) {
   const [qty, setQty] = useState(1)
   const stockQty   = combo.stockQty ?? 0
@@ -22,85 +22,61 @@ function ComboCard({ combo, onAddToCart }) {
   const saving     = (Number(combo.totalComponentRetailPrice) || 0) - sellPrice
 
   return (
-    <div className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-200 hover:-translate-y-1 overflow-hidden border border-purple-100 flex flex-col">
-      {/* Ảnh / placeholder */}
-      <div className="bg-gradient-to-br from-purple-50 to-purple-100 h-36 flex items-center justify-center overflow-hidden relative">
-        {combo.imageUrl
-          ? <img src={combo.imageUrl} alt={combo.name} className="w-full h-full object-cover"
-              onError={e => { e.target.style.display='none'; if(e.target.nextSibling) e.target.nextSibling.style.display='flex' }} />
-          : null}
-        <div className="absolute inset-0 flex flex-col items-center justify-center select-none"
-          style={{ display: combo.imageUrl ? 'none' : 'flex' }}>
-          <span className="text-4xl">📦</span>
-          <span className="text-xs text-purple-400 font-medium mt-1">COMBO</span>
+    <div className="bg-white rounded-xl shadow-sm hover:shadow-lg active:scale-[0.98] transition-all duration-150 overflow-hidden border border-purple-100 flex flex-col">
+      {/* Image */}
+      <div className="relative bg-gradient-to-br from-purple-50 to-purple-100 overflow-hidden" style={{ paddingBottom: '75%' }}>
+        <div className="absolute inset-0 flex items-center justify-center">
+          {combo.imageUrl ? (
+            <img src={combo.imageUrl} alt={combo.name} className="w-full h-full object-cover" loading="lazy"
+              onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }} />
+          ) : null}
+          <div className="w-full h-full flex items-center justify-center text-3xl select-none"
+            style={{ display: combo.imageUrl ? 'none' : 'flex' }}>📦</div>
         </div>
-        {/* Badge tiết kiệm */}
         {saving > 0 && (
-          <div className="absolute top-2 right-2 bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
-            -{Math.round(saving / (Number(combo.totalComponentRetailPrice)||1) * 100)}%
-          </div>
-        )}
-      </div>
-
-      <div className="p-3 flex flex-col flex-1">
-        <div className="flex items-center gap-1 mb-1">
-          <span className="font-mono text-xs text-purple-500">{combo.code}</span>
-          <span className="text-xs bg-purple-100 text-purple-600 px-1 rounded">COMBO</span>
-        </div>
-        <h3 className="font-semibold text-gray-800 text-sm leading-tight flex-1">{combo.name}</h3>
-        {combo.description && (
-          <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{combo.description}</p>
-        )}
-
-        {/* Thành phần pills */}
-        <div className="flex flex-wrap gap-1 mt-1.5 mb-2">
-          {(combo.items || []).slice(0, 3).map((it, i) => (
-            <span key={i} className="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-1.5 py-0.5 rounded-full">
-              {it.productCode} ×{it.quantity}
+          <div className="absolute top-1.5 right-1.5">
+            <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+              -{Math.round(saving / (Number(combo.totalComponentRetailPrice) || 1) * 100)}%
             </span>
-          ))}
-          {(combo.items || []).length > 3 && (
-            <span className="text-xs text-gray-400">+{combo.items.length - 3}</span>
-          )}
-        </div>
-
-        {/* Tồn kho */}
-        <div className="mb-2">
-          {outOfStock
-            ? <span className="bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded-full">Hết hàng</span>
-            : stockQty <= 5
-              ? <span className="bg-orange-100 text-orange-700 text-xs px-1.5 py-0.5 rounded-full">Còn {stockQty} combo</span>
-              : <span className="text-xs text-gray-400">Còn {stockQty} combo</span>}
-        </div>
-
-        {/* Giá */}
-        <div className="flex items-end gap-2 mb-2">
-          <span className="text-base font-bold text-purple-700">{sellPrice.toLocaleString('vi-VN')} ₫</span>
-          {Number(combo.totalComponentRetailPrice) > sellPrice && (
-            <span className="text-xs text-gray-400 line-through">
-              {Number(combo.totalComponentRetailPrice).toLocaleString('vi-VN')} ₫
-            </span>
-          )}
-        </div>
-
-        {!outOfStock && (
-          <div className="flex items-center gap-1 mt-auto">
-            <div className="flex items-center border rounded-lg overflow-hidden flex-1">
-              <button onClick={() => setQty(q => Math.max(1, q - 1))}
-                className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-sm font-bold">-</button>
-              <span className="flex-1 text-center text-sm font-medium py-1">{qty}</span>
-              <button onClick={() => setQty(q => Math.min(stockQty, q + 1))}
-                className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-sm font-bold">+</button>
-            </div>
-            <button
-              onClick={() => { onAddToCart(combo, qty); setQty(1) }}
-              className="bg-purple-600 hover:bg-purple-700 text-white px-2 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap">
-              Thêm
-            </button>
           </div>
         )}
         {outOfStock && (
-          <button disabled className="mt-auto w-full bg-gray-200 text-gray-400 py-1.5 rounded-lg text-xs font-semibold cursor-not-allowed">
+          <div className="absolute top-1.5 left-1.5">
+            <span className="bg-red-500/90 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">Hết</span>
+          </div>
+        )}
+        <div className="absolute bottom-1 left-1.5">
+          <span className="text-[10px] bg-purple-600/80 text-white px-1.5 py-0.5 rounded-full font-medium">COMBO</span>
+        </div>
+      </div>
+      {/* Info */}
+      <div className="p-2.5 sm:p-3 flex flex-col flex-1 gap-1">
+        <h3 className="font-semibold text-gray-800 text-xs sm:text-sm leading-tight line-clamp-2 flex-1">{combo.name}</h3>
+        <div className="flex items-baseline gap-1.5 mt-0.5">
+          <span className="text-sm sm:text-base font-bold text-purple-700">{sellPrice.toLocaleString('vi-VN')}₫</span>
+          {Number(combo.totalComponentRetailPrice) > sellPrice && (
+            <span className="text-[10px] text-gray-400 line-through">
+              {Number(combo.totalComponentRetailPrice).toLocaleString('vi-VN')}₫
+            </span>
+          )}
+        </div>
+        {!outOfStock ? (
+          <div className="flex items-center gap-1 mt-1">
+            <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden">
+              <button onClick={() => setQty(q => Math.max(1, q - 1))}
+                className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center text-gray-600 hover:bg-gray-100 active:bg-gray-200 font-bold text-base transition">−</button>
+              <span className="w-6 sm:w-7 text-center text-xs sm:text-sm font-semibold">{qty}</span>
+              <button onClick={() => setQty(q => Math.min(stockQty, q + 1))}
+                className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center text-gray-600 hover:bg-gray-100 active:bg-gray-200 font-bold text-base transition">+</button>
+            </div>
+            <button onClick={() => { onAddToCart(combo, qty); setQty(1) }}
+              className="flex-1 h-7 sm:h-8 text-white rounded-lg text-xs sm:text-sm font-semibold transition active:scale-95"
+              style={{ background: '#7c3aed' }}>
+              + Thêm
+            </button>
+          </div>
+        ) : (
+          <button disabled className="mt-1 w-full h-7 bg-gray-100 text-gray-400 rounded-lg text-xs font-semibold cursor-not-allowed">
             Hết hàng
           </button>
         )}
@@ -109,10 +85,9 @@ function ComboCard({ combo, onAddToCart }) {
   )
 }
 
-// ── ProductCard — SP đơn, giữ nguyên variant selector ────────────────────────
+// ── ProductCard — responsive mobile/iPad/desktop ────────────────────────────
 function ProductCard({ product, onAddToCart }) {
   const [qty, setQty] = useState(1)
-  // [Sprint 0] Variants support
   const variants = product.variants || []
   const hasMultiVariant = variants.length > 1
   const [selectedVariantId, setSelectedVariantId] = useState(
@@ -122,84 +97,101 @@ function ProductCard({ product, onAddToCart }) {
     || variants.find(v => v.isDefault)
     || null
 
-  // Dùng variant data — product không còn sellPrice/stockQty
-  const sellPrice = selectedVariant ? Number(selectedVariant.sellPrice) : 0
-  const sellUnit  = selectedVariant ? selectedVariant.sellUnit : 'cai'
-  const stockQty  = selectedVariant ? selectedVariant.stockQty : 0
+  const sellPrice  = selectedVariant ? Number(selectedVariant.sellPrice) : 0
+  const sellUnit   = selectedVariant ? selectedVariant.sellUnit : 'cái'
+  const stockQty   = selectedVariant ? selectedVariant.stockQty : 0
   const outOfStock = stockQty <= 0
 
   return (
-    <div className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-200 hover:-translate-y-1 overflow-hidden border border-amber-100 flex flex-col">
-      <div className="bg-gradient-to-br from-amber-50 to-amber-100 h-36 flex items-center justify-center overflow-hidden relative">
-        {product.imageUrl ? (
-          <img
-            src={product.imageUrl}
-            alt={product.name}
-            className="w-full h-full object-cover"
-            onError={e => {
-              e.target.style.display = 'none'
-              if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'
-            }}
-          />
-        ) : null}
-        <div
-          className="absolute inset-0 flex items-center justify-center text-5xl select-none"
-          style={{ display: product.imageUrl ? 'none' : 'flex' }}
-        >
-          {'\uD83D\uDECD'}
+    <div className="bg-white rounded-xl shadow-sm hover:shadow-lg active:scale-[0.98] transition-all duration-150 overflow-hidden border border-amber-100 flex flex-col">
+      {/* Product image — taller on mobile for better visual */}
+      <div className="relative bg-gradient-to-br from-amber-50 to-amber-100 overflow-hidden"
+        style={{ paddingBottom: '75%' }}>
+        <div className="absolute inset-0 flex items-center justify-center">
+          {product.imageUrl ? (
+            <img
+              src={product.imageUrl}
+              alt={product.name}
+              className="w-full h-full object-cover"
+              loading="lazy"
+              onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }}
+            />
+          ) : null}
+          <div
+            className="w-full h-full flex items-center justify-center text-4xl select-none"
+            style={{ display: product.imageUrl ? 'none' : 'flex' }}
+          >🛒</div>
         </div>
-      </div>
-      <div className="p-3 flex flex-col flex-1">
-        <p className="text-xs text-gray-400 font-mono">{product.code}</p>
-        <h3 className="font-semibold text-gray-800 text-sm leading-tight mt-0.5 flex-1">{product.name}</h3>
-        <p className="text-xs text-gray-400 mt-1 mb-2">{product.categoryName}</p>
-        <div className="flex items-center gap-1 mb-2 flex-wrap">
-          {outOfStock && <span className="bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded-full">Hết hàng</span>}
-          {!outOfStock && stockQty <= 5 && <span className="bg-orange-100 text-orange-700 text-xs px-1.5 py-0.5 rounded-full">Sắp hết</span>}
-          {!outOfStock && stockQty > 5 && <span className="text-xs text-gray-400">Còn {stockQty} {sellUnit}</span>}
-        </div>
-        {/* [Sprint 0] Variant selector — chỉ hiện khi có >1 variant */}
-        {hasMultiVariant && (
-          <div className="mb-2">
-            <select value={selectedVariantId || ''} onChange={e => setSelectedVariantId(Number(e.target.value))}
-              className="w-full border border-purple-200 rounded-lg px-2 py-1 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-400">
-              {variants.map(v => (
-                <option key={v.id} value={v.id} disabled={v.stockQty <= 0}>
-                  {v.variantName} — {Number(v.sellPrice).toLocaleString('vi-VN')}₫/{v.sellUnit}
-                  {v.stockQty <= 0 ? ' (Hết)' : ''}
-                </option>
-              ))}
-            </select>
+        {/* Stock badges */}
+        {outOfStock && (
+          <div className="absolute top-1.5 left-1.5">
+            <span className="bg-red-500/90 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">Hết</span>
           </div>
         )}
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-base font-bold text-green-700">
-            {sellPrice.toLocaleString('vi-VN')} {'\u20AB'}
+        {!outOfStock && stockQty <= 5 && (
+          <div className="absolute top-1.5 left-1.5">
+            <span className="bg-orange-500/90 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">Sắp hết</span>
+          </div>
+        )}
+      </div>
+
+      {/* Info */}
+      <div className="p-2.5 sm:p-3 flex flex-col flex-1 gap-1">
+        {/* Name */}
+        <h3 className="font-semibold text-gray-800 text-xs sm:text-sm leading-tight line-clamp-2 flex-1">
+          {product.name}
+        </h3>
+
+        {/* Variant selector */}
+        {hasMultiVariant && (
+          <select
+            value={selectedVariantId || ''}
+            onChange={e => setSelectedVariantId(Number(e.target.value))}
+            className="w-full border border-purple-200 rounded-lg px-2 py-1.5 text-xs text-gray-700 bg-purple-50 focus:outline-none focus:ring-1 focus:ring-purple-400 mt-0.5"
+          >
+            {variants.map(v => (
+              <option key={v.id} value={v.id} disabled={v.stockQty <= 0}>
+                {v.variantName} — {Number(v.sellPrice).toLocaleString('vi-VN')}₫
+                {v.stockQty <= 0 ? ' (Hết)' : ''}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {/* Price */}
+        <div className="flex items-baseline gap-1 mt-0.5">
+          <span className="text-sm sm:text-base font-bold text-amber-700">
+            {sellPrice.toLocaleString('vi-VN')}₫
           </span>
-          <span className="text-xs text-gray-400">/{sellUnit}</span>
+          <span className="text-[10px] text-gray-400">/{sellUnit}</span>
         </div>
-        {!outOfStock && (
-          <div className="flex items-center gap-1 mt-auto">
-            <div className="flex items-center border rounded-lg overflow-hidden flex-1">
-              <button onClick={() => setQty(q => Math.max(1, q - 1))}
-                className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-sm font-bold">-</button>
-              <span className="flex-1 text-center text-sm font-medium py-1">{qty}</span>
-              <button onClick={() => setQty(q => Math.min(stockQty, q + 1))}
-                className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-sm font-bold">+</button>
+
+        {/* Add to cart controls */}
+        {!outOfStock ? (
+          <div className="flex items-center gap-1 mt-1">
+            {/* Qty stepper */}
+            <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden">
+              <button
+                onClick={() => setQty(q => Math.max(1, q - 1))}
+                className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center text-gray-600 hover:bg-gray-100 active:bg-gray-200 font-bold text-base transition"
+              >−</button>
+              <span className="w-6 sm:w-7 text-center text-xs sm:text-sm font-semibold text-gray-800">{qty}</span>
+              <button
+                onClick={() => setQty(q => Math.min(stockQty, q + 1))}
+                className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center text-gray-600 hover:bg-gray-100 active:bg-gray-200 font-bold text-base transition"
+              >+</button>
             </div>
+            {/* Add button */}
             <button
-              onClick={() => {
-                onAddToCart(product, qty, stockQty, selectedVariant)
-                setQty(1)
-              }}
-              className="bg-amber-600 hover:bg-amber-700 text-white px-2 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap"
+              onClick={() => { onAddToCart(product, qty, stockQty, selectedVariant); setQty(1) }}
+              className="flex-1 h-7 sm:h-8 text-white rounded-lg text-xs sm:text-sm font-semibold transition active:scale-95"
+              style={{ background: '#b45309' }}
             >
-              Thêm
+              + Thêm
             </button>
           </div>
-        )}
-        {outOfStock && (
-          <button disabled className="mt-auto w-full bg-gray-200 text-gray-400 py-1.5 rounded-lg text-xs font-semibold cursor-not-allowed">
+        ) : (
+          <button disabled className="mt-1 w-full h-7 bg-gray-100 text-gray-400 rounded-lg text-xs font-semibold cursor-not-allowed">
             Hết hàng
           </button>
         )}
@@ -207,70 +199,104 @@ function ProductCard({ product, onAddToCart }) {
     </div>
   )
 }
-// CartDrawer
+// ── CartDrawer — full screen on mobile, side drawer on tablet+ ──────────────
 function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout }) {
   const total = cart.reduce((s, i) => s + (i.sellPrice ?? 0) * i.qty, 0)
   return (
     <div className="fixed inset-0 z-50 flex">
-      <div className="flex-1 bg-black/40" onClick={onClose} />
-      <div className="w-full max-w-sm bg-white shadow-2xl flex flex-col h-full">
-        <div className="flex items-center justify-between px-4 py-3 border-b text-white" style={{background:'linear-gradient(90deg,#92400e,#b45309)'}}>
-          <h2 className="font-bold text-lg">Giỏ hàng ({cart.length})</h2>
-          <button onClick={onClose} className="text-2xl leading-none">&times;</button>
+      {/* Backdrop */}
+      <div className="hidden sm:flex flex-1 bg-black/40" onClick={onClose} />
+
+      {/* Drawer panel: full width on mobile, max-w-sm on tablet+ */}
+      <div className="w-full sm:max-w-sm bg-white shadow-2xl flex flex-col h-full">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3.5 border-b text-white shrink-0"
+          style={{ background: 'linear-gradient(90deg,#92400e,#b45309)' }}>
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🛒</span>
+            <h2 className="font-bold text-lg">Giỏ hàng</h2>
+            {cart.length > 0 && (
+              <span className="bg-white/30 text-white text-sm font-bold rounded-full px-2 py-0.5">
+                {cart.reduce((s, i) => s + i.qty, 0)}
+              </span>
+            )}
+          </div>
+          <button onClick={onClose}
+            className="w-8 h-8 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30 text-xl transition">
+            ×
+          </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {cart.length === 0 && (
-            <div className="text-center py-16 text-gray-400">
-              <div className="text-5xl mb-3">🛒</div>
-              <p>Giỏ hàng trống</p>
+
+        {/* Items */}
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2.5">
+          {cart.length === 0 ? (
+            <div className="text-center py-20 text-gray-400">
+              <div className="text-6xl mb-4">🛒</div>
+              <p className="font-medium">Giỏ hàng trống</p>
+              <p className="text-sm mt-1">Hãy thêm sản phẩm vào giỏ!</p>
             </div>
-          )}
-          {cart.map(item => {
+          ) : cart.map(item => {
             const price = item.sellPrice ?? 0
-            const unit  = item.sellUnit ?? 'cai'
+            const unit  = item.sellUnit ?? 'cái'
             const displayName = item.isCombo
               ? item.product.name
               : item.variant
                 ? `${item.product.name} (${item.variant.variantName})`
                 : item.product.name
             return (
-              <div key={item.cartKey} className={`flex items-center gap-3 rounded-xl p-3 ${item.isCombo ? 'bg-purple-50' : 'bg-amber-50'}`}>
-                <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden ${item.isCombo ? 'bg-purple-100' : 'bg-amber-100'}`}>
+              <div key={item.cartKey}
+                className={`flex items-center gap-3 rounded-xl p-3 ${item.isCombo ? 'bg-purple-50 border border-purple-100' : 'bg-amber-50 border border-amber-100'}`}>
+                {/* Thumbnail */}
+                <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden ${item.isCombo ? 'bg-purple-100' : 'bg-amber-100'}`}>
                   {item.product.imageUrl
-                    ? <img src={item.product.imageUrl} alt={item.product.name} className="w-full h-full object-cover" onError={e=>{e.target.style.display='none'}} />
+                    ? <img src={item.product.imageUrl} alt={item.product.name}
+                        className="w-full h-full object-cover rounded-xl"
+                        onError={e => { e.target.style.display = 'none' }} />
                     : item.isCombo ? '📦' : '🛍'}
                 </div>
+
+                {/* Info */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1 flex-wrap">
-                    {item.isCombo && <span className="text-xs bg-purple-200 text-purple-700 px-1 rounded font-medium">COMBO</span>}
-                    <p className="text-sm font-medium text-gray-800 truncate">{displayName}</p>
-                  </div>
-                  <p className={`text-xs font-semibold ${item.isCombo ? 'text-purple-700' : 'text-amber-700'}`}>
-                    {price.toLocaleString('vi-VN')} ₫ / {unit}
+                  {item.isCombo && (
+                    <span className="text-[10px] bg-purple-200 text-purple-700 px-1.5 py-0.5 rounded-full font-medium">COMBO</span>
+                  )}
+                  <p className="text-sm font-semibold text-gray-800 leading-tight mt-0.5 line-clamp-2">{displayName}</p>
+                  <p className={`text-xs font-bold mt-0.5 ${item.isCombo ? 'text-purple-600' : 'text-amber-700'}`}>
+                    {price.toLocaleString('vi-VN')}₫/{unit}
+                  </p>
+                  <p className="text-xs text-gray-500 font-medium">
+                    = {(price * item.qty).toLocaleString('vi-VN')}₫
                   </p>
                 </div>
-                <div className="flex items-center gap-1">
-                  <button onClick={() => onUpdateQty(item.cartKey, item.qty - 1)}
-                    className="w-6 h-6 rounded bg-gray-200 hover:bg-gray-300 text-xs font-bold flex items-center justify-center">-</button>
-                  <span className="w-7 text-center text-sm font-semibold">{item.qty}</span>
-                  <button onClick={() => onUpdateQty(item.cartKey, item.qty + 1)}
-                    className="w-6 h-6 rounded bg-gray-200 hover:bg-gray-300 text-xs font-bold flex items-center justify-center">+</button>
+
+                {/* Qty controls — bigger on mobile */}
+                <div className="flex flex-col items-center gap-1.5 shrink-0">
+                  <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
+                    <button onClick={() => onUpdateQty(item.cartKey, item.qty - 1)}
+                      className="w-8 h-8 flex items-center justify-center text-gray-600 hover:bg-gray-100 active:bg-gray-200 font-bold text-base transition">−</button>
+                    <span className="w-8 text-center text-sm font-bold text-gray-800">{item.qty}</span>
+                    <button onClick={() => onUpdateQty(item.cartKey, item.qty + 1)}
+                      className="w-8 h-8 flex items-center justify-center text-gray-600 hover:bg-gray-100 active:bg-gray-200 font-bold text-base transition">+</button>
+                  </div>
+                  <button onClick={() => onRemove(item.cartKey)}
+                    className="text-xs text-red-400 hover:text-red-600 transition">🗑 Xóa</button>
                 </div>
-                <button onClick={() => onRemove(item.cartKey)}
-                  className="text-red-400 hover:text-red-600 text-lg ml-1">&times;</button>
               </div>
             )
           })}
         </div>
+
+        {/* Footer */}
         {cart.length > 0 && (
-          <div className="border-t p-4 space-y-3 bg-white">
-            <div className="flex justify-between text-base font-bold">
-              <span>Tổng cộng:</span>
-              <span className="text-amber-700 text-lg">{Number(total).toLocaleString('vi-VN')} ₫</span>
+          <div className="border-t p-4 bg-white shrink-0 space-y-3 safe-area-bottom">
+            <div className="flex justify-between items-center">
+              <span className="text-gray-600 font-medium">Tổng cộng:</span>
+              <span className="text-xl font-bold text-amber-700">{Number(total).toLocaleString('vi-VN')} ₫</span>
             </div>
             <button onClick={onCheckout}
-              className="w-full text-white py-3 rounded-xl font-bold text-base transition" style={{background:'#b45309'}}>
-              Thanh toán &rarr;
+              className="w-full text-white py-3.5 rounded-2xl font-bold text-base transition active:scale-[0.98] shadow-lg"
+              style={{ background: 'linear-gradient(90deg,#92400e,#b45309)' }}>
+              Thanh toán ({cart.reduce((s, i) => s + i.qty, 0)} sp) →
             </button>
           </div>
         )}
@@ -884,133 +910,130 @@ export default function StorefrontPage() {
       (c.description || '').toLowerCase().includes(s))
   }, [activeCombos, search])
 
+
   return (
-    <div className="space-y-6">
-      {/* Hero */}
-      <div className="rounded-2xl p-8 text-white" style={{background:'linear-gradient(135deg,#92400e 0%,#b45309 60%,#d97706 100%)'}}>
-        <h1 className="text-3xl font-bold mb-2">Nhã Đan Shop</h1>
-        <p className="text-amber-100 text-lg">Hàng tươi ngon – Giá cả hợp lý – Phục vụ tận tâm</p>
-        <div className="mt-4 relative max-w-md">
+    <div className="space-y-4 sm:space-y-5">
+      {/* ── Hero ── */}
+      <div className="rounded-2xl px-4 py-5 sm:px-8 sm:py-8 text-white"
+        style={{ background: 'linear-gradient(135deg,#92400e 0%,#b45309 60%,#d97706 100%)' }}>
+        <h1 className="text-xl sm:text-3xl font-bold mb-1">Nhã Đan Shop</h1>
+        <p className="text-amber-100 text-xs sm:text-lg mb-3">Hàng tươi ngon – Giá cả hợp lý – Phục vụ tận tâm</p>
+        <div className="relative max-w-lg">
           <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Tìm kiếm sản phẩm, combo..."
-            className="w-full rounded-xl px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-300 pr-10" />
-          <span className="absolute right-3 top-3 text-gray-400">🔍</span>
+            placeholder="Tìm kiếm sản phẩm..."
+            className="w-full rounded-xl px-4 py-2.5 sm:py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-300 pr-10 text-sm" />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-3">
+      {/* ── Tabs ── */}
+      <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar -mx-1 px-1">
         {[
-          { key: 'all',   label: 'Tất cả sản phẩm',   active: tab==='all'  },
-          { key: 'hot',   label: '🔥 Bán chạy nhất',   active: tab==='hot'  },
-          { key: 'combo', label: `📦 Combo (${activeCombos.length})`, active: tab==='combo' },
+          { key: 'all',   label: 'Tất cả',   icon: '🛒', active: tab === 'all' },
+          { key: 'hot',   label: 'Bán chạy', icon: '🔥', active: tab === 'hot' },
+          { key: 'combo', label: `Combo (${activeCombos.length})`, icon: '📦', active: tab === 'combo' },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-5 py-2.5 rounded-xl font-semibold text-sm transition ${t.active ? 'text-white shadow-md' : 'bg-white text-gray-600 border hover:bg-amber-50'}`}
-            style={t.active ? {background: t.key==='combo' ? '#7c3aed' : '#b45309'} : {}}>
-            {t.label}
+            className={`flex items-center gap-1.5 px-3 sm:px-5 py-2 rounded-xl font-semibold text-xs sm:text-sm transition whitespace-nowrap shrink-0 ${
+              t.active ? 'text-white shadow-md' : 'bg-white text-gray-600 border hover:bg-amber-50'
+            }`}
+            style={t.active ? { background: t.key === 'combo' ? '#7c3aed' : '#b45309' } : {}}>
+            <span>{t.icon}</span><span>{t.label}</span>
           </button>
         ))}
       </div>
 
-      {/* Category filter — chỉ hiện khi không ở tab combo */}
+      {/* ── Category filters ── */}
       {tab !== 'combo' && (
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => setSelectedCat('all')}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${selectedCat==='all' ? 'text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}
-            style={selectedCat==='all' ? {background:'#b45309'} : {}}>
-            Tất cả
-          </button>
-          {categories.filter(c => c.active).map(cat => (
+        <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar -mx-1 px-1">
+          {[{ id: 'all', name: 'Tất cả' }, ...categories.filter(c => c.active)].map(cat => (
             <button key={cat.id} onClick={() => setSelectedCat(String(cat.id))}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${selectedCat===String(cat.id) ? 'text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}
-              style={selectedCat===String(cat.id) ? {background:'#b45309'} : {}}>
+              className={`px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium transition whitespace-nowrap shrink-0 ${
+                selectedCat === String(cat.id) ? 'text-white' : 'bg-white border text-gray-600 hover:bg-amber-50'
+              }`}
+              style={selectedCat === String(cat.id) ? { background: '#b45309' } : {}}>
               {cat.name}
             </button>
           ))}
         </div>
       )}
 
-      {/* ── Tab COMBO ── */}
+      {/* ── Combo tab ── */}
       {tab === 'combo' && (
         <>
-          <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 text-sm text-purple-800 flex items-start gap-3">
-            <span className="text-2xl shrink-0">📦</span>
-            <div>
-              <p className="font-semibold">Mua Combo — Tiết kiệm hơn mua lẻ!</p>
-              <p className="text-xs text-purple-600 mt-0.5">
-                Tồn kho combo tự động cập nhật theo từng thành phần. Thêm vào giỏ và thanh toán bình thường.
-              </p>
-            </div>
-          </div>
-          <p className="text-sm text-gray-500">
-            Hiển thị <span className="font-semibold text-gray-700">{filteredCombos.length}</span> combo đang có hàng
+          <p className="text-xs sm:text-sm text-gray-500">
+            <span className="font-semibold text-gray-700">{filteredCombos.length}</span> combo đang có hàng
           </p>
-          {filteredCombos.length === 0
-            ? <div className="text-center py-20 text-gray-400">
-                <div className="text-5xl mb-3">📦</div>
-                <p>Hiện chưa có combo nào đang bán</p>
-              </div>
-            : <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                {filteredCombos.map(combo => (
-                  <ComboCard key={combo.id} combo={combo} onAddToCart={addComboToCart} />
-                ))}
-              </div>
-          }
+          {filteredCombos.length === 0 ? (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-5xl mb-3">📦</div>
+              <p>Chưa có combo nào đang bán</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3">
+              {filteredCombos.map(combo => (
+                <ComboCard key={combo.id} combo={combo} onAddToCart={addComboToCart} />
+              ))}
+            </div>
+          )}
         </>
       )}
 
-      {/* ── Tab SP đơn ── */}
+      {/* ── Products tab ── */}
       {tab !== 'combo' && (
         <>
-          <p className="text-sm text-gray-500">
-            Hiển thị <span className="font-semibold text-gray-700">{filteredProducts.length}</span> sản phẩm
+          <p className="text-xs sm:text-sm text-gray-500">
+            <span className="font-semibold text-gray-700">{filteredProducts.length}</span> sản phẩm
           </p>
-          {isLoading
-            ? <div className="text-center py-20 text-gray-400 text-lg">Đang tải sản phẩm...</div>
-            : filteredProducts.length === 0
-              ? <div className="text-center py-20 text-gray-400">
-                  <div className="text-5xl mb-4">🔍</div>
-                  <p>Không tìm thấy sản phẩm phù hợp</p>
-                </div>
-              : <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                  {filteredProducts.map(p => (
-                    <ProductCard key={p.id} product={p} onAddToCart={addToCart} />
-                  ))}
-                </div>
-          }
+          {isLoading ? (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-4xl mb-3 animate-pulse">🛒</div>
+              <p>Đang tải sản phẩm...</p>
+            </div>
+          ) : filteredProducts.length === 0 ? (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-5xl mb-3">🔍</div>
+              <p>Không tìm thấy sản phẩm phù hợp</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3">
+              {filteredProducts.map(p => (
+                <ProductCard key={p.id} product={p} onAddToCart={addToCart} />
+              ))}
+            </div>
+          )}
         </>
       )}
 
-      {/* Floating Cart */}
-      {cartCount > 0 && (
+      {/* ── Floating Cart button ── */}
+      {cartCount > 0 && !showCart && (
         <button onClick={() => setShowCart(true)}
-          className="fixed bottom-6 right-6 text-white rounded-full shadow-2xl p-4 flex items-center gap-2 z-40 transition-all hover:scale-105"
-          style={{background:'#b45309'}}>
-          <span className="text-xl">🛒</span>
-          <span className="font-bold">{cartCount}</span>
-          <span className="text-sm hidden sm:inline">giỏ hàng</span>
+          className="fixed bottom-20 md:bottom-8 right-4 sm:right-6 text-white rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-2.5 z-40 transition-all hover:scale-105 active:scale-95"
+          style={{ background: 'linear-gradient(135deg,#7c3209,#b45309)' }}>
+          <span className="text-2xl">🛒</span>
+          <div className="text-left leading-tight">
+            <div className="text-[10px] opacity-80">Giỏ hàng</div>
+            <div className="font-bold text-sm">{cartCount} sản phẩm</div>
+          </div>
+          <span className="bg-white text-amber-800 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">
+            {cartCount}
+          </span>
         </button>
       )}
+
+      {/* ── Modals ── */}
       {showCart && (
         <CartDrawer cart={cart} onClose={() => setShowCart(false)}
           onUpdateQty={updateQty} onRemove={removeFromCart}
           onCheckout={() => { setShowCart(false); setShowCheckout(true) }} />
       )}
       {showCheckout && (
-        <CheckoutModal
-          cart={cart}
-          onClose={() => setShowCheckout(false)}
-          onCashSuccess={handleCashSuccess}
-          onPendingCreated={handlePendingCreated}
-        />
+        <CheckoutModal cart={cart} onClose={() => setShowCheckout(false)}
+          onCashSuccess={handleCashSuccess} onPendingCreated={handlePendingCreated} />
       )}
       {pendingOrderId && (
-        <PendingOrderStatusModal
-          pendingOrderId={pendingOrderId}
-          onClose={() => setPendingOrderId(null)}
-          onConfirmed={handlePendingConfirmed}
-        />
+        <PendingOrderStatusModal pendingOrderId={pendingOrderId}
+          onClose={() => setPendingOrderId(null)} onConfirmed={handlePendingConfirmed} />
       )}
       {successInvoice && (
         <OrderSuccessModal invoice={successInvoice} onClose={() => setSuccessInvoice(null)} />

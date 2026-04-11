@@ -8,6 +8,7 @@ import com.example.nhadanshop.repository.*;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional
@@ -31,13 +33,14 @@ public class InvoiceService {
     private final UserRepository userRepo;
     private final InvoiceNumberGenerator numberGen;
     private final ProductBatchService batchService;
+    private final ProductBatchRepository batchRepo;      // Issue 15: FEFO restore accurate
     private final PromotionRepository promotionRepo;
-    private final ProductVariantService variantService; // Sprint 0
-    private final ProductVariantRepository variantRepo; // Sprint 0 — explicit save
-    private final ProductComboRepository comboItemRepo; // Combo KiotViet
-    private final ProductComboService comboService;     // Combo KiotViet — refreshVirtualStock
-    private final CustomerRepository customerRepository; // Sprint 2
-    private final CustomerService customerService;       // Sprint 2
+    private final ProductVariantService variantService;
+    private final ProductVariantRepository variantRepo;
+    private final ProductComboRepository comboItemRepo;
+    private final ProductComboService comboService;
+    private final CustomerRepository customerRepository;
+    private final CustomerService customerService;
 
     @Transactional
     public SalesInvoiceResponse createInvoice(SalesInvoiceRequest req) {
@@ -362,20 +365,120 @@ public class InvoiceService {
     @Transactional
     public void deleteInvoice(Long id) {
         SalesInvoice inv = invoiceRepo.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("Khong tim thay hoa don ID: " + id));
+                .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy hóa đơn ID: " + id));
+
+        // Bảo vệ: chỉ cho xóa hóa đơn trong ngày hôm nay
+        if (!inv.getInvoiceDate().toLocalDate().equals(java.time.LocalDate.now())) {
+            throw new IllegalStateException(
+                "Chỉ được xóa hóa đơn trong ngày hôm nay. " +
+                "Hóa đơn " + inv.getInvoiceNo() +
+                " được tạo ngày " + inv.getInvoiceDate().toLocalDate() +
+                " — không thể xóa. Hãy dùng chức năng Hủy hóa đơn thay thế.");
+        }
+
+        if (inv.isCancelled()) {
+            throw new IllegalStateException("Hóa đơn " + inv.getInvoiceNo() + " đã bị hủy trước đó.");
+        }
+
+        String actor = SecurityContextHolder.getContext().getAuthentication() != null
+                ? SecurityContextHolder.getContext().getAuthentication().getName() : "unknown";
+        BigDecimal finalAmt = inv.getTotalAmount().subtract(
+                inv.getDiscountAmount() != null ? inv.getDiscountAmount() : BigDecimal.ZERO);
+        log.warn("[AUDIT-DELETE] Hóa đơn={} | user={} | tổng={} ₫ | khách={}",
+                inv.getInvoiceNo(), actor, finalAmt,
+                inv.getCustomerName() != null ? inv.getCustomerName() : "khách lẻ");
+
         Set<Long> affectedProductIds = new java.util.HashSet<>();
         for (SalesInvoiceItem item : inv.getItems()) {
-            Long variantId = item.getVariant() != null ? item.getVariant().getId() : null;
             if (item.getVariant() != null) {
                 item.getVariant().setStockQty(item.getVariant().getStockQty() + item.getQuantity());
                 variantRepo.save(item.getVariant());
             }
-            batchService.restoreStockOnCancel(item.getProduct().getId(), variantId, item.getQuantity());
+            restoreStockFEFOAccurate(item);
             affectedProductIds.add(item.getProduct().getId());
         }
         invoiceRepo.delete(inv);
-        // Refresh virtual stock combo sau khi hoàn kho
         affectedProductIds.forEach(comboService::refreshCombosContaining);
+    }
+
+    /**
+     * Issue 14: Soft Cancel hóa đơn — không xóa vật lý.
+     * - Đánh trạng thái CANCELLED + ghi audit
+     * - Hoàn tồn kho (variant.stockQty + batch.remainingQty)
+     * - Không giới hạn ngày (admin có thể hủy HĐ cũ)
+     */
+    @Transactional
+    public SalesInvoiceResponse cancelInvoice(Long id, String reason, String actor) {
+        SalesInvoice inv = invoiceRepo.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy hóa đơn ID: " + id));
+
+        if (inv.isCancelled()) {
+            throw new IllegalStateException("Hóa đơn " + inv.getInvoiceNo() + " đã bị hủy trước đó (lúc "
+                + (inv.getCancelledAt() != null ? inv.getCancelledAt().toLocalDate() : "?") + ").");
+        }
+
+        log.warn("[AUDIT-CANCEL] Hóa đơn={} | user={} | lý do={} | tổng={} ₫ | khách={}",
+                inv.getInvoiceNo(), actor, reason,
+                inv.getTotalAmount().subtract(inv.getDiscountAmount() != null ? inv.getDiscountAmount() : BigDecimal.ZERO),
+                inv.getCustomerName() != null ? inv.getCustomerName() : "khách lẻ");
+
+        // Đánh dấu CANCELLED
+        inv.setStatus(SalesInvoice.Status.CANCELLED);
+        inv.setCancelledAt(java.time.LocalDateTime.now());
+        inv.setCancelledBy(actor);
+        inv.setCancelReason(reason != null && !reason.isBlank() ? reason.trim() : null);
+
+        // Hoàn tồn kho
+        Set<Long> affectedProductIds = new java.util.HashSet<>();
+        for (SalesInvoiceItem item : inv.getItems()) {
+            if (item.getVariant() != null) {
+                item.getVariant().setStockQty(item.getVariant().getStockQty() + item.getQuantity());
+                variantRepo.save(item.getVariant());
+            }
+            // Issue 15: restore FEFO chính xác
+            restoreStockFEFOAccurate(item);
+            affectedProductIds.add(item.getProduct().getId());
+        }
+
+        invoiceRepo.save(inv);
+        affectedProductIds.forEach(comboService::refreshCombosContaining);
+        return DtoMapper.toResponse(inv);
+    }
+
+    /**
+     * Issue 15: Fix FEFO restore — tìm batch có costPrice khớp unitCostSnapshot để restore đúng lô.
+     * Nếu không tìm được batch khớp giá → fallback về batch mới nhất còn hàng.
+     */
+    private void restoreStockFEFOAccurate(SalesInvoiceItem item) {
+        Long productId = item.getProduct().getId();
+        Long variantId = item.getVariant() != null ? item.getVariant().getId() : null;
+        int qty = item.getQuantity();
+        BigDecimal costSnapshot = item.getUnitCostSnapshot();
+
+        List<com.example.nhadanshop.entity.ProductBatch> batches = variantId != null
+                ? batchRepo.findByVariantIdAndRemainingQtyGreaterThanOrderByExpiryDateAsc(variantId, -1)
+                : batchRepo.findByProductIdOrderByExpiryDateAsc(productId);
+
+        if (batches.isEmpty()) {
+            log.warn("[FEFO-RESTORE] Không tìm thấy batch: productId={} variantId={}", productId, variantId);
+            return;
+        }
+
+        // Ưu tiên batch có costPrice khớp snapshot (đây là batch đã bị deduct)
+        com.example.nhadanshop.entity.ProductBatch target = batches.stream()
+                .filter(b -> costSnapshot != null && b.getCostPrice() != null
+                        && b.getCostPrice().compareTo(costSnapshot) == 0)
+                .findFirst()
+                // Fallback: batch không expired gần nhất (LIFO để hoàn về lô mới nhất)
+                .orElseGet(() -> batches.stream()
+                        .filter(b -> !b.isExpired())
+                        .reduce((a, b) -> b)  // lấy phần tử cuối = mới nhất
+                        .orElse(batches.get(batches.size() - 1)));
+
+        target.setRemainingQty(target.getRemainingQty() + qty);
+        batchRepo.save(target);
+        log.debug("[FEFO-RESTORE] batch={} variantId={} +{} → remaining={}",
+                target.getBatchCode(), variantId, qty, target.getRemainingQty());
     }
 }
 

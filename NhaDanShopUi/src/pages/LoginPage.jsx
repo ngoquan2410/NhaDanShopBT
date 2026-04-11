@@ -1,4 +1,4 @@
-﻿﻿import { useState, useRef } from 'react'
+﻿﻿﻿import { useState, useRef } from 'react'
 import { useNavigate, Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import toast from 'react-hot-toast'
@@ -92,10 +92,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4"
+    <div className="min-h-screen flex flex-col items-center justify-center"
       style={{background:'linear-gradient(135deg,#fef3c7 0%,#fde68a 40%,#fbbf24 100%)'}}>
-      <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md border border-amber-100">
-        <div className="text-center mb-8">
+      {/* Card: full width on mobile, constrained on md+ */}
+      <div className="bg-white w-full sm:rounded-2xl sm:shadow-2xl sm:max-w-md sm:border sm:border-amber-100 px-6 py-8 sm:px-8 min-h-screen sm:min-h-0 flex flex-col justify-center">
+        <div className="text-center mb-7">
           <div className="text-5xl mb-3">{totpStep ? '🔐' : '🛒'}</div>
           <h1 className="text-2xl font-bold text-gray-800">Nhã Đan Shop</h1>
           <p className="text-gray-500 text-sm mt-1">

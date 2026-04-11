@@ -1,4 +1,4 @@
-﻿﻿import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { reportService } from '../../services/reportService'
 import { productService } from '../../services/productService'
@@ -75,150 +75,148 @@ export default function DashboardPage() {
   const warningList = warnings || []
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-800">Dashboard</h2>
+        <h2 className="text-xl sm:text-2xl font-bold text-gray-800">Dashboard</h2>
         <p className="text-gray-500 text-sm">{dayjs().format('dddd, DD/MM/YYYY')}</p>
       </div>
 
-      {/* Profit summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          label="Doanh thu tuần này"
-          value={fmt(weekProfit?.totalRevenue)}
-          sub={`${weekProfit?.totalInvoices || 0} hóa đơn`}
-          color="blue"
-          icon="📈"
-        />
-        <StatCard
-          label="Lợi nhuận tuần này"
-          value={fmt(weekProfit?.totalProfit)}
-          sub={`Margin: ${weekProfit?.profitMarginPct || 0}%`}
-          color="green"
-          icon="💰"
-        />
-        <StatCard
-          label="Doanh thu tháng này"
-          value={fmt(monthProfit?.totalRevenue)}
-          sub={`${monthProfit?.totalInvoices || 0} hóa đơn`}
-          color="blue"
-          icon="📊"
-        />
-        <StatCard
-          label="Lợi nhuận tháng này"
-          value={fmt(monthProfit?.totalProfit)}
-          sub={`Margin: ${monthProfit?.profitMarginPct || 0}%`}
-          color="green"
-          icon="💵"
-        />
+      {/* Profit summary — 2 cols mobile, 4 cols desktop */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="Doanh thu tháng này" value={fmt(monthProfit?.totalRevenue)} sub={`${monthProfit?.totalInvoices || 0} hóa đơn`} color="blue" icon="📊" />
+        <StatCard label="Lợi nhuận tháng này" value={fmt(monthProfit?.totalProfit)} sub={`Margin: ${monthProfit?.profitMarginPct || 0}%`} color="green" icon="💵" />
+        <StatCard label="Doanh thu tuần này" value={fmt(weekProfit?.totalRevenue)} sub={`${weekProfit?.totalInvoices || 0} hóa đơn`} color="blue" icon="📈" />
+        <StatCard label="Lợi nhuận tuần này" value={fmt(weekProfit?.totalProfit)} sub={`Margin: ${weekProfit?.profitMarginPct || 0}%`} color="green" icon="💰" />
       </div>
 
-      {/* Expiry alerts */}
+      {/* Expired alert */}
       {expiredList.length > 0 && (
-        <div className="bg-red-50 border border-red-300 rounded-xl p-5">
-          <h3 className="text-red-700 font-bold text-lg mb-3 flex items-center gap-2">
+        <div className="bg-red-50 border border-red-300 rounded-xl p-4">
+          <h3 className="text-red-700 font-bold text-base mb-3 flex items-center gap-2">
             🚨 Lô hàng đã HẾT HẠN ({expiredList.length})
           </h3>
-          <div className="overflow-x-auto">
+          {/* Mobile: cards, Desktop: table */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
-              <thead>
-                <tr className="text-red-600 border-b border-red-200">
-                  <th className="text-left py-2 pr-4">Mã lô</th>
-                  <th className="text-left py-2 pr-4">Sản phẩm</th>
-                  <th className="text-left py-2 pr-4">Danh mục</th>
-                  <th className="text-right py-2 pr-4">Còn lại</th>
-                  <th className="text-right py-2">Hết hạn</th>
+              <thead><tr className="text-red-600 border-b border-red-200">
+                <th className="text-left py-2 pr-4">Mã lô</th><th className="text-left py-2 pr-4">Sản phẩm</th>
+                <th className="text-left py-2 pr-4">Danh mục</th><th className="text-right py-2 pr-4">Còn lại</th>
+                <th className="text-right py-2">Hết hạn</th>
+              </tr></thead>
+              <tbody>{expiredList.map(w => (
+                <tr key={w.batchId} className="border-b border-red-100">
+                  <td className="py-2 pr-4 font-mono text-xs">{w.batchCode}</td>
+                  <td className="py-2 pr-4">{w.productName}</td>
+                  <td className="py-2 pr-4 text-gray-500">{w.categoryName}</td>
+                  <td className="py-2 pr-4 text-right">{w.remainingQty} {w.sellUnit}</td>
+                  <td className="py-2 text-right text-red-700 font-semibold">{dayjs(w.expiryDate).format('DD/MM/YYYY')}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {expiredList.map(w => (
-                  <tr key={w.batchId} className="border-b border-red-100">
-                    <td className="py-2 pr-4 font-mono">{w.batchCode}</td>
-                    <td className="py-2 pr-4">{w.productName}</td>
-                    <td className="py-2 pr-4 text-gray-500">{w.categoryName}</td>
-                    <td className="py-2 pr-4 text-right">{w.remainingQty} {w.sellUnit}</td>
-                    <td className="py-2 text-right text-red-700 font-semibold">
-                      {dayjs(w.expiryDate).format('DD/MM/YYYY')}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
+              ))}</tbody>
             </table>
+          </div>
+          <div className="md:hidden space-y-2">
+            {expiredList.map(w => (
+              <div key={w.batchId} className="bg-white rounded-lg p-3 border border-red-200">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-sm">{w.productName}</span>
+                  <span className="text-red-700 font-bold text-sm">{dayjs(w.expiryDate).format('DD/MM/YYYY')}</span>
+                </div>
+                <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
+                  <span className="font-mono">{w.batchCode}</span>
+                  <span>· {w.categoryName}</span>
+                  <span>· Còn {w.remainingQty} {w.sellUnit}</span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
+      {/* Sắp hết hạn */}
       {warningList.length > 0 && (
-        <div className="bg-orange-50 border border-orange-300 rounded-xl p-5">
-          <h3 className="text-orange-700 font-bold text-lg mb-3 flex items-center gap-2">
-            ⚠️ Lô hàng sắp hết hạn ({warningList.length})
-          </h3>
-          <div className="overflow-x-auto">
+        <div className="bg-orange-50 border border-orange-300 rounded-xl p-4">
+          <h3 className="text-orange-700 font-bold text-base mb-3">⚠️ Lô sắp hết hạn ({warningList.length})</h3>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
-              <thead>
-                <tr className="text-orange-600 border-b border-orange-200">
-                  <th className="text-left py-2 pr-4">Mã lô</th>
-                  <th className="text-left py-2 pr-4">Sản phẩm</th>
-                  <th className="text-left py-2 pr-4">Danh mục</th>
-                  <th className="text-right py-2 pr-4">Còn lại</th>
-                  <th className="text-right py-2 pr-4">Hết hạn</th>
-                  <th className="text-right py-2">Số ngày</th>
+              <thead><tr className="text-orange-600 border-b border-orange-200">
+                <th className="text-left py-2 pr-4">Mã lô</th><th className="text-left py-2 pr-4">Sản phẩm</th>
+                <th className="text-right py-2 pr-4">Còn lại</th><th className="text-right py-2 pr-4">Hết hạn</th>
+                <th className="text-right py-2">Số ngày</th>
+              </tr></thead>
+              <tbody>{warningList.map(w => (
+                <tr key={w.batchId} className="border-b border-orange-100">
+                  <td className="py-2 pr-4 font-mono text-xs">{w.batchCode}</td>
+                  <td className="py-2 pr-4">{w.productName}</td>
+                  <td className="py-2 pr-4 text-right">{w.remainingQty} {w.sellUnit}</td>
+                  <td className="py-2 pr-4 text-right">{dayjs(w.expiryDate).format('DD/MM/YYYY')}</td>
+                  <td className="py-2 text-right font-semibold text-orange-600">{w.daysRemaining} ngày</td>
                 </tr>
-              </thead>
-              <tbody>
-                {warningList.map(w => (
-                  <tr key={w.batchId} className="border-b border-orange-100">
-                    <td className="py-2 pr-4 font-mono">{w.batchCode}</td>
-                    <td className="py-2 pr-4">{w.productName}</td>
-                    <td className="py-2 pr-4 text-gray-500">{w.categoryName}</td>
-                    <td className="py-2 pr-4 text-right">{w.remainingQty} {w.sellUnit}</td>
-                    <td className="py-2 pr-4 text-right">{dayjs(w.expiryDate).format('DD/MM/YYYY')}</td>
-                    <td className="py-2 text-right font-semibold text-orange-600">{w.daysRemaining} ngày</td>
-                  </tr>
-                ))}
-              </tbody>
+              ))}</tbody>
             </table>
+          </div>
+          <div className="md:hidden space-y-2">
+            {warningList.map(w => (
+              <div key={w.batchId} className="bg-white rounded-lg p-3 border border-orange-200">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-sm">{w.productName}</span>
+                  <span className="font-bold text-orange-600 text-sm">{w.daysRemaining} ngày</span>
+                </div>
+                <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
+                  <span className="font-mono">{w.batchCode}</span>
+                  <span>· HH: {dayjs(w.expiryDate).format('DD/MM/YYYY')}</span>
+                  <span>· Còn {w.remainingQty} {w.sellUnit}</span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
       {expiredList.length === 0 && warningList.length === 0 && (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-5 text-center text-green-700">
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center text-green-700 text-sm font-medium">
           ✅ Tất cả hàng hóa đều trong hạn sử dụng!
         </div>
       )}
 
-      {/* [Sprint 0 - P0-4] Cảnh báo tồn kho thấp theo variant */}
+      {/* Hàng sắp hết tồn kho */}
       {lowStockVariants.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-5">
-          <h3 className="text-yellow-700 font-bold text-lg mb-3 flex items-center gap-2">
-            📦 Hàng sắp hết tồn kho ({lowStockVariants.length} biến thể)
-          </h3>
-          <div className="overflow-x-auto">
+        <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-4">
+          <h3 className="text-yellow-700 font-bold text-base mb-3">📦 Hàng sắp hết tồn kho ({lowStockVariants.length} biến thể)</h3>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
-              <thead>
-                <tr className="text-yellow-700 border-b border-yellow-200">
-                  <th className="text-left py-2 pr-4">Mã SP</th>
-                  <th className="text-left py-2 pr-4">Biến thể</th>
-                  <th className="text-left py-2 pr-4">Tên</th>
-                  <th className="text-right py-2 pr-4">Tồn kho</th>
-                  <th className="text-right py-2">Ngưỡng tối thiểu</th>
+              <thead><tr className="text-yellow-700 border-b border-yellow-200">
+                <th className="text-left py-2 pr-4">Mã SP</th><th className="text-left py-2 pr-4">Biến thể</th>
+                <th className="text-left py-2 pr-4">Tên</th><th className="text-right py-2 pr-4">Tồn kho</th>
+                <th className="text-right py-2">Ngưỡng tối thiểu</th>
+              </tr></thead>
+              <tbody>{lowStockVariants.map(v => (
+                <tr key={v.id} className="border-b border-yellow-100">
+                  <td className="py-2 pr-4 font-mono text-xs text-gray-500">{v.productCode}</td>
+                  <td className="py-2 pr-4 font-mono font-bold text-yellow-700">{v.variantCode}</td>
+                  <td className="py-2 pr-4">{v.variantName}</td>
+                  <td className={`py-2 pr-4 text-right font-bold ${v.stockQty === 0 ? 'text-red-600' : 'text-yellow-700'}`}>
+                    {v.stockQty === 0 ? '🚫 Hết' : `${v.stockQty} ${v.sellUnit}`}
+                  </td>
+                  <td className="py-2 text-right text-gray-500">≤ {v.minStockQty} {v.sellUnit}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {lowStockVariants.map(v => (
-                  <tr key={v.id} className="border-b border-yellow-100">
-                    <td className="py-2 pr-4 font-mono text-xs text-gray-500">{v.productCode}</td>
-                    <td className="py-2 pr-4 font-mono font-bold text-yellow-700">{v.variantCode}</td>
-                    <td className="py-2 pr-4">{v.variantName}</td>
-                    <td className={`py-2 pr-4 text-right font-bold ${v.stockQty === 0 ? 'text-red-600' : 'text-yellow-700'}`}>
-                      {v.stockQty === 0 ? '🚫 Hết hàng' : `${v.stockQty} ${v.sellUnit}`}
-                    </td>
-                    <td className="py-2 text-right text-gray-500">≤ {v.minStockQty} {v.sellUnit}</td>
-                  </tr>
-                ))}
-              </tbody>
+              ))}</tbody>
             </table>
+          </div>
+          <div className="md:hidden space-y-2">
+            {lowStockVariants.map(v => (
+              <div key={v.id} className="bg-white rounded-lg p-3 border border-yellow-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-mono font-bold text-yellow-700 text-sm">{v.variantCode}</span>
+                    <span className="text-xs text-gray-500 ml-2">{v.variantName}</span>
+                  </div>
+                  <span className={`font-bold text-sm ${v.stockQty === 0 ? 'text-red-600' : 'text-yellow-700'}`}>
+                    {v.stockQty === 0 ? '🚫 Hết' : `${v.stockQty} ${v.sellUnit}`}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-400 mt-0.5">SP: {v.productCode} · Ngưỡng: {v.minStockQty} {v.sellUnit}</div>
+              </div>
+            ))}
           </div>
         </div>
       )}
