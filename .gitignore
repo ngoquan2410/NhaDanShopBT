@@ -48,3 +48,17 @@ vite.log
 *.xlsx
 *.tar.gz
 *.py
+
+# ── Local config files (chua secrets, khong push len GitHub) ─────
+start-dev.local.ps1
+*.local.ps1
+*.local.sh
+
+# ── Build / temp output files ────────────────────────────────────
+build_err.txt
+build_out.txt
+build_result.txt
+NhaDanShop/build_err.txt
+NhaDanShop/build_out.txt
+b2.txt
+b3.txt

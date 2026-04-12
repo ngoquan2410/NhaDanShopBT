@@ -11,9 +11,7 @@ on:
       # Bỏ qua: docs, readme, sql scripts, shell scripts không liên quan
       - '!**/*.md'
       - '!**/README*'
-  # Pull Request chỉ build (không deploy) — bỏ trigger PR để tiết kiệm minutes
-  # pull_request:
-  #   branches: [main]
+  workflow_dispatch:
 
 # Hủy run cũ nếu có run mới hơn đang chờ (tránh queue chồng chất)
 concurrency:
@@ -26,17 +24,10 @@ env:
   EC2_USER: ubuntu
   APP_DIR: /app/nhadanshop
   WEB_DIR: /var/www/nhadanshop
-  RDS_HOST: nhadanshop-db.c5w6eg2au3ph.ap-southeast-1.rds.amazonaws.com
-  RDS_PORT: 5432
-  RDS_DB: nhadanshop
-  RDS_INSTANCE_ID: nhadanshop-db
-  AWS_REGION: ap-southeast-1
 
 jobs:
   # ─────────────────────────────────────────────
   # JOB 0: Phát hiện file thay đổi
-  # → Chỉ build BE nếu BE thay đổi
-  # → Chỉ build FE nếu FE thay đổi
   # ─────────────────────────────────────────────
   detect-changes:
     name: 🔍 Detect Changes
@@ -66,6 +57,7 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.backend == 'true'
 
+    # Dùng PostgreSQL container để chạy test trong CI
     services:
       postgres:
         image: postgres:16-alpine
@@ -92,21 +84,20 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: 🔨 Build JAR
+      - name: 🔨 Build JAR (skip tests)
         working-directory: NhaDanShop
         run: |
           chmod +x gradlew
-          ./gradlew bootJar -x test
-        env:
-          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/nhadanshop_test
-          SPRING_DATASOURCE_USERNAME: postgres
-          SPRING_DATASOURCE_PASSWORD: test_password
+          ./gradlew bootJar -x test --no-daemon
+          # Đổi tên để tránh version number trong filename
+          cp build/libs/NhaDanShop-*.jar build/libs/nhadanshop.jar
+          ls -lh build/libs/nhadanshop.jar
 
       - name: 📦 Upload JAR artifact
         uses: actions/upload-artifact@v4
         with:
           name: backend-jar
-          path: NhaDanShop/build/libs/*.jar
+          path: NhaDanShop/build/libs/nhadanshop.jar
           retention-days: 1
 
   # ─────────────────────────────────────────────
@@ -135,12 +126,11 @@ jobs:
 
       - name: 🏗️ Build React app
         working-directory: NhaDanShopUi
-        run: |
-          # Strip trailing /api from base URL to avoid double /api/api/ paths
-          RAW_URL="${{ secrets.VITE_API_BASE_URL }}"
-          CLEAN_URL="${RAW_URL%/api}"
-          echo "Building with VITE_API_BASE_URL=$CLEAN_URL"
-          VITE_API_BASE_URL="$CLEAN_URL" npm run build
+        env:
+          # Để trống = relative URL → Nginx proxy /api/ → localhost:8080
+          # Không hardcode IP/domain → không bị lỗi khi EC2 thay đổi IP
+          VITE_API_BASE_URL: ''
+        run: npm run build
 
       - name: 📦 Upload dist artifact
         uses: actions/upload-artifact@v4
@@ -150,31 +140,31 @@ jobs:
           retention-days: 1
 
   # ─────────────────────────────────────────────
-  # JOB 3: Deploy lên AWS EC2
-  # Chạy khi: ít nhất 1 trong 2 build job thành công
-  # Không chạy khi: cả 2 build đều bị skip
+  # JOB 3: Deploy lên EC2
+  # PostgreSQL chạy LOCAL trên cùng EC2 (không dùng RDS)
   # ─────────────────────────────────────────────
   deploy:
-    name: 🚀 Deploy to AWS EC2
+    name: 🚀 Deploy to EC2 (EC2 Postgres)
     runs-on: ubuntu-latest
     needs: [detect-changes, build-backend, build-frontend]
     if: |
       github.ref == 'refs/heads/main' &&
       github.event_name == 'push' &&
+      (needs.build-backend.result == 'success' ||
+       needs.build-backend.result == 'skipped' ||
+       needs.build-frontend.result == 'success' ||
+       needs.build-frontend.result == 'skipped') &&
       (needs.build-backend.result == 'success' || needs.build-frontend.result == 'success')
 
     steps:
-      # NOTE: Start/Stop RDS làm thủ công qua AWS Console khi cần
-      # Không dùng aws CLI ở đây để tránh cần AWS_ACCESS_KEY_ID/SECRET
-
-      - name: 📥 Download Backend JAR (nếu BE thay đổi)
+      - name: 📥 Download Backend JAR
         if: needs.detect-changes.outputs.backend == 'true'
         uses: actions/download-artifact@v4
         with:
           name: backend-jar
           path: ./artifacts/backend
 
-      - name: 📥 Download Frontend dist (nếu FE thay đổi)
+      - name: 📥 Download Frontend dist
         if: needs.detect-changes.outputs.frontend == 'true'
         uses: actions/download-artifact@v4
         with:
@@ -186,100 +176,146 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: 📤 Upload JAR lên EC2 (nếu BE thay đổi)
+      # ── Deploy Backend ──────────────────────────────────────────────────────
+      - name: 📤 Upload JAR lên EC2
         if: needs.detect-changes.outputs.backend == 'true'
         run: |
-          scp ./artifacts/backend/*.jar \
-            ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ env.APP_DIR }}/nhadanshop.jar
+          scp ./artifacts/backend/nhadanshop.jar \
+            ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/nhadanshop-new.jar
+          echo "✅ JAR uploaded to /tmp/nhadanshop-new.jar"
 
-      - name: 📤 Upload Frontend lên EC2 (nếu FE thay đổi)
-        if: needs.detect-changes.outputs.frontend == 'true'
-        run: |
-          ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "sudo chown -R ubuntu:ubuntu /var/www/nhadanshop && sudo chmod -R 755 /var/www/nhadanshop"
-          rsync -avz --delete ./artifacts/frontend/ \
-            ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ env.WEB_DIR }}/
-          ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "sudo chown -R www-data:www-data /var/www/nhadanshop && \
-             sudo chmod -R 755 /var/www/nhadanshop && \
-             sudo systemctl reload nginx"
-
-      - name: ⚙️ Cấu hình và restart Spring Boot (nếu BE thay đổi)
+      - name: ⚙️ Cập nhật systemd + swap JAR + restart
         if: needs.detect-changes.outputs.backend == 'true'
         run: |
-          ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "sudo tee /etc/systemd/system/nhadanshop.service > /dev/null << 'EOF'
+          ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} << 'ENDSSH'
+            set -e
+
+            echo "=== Cập nhật systemd service ==="
+            sudo tee /etc/systemd/system/nhadanshop.service > /dev/null << 'SERVICE'
           [Unit]
-          Description=NhaDanShop Spring Boot
-          After=network.target
+          Description=NhaDanShop Spring Boot Application
+          After=network.target postgresql.service
 
           [Service]
           Type=simple
           User=ubuntu
           WorkingDirectory=/app/nhadanshop
-          Environment=\"SPRING_DATASOURCE_URL=jdbc:postgresql://nhadanshop-db.c5w6eg2au3ph.ap-southeast-1.rds.amazonaws.com:5432/nhadanshop\"
-          Environment=\"SPRING_DATASOURCE_USERNAME=postgres\"
-          Environment=\"SPRING_DATASOURCE_PASSWORD=${{ secrets.RDS_PASSWORD }}\"
-          Environment=\"SERVER_PORT=8080\"
-          ExecStart=/usr/bin/java -jar /app/nhadanshop/nhadanshop.jar
+
+          # ── PostgreSQL LOCAL (cùng EC2, không dùng RDS) ──────────────────
+          Environment="SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/nhadanshop"
+          Environment="SPRING_DATASOURCE_USERNAME=nhadanshop_user"
+          Environment="SPRING_DATASOURCE_PASSWORD=PLACEHOLDER_REPLACED_BELOW"
+
+          # ── JPA & Flyway ──────────────────────────────────────────────────
+          Environment="SPRING_JPA_HIBERNATE_DDL_AUTO=validate"
+          Environment="SPRING_FLYWAY_ENABLED=true"
+
+          # ── JVM memory tối ưu cho t3.micro (1GB RAM) ─────────────────────
+          ExecStart=/usr/bin/java \
+            -Xmx512m -Xms256m \
+            -jar /app/nhadanshop/nhadanshop.jar
+
           Restart=on-failure
           RestartSec=10
           StandardOutput=journal
           StandardError=journal
+          SyslogIdentifier=nhadanshop
 
           [Install]
           WantedBy=multi-user.target
-          EOF
-          sudo systemctl daemon-reload && sudo systemctl restart nhadanshop"
+          SERVICE
 
-      - name: ⏳ Chờ Spring Boot khởi động
-        run: sleep 40
+            # Thay placeholder password bằng secret thực
+            # (Secret không được đặt trực tiếp trong heredoc để tránh log)
+            sudo sed -i "s/PLACEHOLDER_REPLACED_BELOW/$DB_PASSWORD/" \
+              /etc/systemd/system/nhadanshop.service
 
-      - name: 📋 Kiểm tra logs Spring Boot
+            echo "=== Backup JAR cũ ==="
+            [ -f /app/nhadanshop/nhadanshop.jar ] && \
+              sudo cp /app/nhadanshop/nhadanshop.jar /app/nhadanshop/nhadanshop.jar.bak || true
+
+            echo "=== Cài JAR mới ==="
+            sudo mv /tmp/nhadanshop-new.jar /app/nhadanshop/nhadanshop.jar
+            sudo chown ubuntu:ubuntu /app/nhadanshop/nhadanshop.jar
+
+            echo "=== Reload & restart service ==="
+            sudo systemctl daemon-reload
+            sudo systemctl restart nhadanshop
+
+            echo "=== Chờ Spring Boot khởi động (tối đa 90s) ==="
+            STARTED=false
+            for i in $(seq 1 18); do
+              sleep 5
+              if curl -sf http://localhost:8080/actuator/health > /dev/null 2>&1; then
+                echo "✅ App started OK sau $((i*5))s"
+                STARTED=true
+                break
+              fi
+              echo "  Chờ... lần $i/18"
+            done
+
+            if [ "$STARTED" = "false" ]; then
+              echo "❌ App không khởi động được! Rollback..."
+              [ -f /app/nhadanshop/nhadanshop.jar.bak ] && \
+                sudo cp /app/nhadanshop/nhadanshop.jar.bak /app/nhadanshop/nhadanshop.jar
+              sudo systemctl restart nhadanshop
+              sudo journalctl -u nhadanshop -n 50 --no-pager
+              exit 1
+            fi
+          ENDSSH
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+
+      # ── Deploy Frontend ─────────────────────────────────────────────────────
+      - name: 📤 Upload Frontend lên EC2
+        if: needs.detect-changes.outputs.frontend == 'true'
+        run: |
+          # Fix quyền trước khi rsync
+          ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "sudo chown -R ubuntu:ubuntu ${{ env.WEB_DIR }} || true"
+
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/id_rsa" \
+            ./artifacts/frontend/ \
+            ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ env.WEB_DIR }}/
+
+          ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "sudo chown -R www-data:www-data ${{ env.WEB_DIR }} && \
+             sudo chmod -R 755 ${{ env.WEB_DIR }} && \
+             sudo systemctl reload nginx && \
+             echo '✅ Frontend deployed & Nginx reloaded'"
+
+      # ── Health Check ────────────────────────────────────────────────────────
+      - name: 🏥 Health Check
+        run: |
+          sleep 3
+          echo "=== Backend health check ==="
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+            http://${{ secrets.EC2_HOST }}/api/actuator/health || echo "000")
+          echo "HTTP Status: $HTTP"
+          [ "$HTTP" = "200" ] && echo "✅ Backend OK" || echo "⚠️ Backend: $HTTP"
+
+          echo "=== Frontend check ==="
+          HTTP_FE=$(curl -s -o /dev/null -w "%{http_code}" \
+            http://${{ secrets.EC2_HOST }}/ || echo "000")
+          echo "HTTP Status: $HTTP_FE"
+          [ "$HTTP_FE" = "200" ] && echo "✅ Frontend OK" || echo "⚠️ Frontend: $HTTP_FE"
+
+      - name: 📋 Xem logs sau deploy
+        if: always()
         run: |
           ssh ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "sudo journalctl -u nhadanshop -n 30 --no-pager"
+            "sudo journalctl -u nhadanshop -n 20 --no-pager" || true
 
-      - name: ✅ Health check
-        run: |
-          echo "=== Test Backend (port 8080) ==="
-          curl -f http://${{ secrets.EC2_HOST }}:8080/api/categories \
-            && echo "✅ Backend OK" \
-            || echo "⚠️ Backend health check failed"
-          echo "=== Test Frontend (port 80) ==="
-          curl -f http://${{ secrets.EC2_HOST }}/ \
-            && echo "✅ Frontend OK" \
-            || echo "⚠️ Frontend health check failed"
-
-      # ── GHI CHÚ VỀ STOP RDS ─────────────────────────────────────────────
-      # KHÔNG nên stop RDS ngay sau deploy vì:
-      # ��� Spring Boot mất connection pool → app lỗi 500 ngay lập tức
-      # → HikariCP sẽ báo "Connection is not available"
-      #
-      # CHIẾN LƯỢC ĐÚNG để tiết kiệm chi phí RDS:
-      # Option A (Khuyến nghị — dùng Free Tier):
-      #   → Dùng RDS Free Tier (db.t3.micro, 12 tháng đầu) = $0
-      #   → Sau 12 tháng: stop EC2 + RDS khi không demo/dùng
-      #
-      # Option B (Tắt cả hệ thống khi không dùng):
-      #   → Stop EC2 + RDS thủ công qua AWS Console khi không cần demo
-      #   → Start lại khi cần (mất ~3-5 phút boot)
-      #
-      # Option C (Tự động stop vào ban đêm — dùng EventBridge):
-      #   → EventBridge rule: stop EC2+RDS lúc 22:00, start lại lúc 08:00
-      #   → Tiết kiệm 58% chi phí (~14h stop / 24h)
-      - name: 💡 Chi phí ước tính
+      - name: 🎉 Deploy Summary
+        if: success()
         run: |
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  Deploy hoàn thành! Chi phí ước tính:"
-          echo "  EC2 t2.micro  : Free Tier (750h/tháng)"
-          echo "  RDS db.t3.micro: Free Tier (750h/tháng)"
-          echo "  RDS Storage   : ~\$2.30/tháng (luôn tính)"
-          echo "  → Tổng hiện tại: ~\$2-3/tháng"
+          echo "  ✅ Deploy thành công!"
+          echo "  🌐 URL   : http://${{ secrets.EC2_HOST }}"
+          echo "  🗄️ DB    : PostgreSQL localhost:5432 (EC2)"
+          echo "  📅 Time  : $(date '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "  💰 Chi phí: ~\$2-3/tháng (không có RDS)"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  💡 Để tiết kiệm: Stop EC2 + RDS qua AWS Console"
-          echo "     khi không cần dùng hệ thống."
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
