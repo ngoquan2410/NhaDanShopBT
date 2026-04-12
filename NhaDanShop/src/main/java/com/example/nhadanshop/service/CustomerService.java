@@ -42,13 +42,41 @@ public class CustomerService {
 
     @Transactional
     public CustomerResponse create(CustomerRequest req) {
-        String code = req.code().trim().toUpperCase();
-        if (customerRepository.existsByCode(code))
-            throw new IllegalStateException("Mã KH '" + code + "' đã tồn tại.");
+        // Tự sinh code nếu FE không gửi (VD: tạo inline từ form hóa đơn)
+        String code;
+        if (req.code() == null || req.code().isBlank()) {
+            code = generateNextCode();
+        } else {
+            code = req.code().trim().toUpperCase();
+            if (customerRepository.existsByCode(code))
+                throw new IllegalStateException("Mã KH '" + code + "' đã tồn tại.");
+        }
 
         Customer c = new Customer();
         applyFields(c, req, code);
         return toResponse(customerRepository.save(c));
+    }
+
+    /** Sinh mã KH tự động: KH001, KH002, ... tìm số lớn nhất hiện có rồi +1 */
+    private String generateNextCode() {
+        // Lấy tất cả code bắt đầu bằng KH, tìm số lớn nhất
+        long maxNum = customerRepository.findAll().stream()
+                .map(Customer::getCode)
+                .filter(c -> c != null && c.matches("KH\\d+"))
+                .mapToLong(c -> {
+                    try { return Long.parseLong(c.substring(2)); }
+                    catch (NumberFormatException e) { return 0L; }
+                })
+                .max()
+                .orElse(0L);
+
+        String candidate;
+        do {
+            maxNum++;
+            candidate = String.format("KH%03d", maxNum);
+        } while (customerRepository.existsByCode(candidate));
+
+        return candidate;
     }
 
     @Transactional
