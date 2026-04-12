@@ -24,8 +24,16 @@ $CONFIG = @{
     SshHost       = "nhadanshop"
     GitHubOwner   = "ngoquan2410"
     GitHubRepo    = "NhaDanShopBT"
-    GitHubPAT     = "REPLACE_WITH_GITHUB_PAT"   # ghp_xxxxxxxxxxxx (tao tai github.com/settings/tokens)
+    GitHubPAT     = if ($env:NHADANSHOP_GITHUB_PAT) { $env:NHADANSHOP_GITHUB_PAT } else { "REPLACE_WITH_GITHUB_PAT" }
     GitHubSecret  = "EC2_HOST"
+}
+
+# Load file local neu co (chua PAT thuc te, khong push len GitHub)
+$localConfig = Join-Path $PSScriptRoot "start-dev.local.ps1"
+if (Test-Path $localConfig) { . $localConfig }
+# Sau khi load local config, override lai PAT neu co
+if ($env:NHADANSHOP_GITHUB_PAT -and $CONFIG.GitHubPAT -eq "REPLACE_WITH_GITHUB_PAT") {
+    $CONFIG.GitHubPAT = $env:NHADANSHOP_GITHUB_PAT
 }
 
 $ErrorActionPreference = "Stop"
