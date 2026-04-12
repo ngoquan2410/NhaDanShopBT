@@ -243,6 +243,15 @@ jobs:
       - name: 🔄 Swap JAR + reload systemd + restart
         if: needs.detect-changes.outputs.backend == 'true'
         run: |
+          # Buoc 1: Tao SQL file de sync DB password (tranh escape quotes qua SSH)
+          printf "ALTER USER nhadanshop_user WITH PASSWORD '%s';\n" \
+            "${{ secrets.DB_PASSWORD }}" > /tmp/sync_pass.sql
+          scp -o StrictHostKeyChecking=no /tmp/sync_pass.sql \
+            ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/sync_pass.sql
+          ssh -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "sudo -u postgres psql -f /tmp/sync_pass.sql && rm /tmp/sync_pass.sql && echo DB_PASS_SYNCED"
+
+          # Buoc 2: Swap JAR + restart service
           ssh -o StrictHostKeyChecking=no \
               ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} bash -s << 'ENDSSH'
             set -e
