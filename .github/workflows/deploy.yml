@@ -194,50 +194,51 @@ jobs:
 
       - name: ⚙️ Ghi systemd service file lên EC2
         if: needs.detect-changes.outputs.backend == 'true'
-        # Tách riêng bước ghi service file để tránh heredoc lồng nhau
-        # Dùng cat + base64 để truyền nội dung qua SSH an toàn
         run: |
-          # Tạo service file tại chỗ, inject secrets trực tiếp
-          cat > /tmp/nhadanshop.service << EOF
-          [Unit]
-          Description=NhaDanShop Spring Boot Application
-          After=network.target postgresql.service
+          # Dung printf de tranh leading whitespace tu YAML indent
+          # Secrets duoc GitHub Actions expand truoc khi chay shell
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=NhaDanShop Spring Boot Application' \
+            'After=network.target postgresql.service' \
+            '' \
+            '[Service]' \
+            'Type=simple' \
+            'User=ubuntu' \
+            'WorkingDirectory=/app/nhadanshop' \
+            'Environment="SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/nhadanshop"' \
+            'Environment="SPRING_DATASOURCE_USERNAME=nhadanshop_user"' \
+            "Environment=\"SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }}\"" \
+            'Environment="SPRING_JPA_HIBERNATE_DDL_AUTO=validate"' \
+            'Environment="SPRING_FLYWAY_ENABLED=true"' \
+            "Environment=\"R2_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }}\"" \
+            "Environment=\"R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}\"" \
+            "Environment=\"R2_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}\"" \
+            "Environment=\"R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}\"" \
+            "Environment=\"R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}\"" \
+            "Environment=\"JWT_SECRET=${{ secrets.JWT_SECRET }}\"" \
+            "Environment=\"CORS_ALLOWED_ORIGINS=http://${{ secrets.EC2_HOST }}\"" \
+            'ExecStart=/usr/bin/java -Xmx512m -Xms256m -jar /app/nhadanshop/nhadanshop.jar' \
+            'Restart=on-failure' \
+            'RestartSec=10' \
+            'StandardOutput=journal' \
+            'StandardError=journal' \
+            'SyslogIdentifier=nhadanshop' \
+            '' \
+            '[Install]' \
+            'WantedBy=multi-user.target' \
+          > /tmp/nhadanshop.service
 
-          [Service]
-          Type=simple
-          User=ubuntu
-          WorkingDirectory=/app/nhadanshop
+          echo "=== Service file content (secrets masked) ==="
+          grep -v "PASSWORD\|SECRET\|KEY" /tmp/nhadanshop.service || true
+          echo "=== Secrets lines exist ==="
+          grep -c "PASSWORD\|SECRET\|KEY" /tmp/nhadanshop.service
 
-          Environment="SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/nhadanshop"
-          Environment="SPRING_DATASOURCE_USERNAME=nhadanshop_user"
-          Environment="SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }}"
-          Environment="SPRING_JPA_HIBERNATE_DDL_AUTO=validate"
-          Environment="SPRING_FLYWAY_ENABLED=true"
-          Environment="R2_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }}"
-          Environment="R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}"
-          Environment="R2_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}"
-          Environment="R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}"
-          Environment="R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}"
-          Environment="JWT_SECRET=${{ secrets.JWT_SECRET }}"
-          Environment="CORS_ALLOWED_ORIGINS=http://${{ secrets.EC2_HOST }}"
-          ExecStart=/usr/bin/java \
-            -Xmx512m -Xms256m \
-            -jar /app/nhadanshop/nhadanshop.jar
-          Restart=on-failure
-          RestartSec=10
-          StandardOutput=journal
-          StandardError=journal
-          SyslogIdentifier=nhadanshop
-
-          [Install]
-          WantedBy=multi-user.target
-          EOF
-
-          # Upload service file lên EC2
+          # Upload service file len EC2
           scp -o StrictHostKeyChecking=no \
             /tmp/nhadanshop.service \
             ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/nhadanshop.service
-          echo "✅ Service file uploaded"
+          echo "Service file uploaded"
 
       - name: 🔄 Swap JAR + reload systemd + restart
         if: needs.detect-changes.outputs.backend == 'true'
