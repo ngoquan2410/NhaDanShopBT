@@ -172,52 +172,53 @@ if ($SkipGitHub) {
     }
 
     if (-not $ghCli) {
-        try {
-            $headers = @{
-                "Authorization"        = "Bearer $($CONFIG.GitHubPAT)"
-                "Accept"               = "application/vnd.github+json"
-                "X-GitHub-Api-Version" = "2022-11-28"
-            }
-            $pk = Invoke-RestMethod `
-                -Uri "https://api.github.com/repos/$($CONFIG.GitHubOwner)/$($CONFIG.GitHubRepo)/actions/secrets/public-key" `
-                -Headers $headers -Method Get
+        # Dung Python + PyNaCl (da cai san) de ma hoa va update secret
+        $pyScript = @"
+import sys, requests, base64, json
+from nacl import public as nacl_public
 
-            Add-Type -AssemblyName System.Security
-            $keyBytes = [Convert]::FromBase64String($pk.key)
-            $valBytes = [System.Text.Encoding]::UTF8.GetBytes($newIP)
+pat   = sys.argv[1]
+owner = sys.argv[2]
+repo  = sys.argv[3]
+name  = sys.argv[4]
+value = sys.argv[5]
 
-            $sodiumDll = @(
-                "$PSScriptRoot\lib\libsodium.dll",
-                "C:\Program Files\libsodium\libsodium.dll"
-            ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-            if ($sodiumDll) {
-                $sodiumPath = $sodiumDll -replace '\\','\\'
-                Add-Type -TypeDefinition @"
-using System; using System.Runtime.InteropServices;
-public class Sodium {
-    [DllImport(@"$sodiumPath")]
-    public static extern int crypto_box_seal(byte[] c, byte[] m, ulong mlen, byte[] pk);
-    public static byte[] SealedBox(byte[] msg, byte[] pk) {
-        var c = new byte[pk.Length + 32 + msg.Length];
-        crypto_box_seal(c, msg, (ulong)msg.Length, pk);
-        return c;
-    }
+headers = {
+    'Authorization': f'Bearer {pat}',
+    'Accept': 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28'
 }
+r = requests.get(f'https://api.github.com/repos/{owner}/{repo}/actions/secrets/public-key', headers=headers)
+pk = r.json()
+pk_bytes = base64.b64decode(pk['key'])
+box = nacl_public.SealedBox(nacl_public.PublicKey(pk_bytes))
+encrypted = base64.b64encode(box.encrypt(value.encode())).decode()
+body = json.dumps({'encrypted_value': encrypted, 'key_id': pk['key_id']})
+resp = requests.put(
+    f'https://api.github.com/repos/{owner}/{repo}/actions/secrets/{name}',
+    headers={**headers, 'Content-Type': 'application/json'},
+    data=body
+)
+if resp.status_code in (201, 204):
+    print(f'OK: {name} = {value}')
+else:
+    print(f'FAIL: {resp.status_code} {resp.text}')
+    sys.exit(1)
 "@
-                $encrypted = [Convert]::ToBase64String([Sodium]::SealedBox($valBytes, $keyBytes))
+        $pyFile = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.py'
+        $pyScript | Out-File -FilePath $pyFile -Encoding UTF8
+        try {
+            $result = python $pyFile `
+                $CONFIG.GitHubPAT `
+                $CONFIG.GitHubOwner `
+                $CONFIG.GitHubRepo `
+                $CONFIG.GitHubSecret `
+                $newIP 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-OK "GitHub Secret '$($CONFIG.GitHubSecret)' = $newIP"
             } else {
-                throw "Khong tim thay libsodium - dung phuong phap thu cong"
+                throw $result
             }
-
-            Invoke-RestMethod `
-                -Uri "https://api.github.com/repos/$($CONFIG.GitHubOwner)/$($CONFIG.GitHubRepo)/actions/secrets/$($CONFIG.GitHubSecret)" `
-                -Headers $headers -Method Put `
-                -Body (@{ encrypted_value = $encrypted; key_id = $pk.key_id } | ConvertTo-Json) `
-                -ContentType "application/json" | Out-Null
-
-            Write-OK "GitHub Secret '$($CONFIG.GitHubSecret)' = $newIP"
-
         } catch {
             Write-Warn "Tu dong update that bai - can update thu cong:"
             Write-Host ""
@@ -227,6 +228,8 @@ public class Sodium {
             Write-Host ""
             $newIP | Set-Clipboard
             Write-Host "  (IP da copy vao clipboard)" -ForegroundColor Gray
+        } finally {
+            Remove-Item $pyFile -ErrorAction SilentlyContinue
         }
     }
 }
