@@ -111,11 +111,15 @@ Backend `update()` chỉ gọi `p.setActive(req.active())` — không loop qua v
 
 ## ✅ Issue 18 — Thêm mới NCC inline khi tạo phiếu nhập
 
-**File**: `ReceiptsPage.jsx` — `ReceiptForm`
+**Files**: `ReceiptsPage.jsx` — `ReceiptForm` + `ImportReceiptExcelForm`
 
 **Vấn đề**: Khi tìm NCC không có kết quả, không có cách tạo mới → phải thoát ra ngoài vào trang NCC.
 
-**Fix** — Tham khảo pattern customer trong `InvoicesPage.jsx`:
+**Fix** — Tham khảo pattern customer trong `InvoicesPage.jsx`, áp dụng cho **2 form**:
+- `ReceiptForm` — form tạo phiếu nhập thủ công
+- `ImportReceiptExcelForm` — form import phiếu nhập bằng Excel
+
+**Logic chung**:
 - Thay `<select>` dropdown NCC → search input có debounce 350ms
 - Tìm thấy → dropdown kết quả, click để chọn
 - Không tìm thấy → hiện panel inline "Tạo NCC mới?" với form: **Tên\* / SĐT / Địa chỉ**
