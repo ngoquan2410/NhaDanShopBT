@@ -1,4 +1,4 @@
-﻿import { useState, useRef } from 'react'
+﻿﻿import { useState, useRef } from 'react'
 import { useReceipts, useReceiptMutations } from '../../hooks/useReceipts'
 import { useProducts, useVariants } from '../../hooks/useProducts'
 import { useSort } from '../../hooks/useSort'
@@ -196,6 +196,17 @@ function VariantReceiptRow({ idx, item, products, onSet, onRemove }) {
 function ReceiptForm({ products, onSubmit, loading }) {
   const [supplierName, setSupplierName] = useState('')
   const [supplierId, setSupplierId] = useState(null)
+  const [supplierSearch, setSupplierSearch] = useState('')
+  const [supplierResults, setSupplierResults] = useState([])
+  const [searchDone, setSearchDone] = useState(false)
+  // Inline tạo mới NCC
+  const [showCreateSupplier, setShowCreateSupplier] = useState(false)
+  const [newSupplierName, setNewSupplierName] = useState('')
+  const [newSupplierPhone, setNewSupplierPhone] = useState('')
+  const [newSupplierAddress, setNewSupplierAddress] = useState('')
+  const [creatingSupplier, setCreatingSupplier] = useState(false)
+  const supplierSearchTimer = useRef(null)
+
   const [note, setNote] = useState('')
   const [shippingFee, setShippingFee] = useState(0)
   const [vatPercent, setVatPercent] = useState(0)
@@ -210,6 +221,68 @@ function ReceiptForm({ products, onSubmit, loading }) {
     queryFn: () => supplierService.getAll(),
     staleTime: 60_000,
   })
+  const queryClient = useQueryClient()
+  const handleSupplierSearch = (val) => {
+    setSupplierSearch(val)
+    setSearchDone(false)
+    setShowCreateSupplier(false)
+    setSupplierResults([])
+    if (!val.trim()) return
+    clearTimeout(supplierSearchTimer.current)
+    supplierSearchTimer.current = setTimeout(async () => {
+      try {
+        const res = await supplierService.getAll(val.trim())
+        const list = Array.isArray(res) ? res : (res.content || [])
+        setSupplierResults(list.slice(0, 6))
+        setSearchDone(true)
+        if (list.length === 0) {
+          setShowCreateSupplier(true)
+          setNewSupplierName(val.trim())
+          setNewSupplierPhone('')
+          setNewSupplierAddress('')
+        }
+      } catch { setSupplierResults([]); setSearchDone(true) }
+    }, 350)
+  }
+
+  const selectSupplier = (s) => {
+    setSupplierId(s.id)
+    setSupplierName(s.name)
+    setSupplierSearch('')
+    setSupplierResults([])
+    setSearchDone(false)
+    setShowCreateSupplier(false)
+  }
+
+  const clearSupplier = () => {
+    setSupplierId(null)
+    setSupplierName('')
+    setSupplierSearch('')
+    setSupplierResults([])
+    setSearchDone(false)
+    setShowCreateSupplier(false)
+    setNewSupplierName('')
+    setNewSupplierPhone('')
+    setNewSupplierAddress('')
+  }
+
+  const handleCreateSupplier = async () => {
+    const name = newSupplierName.trim()
+    if (!name) { toast.error('Vui lòng nhập tên nhà cung cấp'); return }
+    setCreatingSupplier(true)
+    try {
+      const created = await supplierService.create({
+        name,
+        phone: newSupplierPhone.trim() || null,
+        address: newSupplierAddress.trim() || null,
+      })
+      toast.success(`✅ Đã tạo NCC "${created.name}"`)
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] })
+      selectSupplier(created)
+    } catch (e) {
+      toast.error(e?.response?.data?.message || e?.response?.data?.detail || 'Lỗi tạo nhà cung cấp')
+    } finally { setCreatingSupplier(false) }
+  }
 
   const { data: combos = [] } = useQuery({
     queryKey: ['combos'],
@@ -279,26 +352,98 @@ function ReceiptForm({ products, onSubmit, loading }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Nhà cung cấp</label>
-          {suppliers.length > 0 ? (
-            <select value={supplierId || ''}
-              onChange={e => {
-                const id = e.target.value ? Number(e.target.value) : null
-                setSupplierId(id)
-                const s = suppliers.find(s => s.id === id)
-                if (s) setSupplierName(s.name)
-                else setSupplierName('')
-              }}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-              <option value="">-- Chọn NCC hoặc nhập tay --</option>
-              {suppliers.map(s => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
-            </select>
-          ) : null}
-          {!supplierId && (
-            <input value={supplierName} onChange={e => setSupplierName(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 mt-1"
-              placeholder="Hoặc nhập tên NCC thủ công" />
+        {/* ── Supplier picker + tạo mới inline ── */}
+        <div className="relative">
+          <label className="block text-sm font-medium text-gray-700 mb-1">🏭 Nhà cung cấp</label>
+          {supplierId ? (
+            <div className="flex items-center gap-2 border-2 border-green-300 rounded-lg px-3 py-2 bg-green-50">
+              <span className="text-green-600">🏭</span>
+              <span className="flex-1 text-sm font-semibold text-green-800">{supplierName}</span>
+              <button type="button" onClick={clearSupplier}
+                title="Đổi NCC" className="text-gray-400 hover:text-red-500 text-xl leading-none">&times;</button>
+            </div>
+          ) : (
+            <>
+              <input
+                value={supplierSearch}
+                onChange={e => handleSupplierSearch(e.target.value)}
+                placeholder="Tìm theo tên nhà cung cấp..."
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+              />
+              {/* Dropdown kết quả */}
+              {supplierResults.length > 0 && (
+                <div className="absolute z-30 left-0 right-0 mt-1 bg-white border rounded-xl shadow-2xl max-h-52 overflow-y-auto">
+                  {supplierResults.map(s => (
+                    <button key={s.id} type="button" onClick={() => selectSupplier(s)}
+                      className="w-full text-left px-3 py-2.5 hover:bg-green-50 text-sm border-b last:border-0 flex items-center gap-2">
+                      <span className="text-xs bg-green-100 text-green-700 font-mono px-1.5 py-0.5 rounded flex-shrink-0">{s.code}</span>
+                      <span className="font-medium flex-1 min-w-0 truncate">{s.name}</span>
+                      {s.phone && <span className="text-gray-400 text-xs flex-shrink-0">{s.phone}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* Không tìm thấy → panel tạo mới */}
+              {showCreateSupplier && (
+                <div className="mt-2 border-2 border-dashed border-green-300 rounded-xl p-3 bg-green-50 space-y-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-green-600 font-bold text-sm">➕</span>
+                    <p className="text-xs font-semibold text-green-700">
+                      Không tìm thấy "<span className="italic">{supplierSearch}</span>" — Tạo nhà cung cấp mới?
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="col-span-2">
+                      <label className="block text-xs text-gray-600 mb-0.5">Tên NCC <span className="text-red-500">*</span></label>
+                      <input
+                        value={newSupplierName}
+                        onChange={e => setNewSupplierName(e.target.value)}
+                        placeholder="Công ty TNHH..."
+                        className="w-full border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                        autoFocus
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-0.5">Số điện thoại</label>
+                      <input
+                        type="tel"
+                        value={newSupplierPhone}
+                        onChange={e => setNewSupplierPhone(e.target.value)}
+                        placeholder="0901234567"
+                        className="w-full border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-0.5">Địa chỉ</label>
+                      <input
+                        value={newSupplierAddress}
+                        onChange={e => setNewSupplierAddress(e.target.value)}
+                        placeholder="Địa chỉ (tùy chọn)"
+                        className="w-full border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={handleCreateSupplier}
+                      disabled={creatingSupplier || !newSupplierName.trim()}
+                      className="flex-1 py-1.5 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 disabled:opacity-50 transition">
+                      {creatingSupplier ? '⏳ Đang tạo...' : '✅ Tạo & chọn NCC này'}
+                    </button>
+                    <button type="button"
+                      onClick={() => { setShowCreateSupplier(false); setSupplierSearch('') }}
+                      className="px-3 py-1.5 border rounded-lg text-xs text-gray-500 hover:bg-gray-100">
+                      Bỏ qua
+                    </button>
+                  </div>
+                </div>
+              )}
+              {/* Chưa search → cho nhập tay */}
+              {!supplierSearch && !showCreateSupplier && (
+                <input value={supplierName} onChange={e => setSupplierName(e.target.value)}
+                  placeholder="...hoặc nhập tên NCC thủ công (không bắt buộc)"
+                  className="w-full border border-dashed rounded-lg px-3 py-1.5 text-xs text-gray-500 focus:outline-none focus:ring-1 focus:ring-green-300 mt-1" />
+              )}
+            </>
           )}
         </div>
         <div>

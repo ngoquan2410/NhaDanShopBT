@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react'
+﻿﻿import { useState, useEffect, useRef } from 'react'
 import { useProducts, useProductMutations, useVariants, useVariantMutations } from '../../hooks/useProducts'
 import { useCategories } from '../../hooks/useCategories'
 import { productService } from '../../services/productService'
@@ -306,7 +306,7 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
                       )}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-2 items-start">
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Mã biến thể *</label>
                       <input type="text" value={v.variantCode}
@@ -337,43 +337,49 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
                         onChange={e => { const v2 = e.target.value.replace(/\D/g,''); setV(idx, 'piecesPerUnit', v2||1) }}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">
-                        Giá bán (₫)
-                        <span className="ml-1 text-gray-400 font-normal">(để trống = điền sau)</span>
-                      </label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={v.sellPrice === 0 || v.sellPrice === '' ? '' : Number(v.sellPrice).toLocaleString('vi-VN')}
-                        placeholder="0"
-                        onChange={e => {
-                          const raw = e.target.value.replace(/\./g, '').replace(/,/g, '')
-                          if (raw === '' || /^\d+$/.test(raw)) setV(idx, 'sellPrice', raw === '' ? 0 : Number(raw))
-                        }}
-                        className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
-                      {Number(v.sellPrice) > 0 && Number(v.sellPrice) % 1000 !== 0 && (
-                        <p className="text-xs text-amber-600 mt-0.5">⚠️ Giá nên là bội số của 1.000₫</p>
-                      )}
-                      {Number(v.sellPrice) === 0 && (
-                        <p className="text-xs text-amber-600 mt-0.5">⚠️ Chưa có giá bán — SP sẽ hiện 0₫ trên POS</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">
-                        Giá vốn (₫)
-                        <span className="ml-1 text-gray-400 font-normal">(để trống = tự tính khi nhập kho)</span>
-                      </label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={v.costPrice === 0 || v.costPrice === '' ? '' : Number(v.costPrice).toLocaleString('vi-VN')}
-                        placeholder="0"
-                        onChange={e => {
-                          const raw = e.target.value.replace(/\./g, '').replace(/,/g, '')
-                          if (raw === '' || /^\d+$/.test(raw)) setV(idx, 'costPrice', raw === '' ? 0 : Number(raw))
-                        }}
-                        className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                    {/* Giá bán + Giá vốn: wrap trong div có min-h để warning không đẩy lệch */}
+                    <div className="col-span-2 grid grid-cols-2 gap-2 items-start">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">
+                          Giá bán (₫)
+                          <span className="ml-1 text-gray-400 font-normal">(để trống = điền sau)</span>
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={v.sellPrice === 0 || v.sellPrice === '' ? '' : Number(v.sellPrice).toLocaleString('vi-VN')}
+                          placeholder="0"
+                          onChange={e => {
+                            const raw = e.target.value.replace(/\./g, '').replace(/,/g, '')
+                            if (raw === '' || /^\d+$/.test(raw)) setV(idx, 'sellPrice', raw === '' ? 0 : Number(raw))
+                          }}
+                          className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                        <div className="min-h-[1.25rem]">
+                          {Number(v.sellPrice) > 0 && Number(v.sellPrice) % 1000 !== 0 && (
+                            <p className="text-xs text-amber-600 mt-0.5">⚠️ Giá nên là bội số của 1.000₫</p>
+                          )}
+                          {Number(v.sellPrice) === 0 && (
+                            <p className="text-xs text-amber-600 mt-0.5">⚠️ Chưa có giá bán — SP sẽ hiện 0₫ trên POS</p>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">
+                          Giá vốn (₫)
+                          <span className="ml-1 text-gray-400 font-normal">(để trống = tự tính khi nhập kho)</span>
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={v.costPrice === 0 || v.costPrice === '' ? '' : Number(v.costPrice).toLocaleString('vi-VN')}
+                          placeholder="0"
+                          onChange={e => {
+                            const raw = e.target.value.replace(/\./g, '').replace(/,/g, '')
+                            if (raw === '' || /^\d+$/.test(raw)) setV(idx, 'costPrice', raw === '' ? 0 : Number(raw))
+                          }}
+                          className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                        <div className="min-h-[1.25rem]" />
+                      </div>
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Tồn kho ban đầu</label>
