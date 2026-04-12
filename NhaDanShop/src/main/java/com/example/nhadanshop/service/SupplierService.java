@@ -37,9 +37,15 @@ public class SupplierService {
 
     @Transactional
     public SupplierResponse create(SupplierRequest req) {
-        String code = req.code().trim().toUpperCase();
-        if (supplierRepository.existsByCode(code))
-            throw new IllegalStateException("Mã NCC '" + code + "' đã tồn tại.");
+        // Tự sinh code nếu FE không gửi (VD: tạo inline từ form phiếu nhập)
+        String code;
+        if (req.code() == null || req.code().isBlank()) {
+            code = generateNextCode();
+        } else {
+            code = req.code().trim().toUpperCase();
+            if (supplierRepository.existsByCode(code))
+                throw new IllegalStateException("Mã NCC '" + code + "' đã tồn tại.");
+        }
 
         Supplier s = new Supplier();
         s.setCode(code);
@@ -51,6 +57,27 @@ public class SupplierService {
         s.setNote(req.note());
         s.setActive(req.active() != null ? req.active() : true);
         return toResponse(supplierRepository.save(s));
+    }
+
+    /** Sinh mã NCC tự động: NCC001, NCC002, ... tìm số lớn nhất hiện có rồi +1 */
+    private String generateNextCode() {
+        long maxNum = supplierRepository.findAll().stream()
+                .map(Supplier::getCode)
+                .filter(c -> c != null && c.matches("NCC\\d+"))
+                .mapToLong(c -> {
+                    try { return Long.parseLong(c.substring(3)); }
+                    catch (NumberFormatException e) { return 0L; }
+                })
+                .max()
+                .orElse(0L);
+
+        String candidate;
+        do {
+            maxNum++;
+            candidate = String.format("NCC%03d", maxNum);
+        } while (supplierRepository.existsByCode(candidate));
+
+        return candidate;
     }
 
     @Transactional
