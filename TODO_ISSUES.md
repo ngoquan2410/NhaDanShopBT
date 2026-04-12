@@ -1,6 +1,6 @@
 # 🛠️ TODO — Fix Issues NhaDanShop UI
 
-> Cập nhật: 12/04/2026 | **Trạng thái: 21/21 issues ✅ hoàn thành**
+> Cập nhật: 12/04/2026 | **Trạng thái: 22/22 issues ✅ hoàn thành**
 
 ---
 
@@ -122,6 +122,26 @@ Backend `update()` chỉ gọi `p.setActive(req.active())` — không loop qua v
 - Sau khi tạo → auto chọn NCC vừa tạo + `invalidateQueries(['suppliers'])`
 - Đã chọn NCC → hiện badge xanh + nút ✕ để đổi
 - Chưa search → vẫn cho nhập tên NCC thủ công (không bắt buộc lưu)
+
+---
+
+## ✅ Issue 22 — Tự động sinh mã khách hàng khi tạo inline từ hóa đơn
+
+**Files**: `CustomerRequest.java`, `CustomerService.java`
+
+**Vấn đề**: Khi tạo khách hàng mới inline từ form tạo hóa đơn, FE không gửi `code` → backend trả lỗi `400 "code: must not be blank"`.
+
+**Fix**:
+- `CustomerRequest.java`: bỏ `@NotBlank` khỏi `code` — cho phép null/blank
+- `CustomerService.create()`: tự sinh code nếu không có
+  ```
+  generateNextCode():
+    1. Tìm tất cả code dạng KHxxx, lấy số lớn nhất
+    2. +1 và format KH001, KH002, ...
+    3. Vòng lặp đảm bảo unique (tránh race condition)
+  ```
+
+**Kết quả**: Tạo KH inline không cần nhập mã → mã tự sinh `KH001`, `KH002`...
 
 ---
 
