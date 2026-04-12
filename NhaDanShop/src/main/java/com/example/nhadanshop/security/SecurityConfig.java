@@ -78,6 +78,8 @@ public class SecurityConfig {
                         .requestMatchers("/h2-console/**").permitAll()
                         .requestMatchers("/debug/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        // Actuator health check - MUST be public for CI/CD and monitoring
+                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         // Auth public
                         .requestMatchers("/api/auth/login", "/api/auth/verify-totp", "/api/auth/refresh", "/api/auth/signup").permitAll()
                         .requestMatchers("/api/auth/**").authenticated()
