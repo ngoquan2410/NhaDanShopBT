@@ -1,7 +1,7 @@
 package com.example.nhadanshop.dto;
 
 import jakarta.validation.constraints.Size;
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 
 /**
  * PATCH /api/receipts/{id}/meta
@@ -11,6 +11,6 @@ public record ReceiptMetaUpdateRequest(
         @Size(max = 500) String note,
         Long supplierId,
         @Size(max = 150) String supplierName,
-        /** Ngày nhập kho thực tế — null → không đổi. Không được là tương lai. */
-        LocalDateTime receiptDate
+        /** Ngày nhập kho — null → không đổi. Không được là tương lai. */
+        LocalDate receiptDate
 ) {}

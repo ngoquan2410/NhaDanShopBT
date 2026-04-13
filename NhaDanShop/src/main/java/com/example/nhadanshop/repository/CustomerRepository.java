@@ -30,17 +30,17 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     Optional<Customer> findByPhoneAndActiveTrue(String phone);
 
     /**
-     * Tìm kiếm đa tiêu chí: tên, SĐT, mã KH.
-     * Dùng cho search input trên FE.
+     * Tìm kiếm đa tiêu chí: tên (hỗ trợ không dấu tiếng Việt), SĐT, mã KH.
+     * VD: "manh" → "Mạnh Hùng", "nguyen" → "Nguyễn Văn A"
      */
-    @Query("""
-            SELECT c FROM Customer c
+    @Query(value = """
+            SELECT * FROM customers c
             WHERE c.active = TRUE
-              AND (LOWER(c.name)  LIKE LOWER(CONCAT('%', :q, '%'))
-                OR c.phone        LIKE CONCAT('%', :q, '%')
-                OR LOWER(c.code)  LIKE LOWER(CONCAT('%', :q, '%')))
+              AND (immutable_unaccent(lower(c.name)) LIKE '%' || immutable_unaccent(lower(:q)) || '%'
+                OR c.phone LIKE '%' || :q || '%'
+                OR lower(c.code) LIKE '%' || lower(:q) || '%')
             ORDER BY c.name
-            """)
+            """, nativeQuery = true)
     List<Customer> searchActive(@Param("q") String q);
 
     /** Top N KH theo tổng chi tiêu (VIP ranking) */

@@ -318,7 +318,7 @@ function ReceiptForm({ products, onSubmit, loading }) {
       supplierName, supplierId: supplierId || null, note,
       shippingFee:  Number(shippingFee),
       vatPercent:   Number(vatPercent) || 0,
-      receiptDate:  receiptDate ? `${receiptDate}T00:00:00` : null,
+      receiptDate:  receiptDate || null,
       items: validItems.map(it => ({
         productId:          Number(it.productId),
         quantity:           Number(it.quantity),
@@ -1136,11 +1136,16 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
 
 // ── EditMetaModal — Sửa ghi chú + NCC (không ảnh hưởng tồn kho) ─────────────
 function EditMetaModal({ receipt, onClose, onSave, saving }) {
+  const today = new Date().toISOString().split('T')[0]
   const [note, setNote] = useState(receipt.note || '')
   const [supplierName, setSupplierName] = useState(receipt.supplierName || '')
   const [supplierId, setSupplierId] = useState(receipt.supplierId || null)
   const [supplierSearch, setSupplierSearch] = useState('')
   const [supplierResults, setSupplierResults] = useState([])
+  // receiptDate: hiển thị ngày hiện tại của phiếu, cho phép sửa
+  const [receiptDate, setReceiptDate] = useState(
+    receipt.receiptDate ? receipt.receiptDate.split('T')[0] : today
+  )
   const searchTimer = useRef(null)
 
   const handleSupplierSearch = (val) => {
@@ -1165,7 +1170,12 @@ function EditMetaModal({ receipt, onClose, onSave, saving }) {
   }
 
   const handleSubmit = () => {
-    onSave({ note: note.trim() || null, supplierId: supplierId || null, supplierName: supplierName.trim() || null })
+    onSave({
+      note: note.trim() || null,
+      supplierId: supplierId || null,
+      supplierName: supplierName.trim() || null,
+      receiptDate: receiptDate || null,
+    })
   }
 
   return (
@@ -1176,7 +1186,7 @@ function EditMetaModal({ receipt, onClose, onSave, saving }) {
             <h3 className="font-bold text-gray-800">✏️ Sửa thông tin phiếu</h3>
             <p className="text-xs text-gray-400 mt-0.5">
               <span className="font-mono text-blue-600">{receipt.receiptNo}</span>
-              {' · '}Chỉ sửa được ghi chú và nhà cung cấp
+              {' · '}Sửa được ghi chú, nhà cung cấp và ngày nhập
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
@@ -1225,6 +1235,25 @@ function EditMetaModal({ receipt, onClose, onSave, saving }) {
               placeholder="VD: Nhập hàng tháng 4 từ NCC Hải Hà"
               className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 resize-none"
             />
+          </div>
+
+          {/* Ngày nhập kho */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              📅 Ngày nhập kho
+            </label>
+            <input
+              type="date"
+              value={receiptDate}
+              max={today}
+              onChange={e => setReceiptDate(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+            />
+            {receiptDate && receiptDate < today && (
+              <p className="text-xs text-amber-600 mt-1">
+                ⚠️ Ngày quá khứ — HSD của các lô trong phiếu này không được cập nhật lại tự động.
+              </p>
+            )}
           </div>
 
           {/* Thông báo */}

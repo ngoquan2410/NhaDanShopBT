@@ -17,9 +17,13 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
 
     Optional<Supplier> findByCode(String code);
 
-    @Query("SELECT s FROM Supplier s WHERE s.active = true AND " +
-           "(LOWER(s.name) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
-           " LOWER(s.code) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
-           " LOWER(COALESCE(s.phone, '')) LIKE LOWER(CONCAT('%', :q, '%')))")
+    /**
+     * Tìm kiếm không dấu tiếng Việt — VD: "trang" tìm được "Trạng", "manh" → "Mạnh Hùng".
+     */
+    @Query(value = "SELECT * FROM suppliers s WHERE s.active = true AND " +
+           "(immutable_unaccent(lower(s.name)) LIKE '%' || immutable_unaccent(lower(:q)) || '%' OR " +
+           " lower(s.code) LIKE '%' || lower(:q) || '%' OR " +
+           " lower(coalesce(s.phone, '')) LIKE '%' || lower(:q) || '%')",
+           nativeQuery = true)
     List<Supplier> searchActive(@Param("q") String query);
 }

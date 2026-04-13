@@ -1,6 +1,6 @@
 # 🛠️ TODO — Fix Issues NhaDanShop UI
 
-> Cập nhật: 13/04/2026 | **Trạng thái: 22/22 cũ ✅ + Issue 23 ✅ đã fix + Issue 24 ✅ đã fix**
+> Cập nhật: 13/04/2026 | **Trạng thái: 22/22 cũ ✅ + Issue 23 ✅ + Issue 24 ✅ + Issue 25 🔍 phân tích + Issue 26 🔍 phân tích**
 
 ---
 
@@ -509,7 +509,355 @@ continue;
 
 ---
 
-## 🔧 Patterns chuẩn
+## 🔍 Issue 25 — Phân tích: 1 user/admin login đồng thời nhiều máy
+
+### 🔍 Hiện trạng — Hệ thống đang xử lý như thế nào?
+
+Hệ thống dùng **JWT stateless + Refresh Token rotation** lưu trong DB (`refresh_tokens` table).
+
+```
+Access Token:  JWT, 30 phút, stateless (không lưu DB)
+Refresh Token: random 32 bytes, hash SHA-256 lưu DB, 7 ngày, có revoked flag
+```
+
+**Khi login**, `issueFullTokens()` tạo **1 refresh token mới** và lưu vào DB:
+```java
+// AuthService.java — issueFullTokens()
+RefreshToken rt = new RefreshToken();
+rt.setUser(user);
+rt.setTokenHash(refreshHash);
+rt.setExpiresAt(LocalDateTime.now().plusDays(7));
+refreshTokenRepo.save(rt);  // ← chỉ INSERT, KHÔNG xóa token cũ
+```
+
+**Kết quả hiện tại**: mỗi lần login tạo 1 refresh token mới → DB tích lũy nhiều token.
+**Không có giới hạn** số session đồng thời → user A có thể login máy tính, điện thoại, máy tính bảng cùng lúc.
+
+---
+
+### 📊 Bảng trạng thái `refresh_tokens` khi login nhiều máy
+
+```
+id | user_id | token_hash | expires_at          | revoked | created_at
+---|---------|------------|---------------------|---------|--------------------
+ 1 | admin   | abc...     | 2026-04-20 08:00:00 | false   | 2026-04-13 08:00  ← Máy tính văn phòng
+ 2 | admin   | def...     | 2026-04-20 09:00:00 | false   | 2026-04-13 09:00  ← Điện thoại
+ 3 | admin   | ghi...     | 2026-04-20 10:00:00 | false   | 2026-04-13 10:00  ← Máy tính bảng
+```
+
+Tất cả 3 session đều **hợp lệ** và hoạt động song song.
+
+---
+
+### 🛡️ Cơ chế bảo mật hiện có
+
+| Tình huống | Hành vi hiện tại | Kết quả |
+|---|---|---|
+| User đăng xuất 1 máy | Revoke refresh token của máy đó | ✅ Máy đó bị đăng xuất |
+| User đổi mật khẩu | Không tự revoke session cũ | ⚠️ Session cũ vẫn còn hiệu lực tối đa 30 phút |
+| Refresh token bị dùng 2 lần | `revokeAllByUser()` — revoke TẤT CẢ session | ✅ Phát hiện token theft |
+| Admin kích hoạt TOTP | `revokeAllByUser()` — buộc login lại tất cả | ✅ |
+| Access token hết hạn (30 phút) | Client phải dùng refresh token để lấy mới | ✅ |
+
+---
+
+### 🎯 3 chiến lược xử lý concurrent login
+
+#### Chiến lược A — **Cho phép đa session** (hiện tại, không thay đổi gì) ✅
+
+> Phù hợp với shop nhỏ: owner vừa dùng máy tính quầy, vừa xem trên điện thoại.
+
+- **Ưu điểm**: Không cần thay đổi code, UX tốt cho owner dùng nhiều thiết bị
+- **Nhược điểm**: Không kiểm soát được số session
+
+**Cần bổ sung duy nhất**: **Revoke tất cả session khi đổi mật khẩu** — hiện tại chưa có:
+```java
+// UserService.changePassword() — CẦN THÊM:
+refreshTokenRepo.revokeAllByUser(user);  // buộc login lại trên tất cả thiết bị
+```
+
+---
+
+#### Chiến lược B — **Giới hạn N session đồng thời** (single-device hoặc N-device)
+
+Khi login, kiểm tra số session đang active:
+```java
+// Trong issueFullTokens():
+long activeSessions = refreshTokenRepo.countActiveByUser(user);
+if (activeSessions >= MAX_SESSIONS) {  // MAX_SESSIONS = 1 (strict) hoặc 3 (loose)
+    // Revoke session CŨ NHẤT để nhường chỗ cho session mới
+    refreshTokenRepo.revokeOldestByUser(user);
+    // Hoặc: từ chối login với message "Đã đăng nhập từ thiết bị khác"
+}
+```
+
+**Cần thêm vào RefreshTokenRepository**:
+```java
+@Query("SELECT COUNT(rt) FROM RefreshToken rt WHERE rt.user = :user AND rt.revoked = false AND rt.expiresAt > :now")
+long countActiveByUser(@Param("user") User user, @Param("now") LocalDateTime now);
+
+@Query("SELECT rt FROM RefreshToken rt WHERE rt.user = :user AND rt.revoked = false ORDER BY rt.createdAt ASC")
+List<RefreshToken> findActiveByUserOrderByCreatedAt(@Param("user") User user);
+```
+
+---
+
+#### Chiến lược C — **Single-session strict** (1 máy tại 1 thời điểm)
+
+```java
+// Khi login thành công → revoke TẤT CẢ session cũ trước khi cấp token mới:
+refreshTokenRepo.revokeAllByUser(user);   // ← đăng xuất khỏi tất cả thiết bị cũ
+RefreshToken newToken = new RefreshToken(...);
+refreshTokenRepo.save(newToken);
+```
+
+**Hành vi**: Login ở máy B → máy A bị đăng xuất ngay khi access token hết hạn (tối đa 30 phút sau).
+
+---
+
+### 🏪 Khuyến nghị cho NhaDanShop
+
+| Đối tượng | Khuyến nghị | Lý do |
+|---|---|---|
+| **ROLE_ADMIN** | Chiến lược A + revoke khi đổi mật khẩu | Owner cần dùng đa thiết bị |
+| **ROLE_USER** (nhân viên) | Chiến lược B (max 2 session) | Tránh chia sẻ tài khoản |
+
+---
+
+### 🔧 Fix tối thiểu cần làm ngay (không ảnh hưởng UX)
+
+**Chỉ cần 1 thay đổi**: Revoke tất cả token khi user đổi mật khẩu:
+
+```java
+// UserService.java — trong method changePassword() hoặc updateUser() khi có password mới:
+if (newPassword != null && !newPassword.isBlank()) {
+    user.setPassword(passwordEncoder.encode(newPassword));
+    refreshTokenRepo.revokeAllByUser(user);  // ← THÊM DÒNG NÀY
+}
+```
+
+**Tại sao quan trọng**: Nếu tài khoản bị lộ mật khẩu, owner đổi mật khẩu nhưng kẻ xấu vẫn có refresh token → vẫn dùng được tối đa 7 ngày.
+
+---
+
+### ✅ Acceptance Criteria
+- [ ] Đổi mật khẩu → revoke tất cả session cũ trên tất cả thiết bị
+- [ ] (Tùy chọn) Giới hạn ROLE_USER tối đa 2 session đồng thời
+- [ ] API `GET /api/auth/sessions` để xem danh sách session đang active (admin có thể revoke)
+- [ ] API `DELETE /api/auth/sessions/all` để đăng xuất tất cả thiết bị
+
+---
+
+## 🔍 Issue 26 — Phân tích chi tiết: expiryDate & FEFO khi nhập kho ngày quá khứ
+
+> **Context**: Issue 23 đã cho phép chọn `receiptDate` trong quá khứ. Issue này phân tích
+> **chính xác** điều gì xảy ra với `ProductBatch.expiryDate` và thuật toán FEFO khi dùng tính năng đó.
+
+---
+
+### 📦 Phần 1 — `ProductBatch.expiryDate` bị sai khi nào?
+
+#### Cơ chế tính expiryDate hiện tại (sau khi fix Issue 23)
+
+```java
+// InventoryReceiptService.java — sau khi fix Issue 23:
+LocalDate importLocalDate = saved.getReceiptDate().toLocalDate(); // dùng receiptDate
+if (itemReq.expiryDateOverride() != null) {
+    expiryDate = itemReq.expiryDateOverride();                    // ← ưu tiên 1: nhập tay
+} else if (variant.getExpiryDays() != null && variant.getExpiryDays() > 0) {
+    expiryDate = importLocalDate.plusDays(variant.getExpiryDays()); // ← ưu tiên 2: tính từ receiptDate
+} else {
+    expiryDate = importLocalDate.plusYears(10);                    // ← fallback: không có HSD
+}
+```
+
+#### Ví dụ thực tế: Muối Ớt Tây Ninh (expiryDays = 180 ngày)
+
+| Tình huống | receiptDate | expiryDateOverride | expiryDate tính ra | Đúng/Sai |
+|---|---|---|---|---|
+| Nhập đúng ngày hàng về | 05/04/2026 | null | 05/04 + 180 = 02/10/2026 | ✅ Đúng |
+| Nhập trễ, quên điền HSD | 13/04/2026 (hôm nay) | null | 13/04 + 180 = 10/10/2026 | ⚠️ Sai 8 ngày |
+| Nhập trễ, có điền HSD | 05/04/2026 | 02/10/2026 | 02/10/2026 | ✅ Đúng |
+| **Trước fix Issue 23** | 13/04 (hard-code now) | null | 13/04 + 180 = 10/10/2026 | ❌ Luôn sai |
+
+**Kết luận**: Sau fix Issue 23, expiryDate chỉ sai khi:
+1. Admin chọn `receiptDate` trong quá khứ **VÀ**
+2. Không điền `expiryDateOverride` (ngày HSD thực tế từ bao bì)
+
+**Giải pháp**: UI đã có cảnh báo khi chọn ngày quá khứ → nhắc admin điền cột N (Ngày HSD).
+
+---
+
+### 🔄 Phần 2 — FEFO hoạt động như thế nào? Ví dụ đầy đủ
+
+#### FEFO = First Expired First Out
+
+> **Nguyên tắc**: Lô nào **sắp hết hạn nhất** thì bán trước — tránh hàng hết hạn còn trong kho.
+
+#### Code thực tế trong hệ thống
+
+```java
+// ProductBatchRepository — query FEFO:
+// SELECT * FROM product_batches
+// WHERE variant_id = :variantId
+//   AND remaining_qty > 0
+//   AND expiry_date > NOW()          ← lọc lô chưa hết hạn
+// ORDER BY expiry_date ASC, id ASC   ← lô gần hết hạn nhất TRƯỚC
+// FOR UPDATE                         ← pessimistic lock tránh race condition
+
+// ProductBatchService.deductFromBatches():
+for (ProductBatch batch : batches) {   // batches đã sort expiry_date ASC
+    int take = Math.min(remaining, batch.getRemainingQty());
+    batch.setRemainingQty(batch.getRemainingQty() - take);
+    weightedCostSum += take * batch.getCostPrice();
+    remaining -= take;
+    if (remaining == 0) break;
+}
+return weightedCostSum / qtyNeeded;    // weighted avg cost → ghi vào SalesInvoiceItem
+```
+
+#### Ví dụ đầy đủ: Bán 150 bịch Bánh Tráng Rong Biển
+
+**Tình trạng kho trước khi bán**:
+```
+Lô A: nhập 01/03, expiryDate = 01/06/2026, còn 100 bịch, giá vốn 9.000₫/bịch
+Lô B: nhập 01/04, expiryDate = 01/07/2026, còn 200 bịch, giá vốn 9.500₫/bịch
+Lô C: nhập 01/05, expiryDate = 01/08/2026, còn 150 bịch, giá vốn 10.000₫/bịch
+```
+
+**FEFO sort**: A (01/06) → B (01/07) → C (01/08) ← đúng thứ tự
+
+**Bán 150 bịch**:
+```
+1. Lô A: take 100, remainingQty A = 0, cost = 100 × 9.000 = 900.000₫
+2. Lô B: take  50, remainingQty B = 150, cost = 50 × 9.500 = 475.000₫
+→ Tổng cost = 1.375.000₫
+→ Weighted avg cost = 1.375.000 / 150 = 9.167₫/bịch → ghi vào SalesInvoiceItem
+```
+
+**Kết quả**: Lô A hết hàng trước ✅, lợi nhuận tính đúng theo giá vốn từng lô ✅
+
+---
+
+### ⚠️ Phần 3 — FEFO bị sai khi nào? Ví dụ cụ thể
+
+#### Kịch bản lỗi: Nhập kho trễ, không điền ngày HSD
+
+**Hàng thực tế**:
+```
+Lô mới về ngày 01/04, expiryDays = 90 ngày → HSD thực tế = 01/07/2026
+Lô cũ đang có:  nhập 01/03, expiryDate = 01/06/2026, còn 100 bịch
+```
+
+**Admin vào máy ngày 13/04** (trễ 12 ngày), chọn `receiptDate = 01/04` nhưng **quên điền ngày HSD**:
+```java
+expiryDate = importLocalDate.plusDays(90)
+           = 01/04/2026 + 90 ngày
+           = 01/07/2026   ← đúng vì đã fix Issue 23 (dùng receiptDate)
+```
+
+✅ Trong trường hợp này sau khi fix Issue 23, expiryDate **ĐÚNG** nếu admin chọn đúng `receiptDate`.
+
+**Nhưng nếu admin quên chọn ngày, để mặc định hôm nay (13/04)**:
+```java
+expiryDate = 13/04/2026 + 90 ngày = 13/07/2026  ← SAI! (đúng phải là 01/07)
+```
+
+**Hậu quả FEFO**:
+```
+Kho sau nhập (expiryDate SAI):
+  Lô cũ:  expiryDate = 01/06/2026, còn 100 bịch  ← sẽ bán trước ✅ (vẫn đúng)
+  Lô mới: expiryDate = 13/07/2026 (SAI), còn 200 bịch
+
+Kho sau nhập (expiryDate ĐÚNG):
+  Lô cũ:  expiryDate = 01/06/2026, còn 100 bịch  ← bán trước ✅
+  Lô mới: expiryDate = 01/07/2026 (đúng), còn 200 bịch
+```
+
+Trong ví dụ này FEFO **không bị đảo ngược** vì lô cũ vẫn hết hạn trước. Nhưng xem kịch bản nguy hiểm hơn:
+
+#### Kịch bản FEFO bị đảo ngược hoàn toàn
+
+**Tình huống**: Nhập thêm hàng cũ tồn từ kho phụ (lô thực tế HSD 15/05) vào ngày 13/04 nhưng quên điền HSD:
+
+```
+Lô A (đang có): nhập tháng 3, expiryDate = 15/06/2026, còn 50 bịch
+Lô B (nhập mới, hàng CŨ từ kho phụ): HSD thực tế = 15/05/2026
+  → Admin quên điền ngày, để mặc định: expiryDate = 13/04 + 90 = 13/07/2026 ← SAI!
+```
+
+**FEFO nhìn thấy** (sai):
+```
+Lô A: expiry = 15/06  ← bán trước (đúng vị trí)
+Lô B: expiry = 13/07  ← bán sau  (SAI! B phải bán TRƯỚC vì HSD thực = 15/05)
+```
+
+**Hậu quả thực tế**:
+- Bán hết Lô A (hết hạn 15/06) trước → OK
+- Đến lúc bán Lô B → hàng đã hết hạn từ 15/05 → **bán hàng quá hạn cho khách** ❌
+- `unitCostSnapshot` của hóa đơn cũng sai theo → **lợi nhuận báo cáo sai**
+
+---
+
+### 📋 Phần 4 — Dữ liệu như thế nào là an toàn?
+
+#### ✅ Trường hợp KHÔNG bị lỗi
+
+| Điều kiện | Giải thích |
+|---|---|
+| `expiryDateOverride` luôn được điền | Admin điền ngày HSD từ bao bì → tuyệt đối an toàn |
+| `expiryDays = null` (không quản lý HSD) | `expiryDate = receiptDate + 10 năm` → lô nào nhập trước bán trước, FEFO theo ngày nhập |
+| Nhập đúng ngày hàng về (`receiptDate = ngày thực tế`) | expiryDate tính từ ngày đúng |
+| Lô mới luôn HSD dài hơn lô cũ | Thứ tự FEFO tự nhiên đúng dù expiryDate tính xấp xỉ |
+
+#### ⚠️ Trường hợp CÓ THỂ bị lỗi
+
+| Điều kiện | Rủi ro |
+|---|---|
+| Nhập kho ngày quá khứ + không điền `expiryDateOverride` | expiryDate tính từ `receiptDate` → đúng nếu chọn đúng ngày |
+| Nhập hàng tồn từ kho khác (lô cũ hơn lô đang có) + không điền HSD | FEFO bị đảo ngược ← **rủi ro cao nhất** |
+| Import Excel với `receiptDate` quá khứ + cột N (Ngày HSD) bỏ trống | Tất cả batch của import đó tính HSD từ `receiptDate` → đúng nếu chọn đúng |
+
+---
+
+### 🔧 Phần 5 — Giải pháp đã triển khai và cần bổ sung
+
+#### ✅ Đã làm (Issue 23)
+- expiryDate tính từ `receiptDate` thay vì `LocalDate.now()`
+- UI cảnh báo khi chọn ngày quá khứ: *"nhớ điền Ngày HSD để FEFO chính xác"*
+
+#### 🔜 Cần làm thêm để an toàn hơn
+
+**Option 1 — Validate backend (khuyến nghị)**:
+Nếu `receiptDate` cách hôm nay > N ngày (VD: 7 ngày) VÀ `expiryDays > 0` VÀ không có `expiryDateOverride`:
+```java
+// InventoryReceiptService.java — trong vòng lặp xử lý items:
+if (ChronoUnit.DAYS.between(importLocalDate, LocalDate.now()) > 7
+        && variant.getExpiryDays() != null && variant.getExpiryDays() > 0
+        && itemReq.expiryDateOverride() == null) {
+    warnings.add("⚠️ SP '" + variant.getVariantCode() + "': nhập ngày " + importLocalDate
+        + " (cách hôm nay " + days + " ngày) nhưng không có ngày HSD thực tế → "
+        + "expiryDate tính tự động có thể không chính xác.");
+}
+```
+
+**Option 2 — Required expiryDateOverride khi nhập ngày quá khứ**:
+Nếu `receiptDate < today - 3 ngày` VÀ variant có `expiryDays > 0` → bắt buộc điền `expiryDateOverride`:
+```java
+if (daysDiff > 3 && variant.getExpiryDays() > 0 && itemReq.expiryDateOverride() == null) {
+    errors.add("SP '" + code + "': nhập ngày quá khứ (" + daysDiff + " ngày trước) — "
+        + "bắt buộc điền Ngày HSD thực tế để đảm bảo FEFO đúng.");
+}
+```
+
+#### ✅ Acceptance Criteria
+- [ ] Warning khi nhập ngày quá khứ > 7 ngày mà không điền `expiryDateOverride`
+- [ ] (Tùy chọn) Bắt buộc `expiryDateOverride` khi `receiptDate < today - 3 ngày` và SP có HSD
+- [ ] Tài liệu hướng dẫn admin: khi nhập kho ngày quá khứ, **luôn điền cột N (Ngày HSD)**
+
+---
+
+
 
 ### Input tiền tệ (không spinner)
 ```jsx

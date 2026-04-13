@@ -47,8 +47,9 @@ public class InventoryReceiptService {
 
         // Dùng receiptDate từ request nếu có và không phải tương lai, ngược lại dùng now()
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime receiptDate = (req.receiptDate() != null && !req.receiptDate().isAfter(now))
-                ? req.receiptDate() : now;
+        LocalDateTime receiptDate = (req.receiptDate() != null && !req.receiptDate().isAfter(LocalDate.now()))
+                ? req.receiptDate().atStartOfDay()
+                : now;
         receipt.setReceiptDate(receiptDate);
 
         // Sprint 1 S1-3: set supplier FK nếu có supplierId
@@ -317,12 +318,12 @@ public class InventoryReceiptService {
         } else if (req.supplierName() != null) {
             receipt.setSupplierName(req.supplierName().isBlank() ? null : req.supplierName().trim());
         }
-        // Cho phép sửa ngày nhập — không được là tương lai
+        // Cho phép sửa ngày nhập — không được là ngày tương lai
         if (req.receiptDate() != null) {
-            if (req.receiptDate().isAfter(LocalDateTime.now())) {
+            if (req.receiptDate().isAfter(LocalDate.now())) {
                 throw new IllegalArgumentException("Ngày nhập không được là ngày tương lai");
             }
-            receipt.setReceiptDate(req.receiptDate());
+            receipt.setReceiptDate(req.receiptDate().atStartOfDay());
         }
         return DtoMapper.toResponse(receiptRepo.save(receipt));
     }
