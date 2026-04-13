@@ -318,7 +318,9 @@ function ReceiptForm({ products, onSubmit, loading }) {
       supplierName, supplierId: supplierId || null, note,
       shippingFee:  Number(shippingFee),
       vatPercent:   Number(vatPercent) || 0,
-      receiptDate:  receiptDate || null,
+      // Ngày quá khứ → gửi T00:00:00 (server đã UTC+7, parse đúng)
+      // Hôm nay → gửi null để backend dùng now() (có giờ phút giây thực)
+      receiptDate:  receiptDate && receiptDate < today ? `${receiptDate}T00:00:00` : null,
       items: validItems.map(it => ({
         productId:          Number(it.productId),
         quantity:           Number(it.quantity),
@@ -772,7 +774,7 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
         file, supplierName.trim(), note.trim(),
         Number(shippingFee) || 0, Number(vatPercent) || 0,
         supplierId || null,
-        receiptDate !== today ? receiptDate : null  // null = hôm nay (backend tự dùng now())
+        receiptDate !== today ? `${receiptDate}T00:00:00` : null  // null = hôm nay (backend dùng now())
       )
       setResult(res)
       if (res.successItems > 0) {
@@ -1174,7 +1176,7 @@ function EditMetaModal({ receipt, onClose, onSave, saving }) {
       note: note.trim() || null,
       supplierId: supplierId || null,
       supplierName: supplierName.trim() || null,
-      receiptDate: receiptDate || null,
+      receiptDate: receiptDate && receiptDate < today ? `${receiptDate}T00:00:00` : null,
     })
   }
 

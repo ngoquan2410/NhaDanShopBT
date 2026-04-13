@@ -211,6 +211,7 @@ jobs:
             "Environment=\"SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }}\"" \
             'Environment="SPRING_JPA_HIBERNATE_DDL_AUTO=validate"' \
             'Environment="SPRING_FLYWAY_ENABLED=true"' \
+            'Environment="TZ=Asia/Ho_Chi_Minh"' \
             "Environment=\"R2_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }}\"" \
             "Environment=\"R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}\"" \
             "Environment=\"R2_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}\"" \
@@ -218,7 +219,7 @@ jobs:
             "Environment=\"R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}\"" \
             "Environment=\"JWT_SECRET=${{ secrets.JWT_SECRET }}\"" \
             "Environment=\"CORS_ALLOWED_ORIGINS=http://${{ secrets.EC2_HOST }}\"" \
-            'ExecStart=/usr/bin/java -Xmx512m -Xms256m -jar /app/nhadanshop/nhadanshop.jar' \
+            'ExecStart=/usr/bin/java -Xmx512m -Xms256m -Duser.timezone=Asia/Ho_Chi_Minh -jar /app/nhadanshop/nhadanshop.jar' \
             'Restart=on-failure' \
             'RestartSec=10' \
             'StandardOutput=journal' \

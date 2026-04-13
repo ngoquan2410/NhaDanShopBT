@@ -79,6 +79,9 @@ sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" $PG_C
 # Tối ưu cho t3.micro (1GB RAM)
 sed -i "s/^shared_buffers = .*/shared_buffers = 256MB/" $PG_CONF
 sed -i "s/^#max_connections = .*/max_connections = 50/" $PG_CONF
+# Timezone UTC+7 cho PostgreSQL — tất cả now(), CURRENT_TIMESTAMP trả về giờ VN
+echo "timezone = 'Asia/Ho_Chi_Minh'" >> $PG_CONF
+echo "log_timezone = 'Asia/Ho_Chi_Minh'" >> $PG_CONF
 
 # pg_hba.conf: chỉ cho local connection bằng password
 cat > $PG_HBA << 'HBA'
@@ -164,10 +167,12 @@ Environment="SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}"
 Environment="SPRING_JPA_HIBERNATE_DDL_AUTO=validate"
 Environment="SPRING_FLYWAY_ENABLED=true"
 Environment="SERVER_PORT=8080"
+Environment="TZ=Asia/Ho_Chi_Minh"
 
 # JVM — tối ưu t3.micro 1GB RAM
 ExecStart=/usr/bin/java \\
   -Xmx512m -Xms256m \\
+  -Duser.timezone=Asia/Ho_Chi_Minh \\
   -jar /app/nhadanshop/nhadanshop.jar
 
 Restart=on-failure

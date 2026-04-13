@@ -7,7 +7,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public record InventoryReceiptRequest(
@@ -19,11 +19,12 @@ public record InventoryReceiptRequest(
         @Valid List<ReceiptItemRequest> items,
         @Valid List<ComboReceiptRequest> comboItems,
         /**
-         * Ngày nhập kho thực tế — optional. Chỉ gửi yyyy-MM-dd (không timezone).
-         * null → dùng LocalDateTime.now() (hôm nay).
+         * Ngày giờ nhập kho thực tế — optional. Format: "yyyy-MM-dd'T'HH:mm:ss"
+         * null → dùng LocalDateTime.now() (server time = UTC+7).
          * Không được là ngày tương lai (validate tại service).
+         * VD: "2026-01-04T08:30:00" = nhập lúc 8h30 ngày 4/1/2026
          */
-        LocalDate receiptDate
+        LocalDateTime receiptDate
 ) {
     public record ComboReceiptRequest(
             @NotNull Long comboId,
