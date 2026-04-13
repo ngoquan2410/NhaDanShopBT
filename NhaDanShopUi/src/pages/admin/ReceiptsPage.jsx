@@ -115,7 +115,8 @@ function VariantReceiptRow({ idx, item, products, onSet, onRemove }) {
             Số lượng <span className="text-gray-400">({importUnit || 'ĐV'})</span>
           </label>
           <input type="text" inputMode="numeric" value={item.quantity}
-            onChange={e => { const r=e.target.value.replace(/\D/g,''); onSet(idx,'quantity',r||1) }}
+            onChange={e => { const r=e.target.value.replace(/\D/g,''); onSet(idx,'quantity',r) }}
+            onBlur={e => { if(e.target.value==='' || Number(e.target.value)<1) onSet(idx,'quantity',1) }}
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
         </div>
         <div>

@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react'
+﻿﻿import { useState, useEffect, useRef } from 'react'
 import { useInvoices, useInvoiceMutations } from '../../hooks/useInvoices'
 import { useProducts } from '../../hooks/useProducts'
 import { useSort } from '../../hooks/useSort'
@@ -495,7 +495,8 @@ function InvoiceForm({ products, onSubmit, loading }) {
                     <div className="flex items-center gap-1">
                       <label className="text-xs text-gray-500 whitespace-nowrap">SL ({sellUnit}):</label>
                       <input type="text" inputMode="numeric" value={item.quantity}
-                        onChange={e => { const r=e.target.value.replace(/\D/g,''); setItem(idx,'quantity',r||1) }}
+                        onChange={e => { const r=e.target.value.replace(/\D/g,''); setItem(idx,'quantity',r) }}
+                        onBlur={e => { if(e.target.value==='' || Number(e.target.value)<1) setItem(idx,'quantity',1) }}
                         className={`w-16 border rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 ${overStock ? 'border-red-400 bg-red-50 focus:ring-red-400' : 'focus:ring-green-500'}`} />
                     </div>
                     {/* CK % */}

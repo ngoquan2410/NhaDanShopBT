@@ -334,7 +334,8 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Số lẻ / ĐV nhập</label>
                       <input type="text" inputMode="numeric" value={v.piecesPerUnit}
-                        onChange={e => { const v2 = e.target.value.replace(/\D/g,''); setV(idx, 'piecesPerUnit', v2||1) }}
+                        onChange={e => { const v2 = e.target.value.replace(/\D/g,''); setV(idx, 'piecesPerUnit', v2) }}
+                        onBlur={e => { if(e.target.value==='' || Number(e.target.value)<1) setV(idx, 'piecesPerUnit', 1) }}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
                     {/* Giá bán + Giá vốn: wrap trong div có min-h để warning không đẩy lệch */}
@@ -930,8 +931,9 @@ function VariantManager({ product, onClose }) {
             {f('Đơn vị nhập kho', 'importUnit')}
             <div>
               <label className="block text-xs text-gray-500 mb-1">Số lẻ / ĐV nhập</label>
-              <input type="text" inputMode="numeric" value={form?.piecesPerUnit||1}
-                onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,piecesPerUnit:r||1})) }}
+              <input type="text" inputMode="numeric" value={form?.piecesPerUnit??1}
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,piecesPerUnit:r})) }}
+                onBlur={e => { if(e.target.value==='' || Number(e.target.value)<1) setForm(p=>({...p,piecesPerUnit:1})) }}
                 className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
             </div>
             {/* Giá bán */}
