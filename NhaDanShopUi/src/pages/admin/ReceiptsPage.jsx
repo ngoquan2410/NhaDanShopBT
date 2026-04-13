@@ -471,6 +471,9 @@ function ReceiptForm({ products, onSubmit, loading }) {
             </p>
           )}
         </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            🚚 Phí vận chuyển (₫)
             <span className="ml-1 text-xs text-gray-400 font-normal">— chia đều vào giá vốn</span>
           </label>
           <input
