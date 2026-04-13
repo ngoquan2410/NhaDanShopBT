@@ -194,8 +194,9 @@ function PromotionForm({ initial, categories, products, onSubmit, loading, onClo
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Mua tối thiểu (X) *</label>
-              <input type="number" min={1} step={1} value={form.buyQty}
-                onChange={e => set('buyQty', e.target.value)}
+              <input type="text" inputMode="numeric" value={form.buyQty}
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); set('buyQty',r) }}
+                onBlur={() => { const n=parseInt(form.buyQty); set('buyQty',isNaN(n)||n<1?1:n) }}
                 placeholder="VD: 2"
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
             </div>
@@ -211,8 +212,9 @@ function PromotionForm({ initial, categories, products, onSubmit, loading, onClo
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Số lượng tặng (Y) *</label>
-              <input type="number" min={1} step={1} value={form.getQty}
-                onChange={e => set('getQty', e.target.value)}
+              <input type="text" inputMode="numeric" value={form.getQty}
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); set('getQty',r) }}
+                onBlur={() => { const n=parseInt(form.getQty); set('getQty',isNaN(n)||n<1?1:n) }}
                 placeholder="VD: 1"
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
             </div>
@@ -236,8 +238,9 @@ function PromotionForm({ initial, categories, products, onSubmit, loading, onClo
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Mua tối thiểu (sp) *</label>
-              <input type="number" min={1} step={1} value={form.minBuyQty}
-                onChange={e => set('minBuyQty', e.target.value)}
+              <input type="text" inputMode="numeric" value={form.minBuyQty}
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); set('minBuyQty',r) }}
+                onBlur={() => { const n=parseInt(form.minBuyQty); set('minBuyQty',isNaN(n)||n<1?1:n) }}
                 placeholder="VD: 5"
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-400 focus:outline-none" />
             </div>
@@ -246,8 +249,9 @@ function PromotionForm({ initial, categories, products, onSubmit, loading, onClo
                 Mua tối đa (sp)
                 <span className="ml-1 text-gray-400 font-normal">(để trống = không giới hạn)</span>
               </label>
-              <input type="number" min={1} step={1} value={form.maxBuyQty}
-                onChange={e => set('maxBuyQty', e.target.value)}
+              <input type="text" inputMode="numeric" value={form.maxBuyQty}
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); set('maxBuyQty',r) }}
+                onBlur={() => { const n=parseInt(form.maxBuyQty); if(!isNaN(n)&&n>=1) set('maxBuyQty',n) }}
                 placeholder="Không giới hạn"
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-400 focus:outline-none" />
             </div>
@@ -263,8 +267,9 @@ function PromotionForm({ initial, categories, products, onSubmit, loading, onClo
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Số lượng tặng *</label>
-              <input type="number" min={1} step={1} value={form.getQty}
-                onChange={e => set('getQty', e.target.value)}
+              <input type="text" inputMode="numeric" value={form.getQty}
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); set('getQty',r) }}
+                onBlur={() => { const n=parseInt(form.getQty); set('getQty',isNaN(n)||n<1?1:n) }}
                 placeholder="VD: 1"
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-400 focus:outline-none" />
             </div>

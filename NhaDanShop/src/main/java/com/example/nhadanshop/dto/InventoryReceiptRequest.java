@@ -7,34 +7,25 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public record InventoryReceiptRequest(
         @Size(max = 150) String supplierName,
-        /** FK → suppliers.id (Sprint 1 S1-3). Null → chỉ lưu supplierName snapshot */
         Long supplierId,
         @Size(max = 500) String note,
-        /** Phí vận chuyển toàn đơn — phân bổ theo tỷ lệ giá trị sau CK */
         @DecimalMin("0.00") BigDecimal shippingFee,
-        /**
-         * Thuế GTGT (VAT) % cho TOÀN ĐƠN (0-100).
-         * Tính trên tổng sau chiết khấu: vatAmount = totalAfterDiscount × vatPercent/100
-         * Sau đó phân bổ đều vào giá vốn từng sản phẩm theo tỷ lệ.
-         * Để trống / null = 0% (không có VAT).
-         */
         @DecimalMin("0.00") BigDecimal vatPercent,
-        /** Các dòng sản phẩm đơn lẻ */
         @Valid List<ReceiptItemRequest> items,
-        /** Các dòng nhập theo combo (optional) */
-        @Valid List<ComboReceiptRequest> comboItems
+        @Valid List<ComboReceiptRequest> comboItems,
+        /**
+         * Ngày nhập kho thực tế — optional.
+         * null → dùng LocalDateTime.now() (hôm nay).
+         * Không được là ngày tương lai (validate tại service).
+         * Dùng khi hàng về trước nhưng hôm nay mới vào máy.
+         */
+        LocalDateTime receiptDate
 ) {
-    /**
-     * Nhập 1 dòng theo combo:
-     *  comboId         = ID combo (Product.productType=COMBO)
-     *  quantity        = số lượng combo nhập
-     *  unitCost        = giá nhập 1 combo (chia đều cho thành phần theo qty ratio)
-     *  discountPercent = chiết khấu % áp dụng cho combo này
-     */
     public record ComboReceiptRequest(
             @NotNull Long comboId,
             @NotNull @Min(1) Integer quantity,

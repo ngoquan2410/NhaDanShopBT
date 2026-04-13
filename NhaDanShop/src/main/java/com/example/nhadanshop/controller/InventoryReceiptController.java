@@ -23,6 +23,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 
 @RestController
@@ -128,11 +129,15 @@ public class InventoryReceiptController {
     public ExcelReceiptImportService.ExcelReceiptResult importFromExcel(
             @RequestParam("file") MultipartFile file,
             @RequestParam("supplierName") String supplierName,
-            @RequestParam(value = "supplierId", required = false) Long supplierId,
-            @RequestParam(value = "note", required = false, defaultValue = "") String note,
-            @RequestParam(value = "shippingFee", required = false, defaultValue = "0") java.math.BigDecimal shippingFee,
-            @RequestParam(value = "vatPercent",  required = false, defaultValue = "0") java.math.BigDecimal vatPercent
+            @RequestParam(value = "supplierId",   required = false) Long supplierId,
+            @RequestParam(value = "note",         required = false, defaultValue = "") String note,
+            @RequestParam(value = "shippingFee",  required = false, defaultValue = "0") java.math.BigDecimal shippingFee,
+            @RequestParam(value = "vatPercent",   required = false, defaultValue = "0") java.math.BigDecimal vatPercent,
+            @RequestParam(value = "receiptDate",  required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate receiptDate
     ) throws IOException {
-        return excelReceiptImportService.importReceiptFromExcel(file, supplierName, supplierId, note, shippingFee, vatPercent);
+        // Chuyển LocalDate → LocalDateTime (đầu ngày), null → service tự dùng now()
+        LocalDateTime receiptDateTime = (receiptDate != null) ? receiptDate.atStartOfDay() : null;
+        return excelReceiptImportService.importReceiptFromExcel(
+                file, supplierName, supplierId, note, shippingFee, vatPercent, receiptDateTime);
     }
 }

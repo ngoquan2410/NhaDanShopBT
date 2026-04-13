@@ -195,6 +195,8 @@ function VariantReceiptRow({ idx, item, products, onSet, onRemove }) {
 }
 
 function ReceiptForm({ products, onSubmit, loading }) {
+  const today = new Date().toISOString().split('T')[0]   // 'yyyy-MM-dd'
+  const [receiptDate, setReceiptDate] = useState(today)  // mặc định = hôm nay
   const [supplierName, setSupplierName] = useState('')
   const [supplierId, setSupplierId] = useState(null)
   const [supplierSearch, setSupplierSearch] = useState('')
@@ -316,6 +318,7 @@ function ReceiptForm({ products, onSubmit, loading }) {
       supplierName, supplierId: supplierId || null, note,
       shippingFee:  Number(shippingFee),
       vatPercent:   Number(vatPercent) || 0,
+      receiptDate:  receiptDate ? `${receiptDate}T00:00:00` : null,
       items: validItems.map(it => ({
         productId:          Number(it.productId),
         quantity:           Number(it.quantity),
@@ -453,9 +456,21 @@ function ReceiptForm({ products, onSubmit, loading }) {
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
             placeholder="Ghi chú (tùy chọn)" />
         </div>
+        {/* ── Ngày nhập kho ── */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            🚚 Phí vận chuyển (₫)
+            📅 Ngày nhập kho
+            <span className="ml-1 text-xs text-gray-400 font-normal">— mặc định hôm nay</span>
+          </label>
+          <input type="date" value={receiptDate} max={today}
+            onChange={e => setReceiptDate(e.target.value)}
+            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+          {receiptDate && receiptDate < today && (
+            <p className="text-xs text-amber-600 mt-1">
+              ⚠️ Nhập ngày trong quá khứ — nhớ điền Ngày HSD thực tế ở từng dòng để FEFO chính xác
+            </p>
+          )}
+        </div>
             <span className="ml-1 text-xs text-gray-400 font-normal">— chia đều vào giá vốn</span>
           </label>
           <input
@@ -473,8 +488,9 @@ function ReceiptForm({ products, onSubmit, loading }) {
           <label className="block text-sm font-medium text-gray-700 mb-1">
             🧾 Thuế GTGT — VAT % <span className="text-xs text-gray-400 font-normal">(cho toàn đơn, tính trên tổng sau CK)</span>
           </label>
-          <input type="number" min={0} max={100} step={0.1} value={vatPercent}
-            onChange={e => setVatPercent(e.target.value)}
+          <input type="text" inputMode="decimal" value={vatPercent}
+            onChange={e => { const r=e.target.value.replace(/[^\d.]/g,''); setVatPercent(r) }}
+            onBlur={() => { const n=parseFloat(vatPercent); setVatPercent(isNaN(n)||n<0?0:n>100?100:n) }}
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
             placeholder="0" />
           {Number(vatPercent) > 0 && (
@@ -571,20 +587,24 @@ function ReceiptForm({ products, onSubmit, loading }) {
                 </div>
                 <div className="w-24">
                   {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Số combo</label>}
-                  <input type="number" min={1} value={ci.quantity}
-                    onChange={e => setComboItem(idx, 'quantity', e.target.value)}
+                  <input type="text" inputMode="numeric" value={ci.quantity}
+                    onChange={e => { const r=e.target.value.replace(/\D/g,''); setComboItem(idx,'quantity',r) }}
+                    onBlur={() => { const n=parseInt(ci.quantity); setComboItem(idx,'quantity',isNaN(n)||n<1?1:n) }}
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                 </div>
                 <div className="w-36">
                   {idx === 0 && <label className="block text-xs text-gray-500 mb-1">Giá nhập 1 combo (₫)</label>}
-                  <input type="number" min={0} step={1000} value={ci.unitCost}
-                    onChange={e => setComboItem(idx, 'unitCost', e.target.value)}
+                  <input type="text" inputMode="numeric"
+                    value={ci.unitCost === 0 || ci.unitCost === '' ? '' : Number(ci.unitCost).toLocaleString('vi-VN')}
+                    placeholder="0"
+                    onChange={e => { const r=e.target.value.replace(/\./g,'').replace(/,/g,''); if(r===''||/^\d+$/.test(r)) setComboItem(idx,'unitCost',r===''?0:Number(r)) }}
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                 </div>
                 <div className="w-20">
                   {idx === 0 && <label className="block text-xs text-gray-500 mb-1">CK %</label>}
-                  <input type="number" min={0} max={100} step={0.1} value={ci.discountPercent}
-                    onChange={e => setComboItem(idx, 'discountPercent', e.target.value)}
+                  <input type="text" inputMode="decimal" value={ci.discountPercent}
+                    onChange={e => { const r=e.target.value.replace(/[^\d.]/g,''); setComboItem(idx,'discountPercent',r) }}
+                    onBlur={() => { const n=parseFloat(ci.discountPercent); setComboItem(idx,'discountPercent',isNaN(n)||n<0?0:n>100?100:n) }}
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" placeholder="0" />
                 </div>
                 <div className="w-28 text-right pb-2">
@@ -629,12 +649,13 @@ function ReceiptForm({ products, onSubmit, loading }) {
 
 // ── Import Excel Phiếu Nhập ───────────────────────────────────────────────────
 function ImportReceiptExcelForm({ onClose, onSuccess }) {
-  // Bước 1: upload → preview; Bước 2: nhập thông tin + xác nhận
-  const [step, setStep]               = useState(1) // 1=upload, 2=preview+confirm
+  const today = new Date().toISOString().split('T')[0]
+  const [step, setStep]               = useState(1)
   const [file, setFile]               = useState(null)
-  const [preview, setPreview]         = useState(null)    // ExcelPreviewResponse
+  const [preview, setPreview]         = useState(null)
   const [previewing, setPreviewing]   = useState(false)
-  const [activeTab, setActiveTab]     = useState('SP_DON') // 'SP_DON' | 'COMBO'
+  const [activeTab, setActiveTab]     = useState('SP_DON')
+  const [receiptDate, setReceiptDate] = useState(today) // mặc định = hôm nay
 
   // ── Supplier picker (search + inline create) ─────────────────────────────
   const [supplierName, setSupplierName]         = useState('')
@@ -744,8 +765,12 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
     if (!supplierId && !supplierName.trim()) { toast.error('Vui lòng chọn hoặc nhập tên nhà cung cấp'); return }
     setImporting(true); setResult(null)
     try {
-      const res = await receiptService.importExcel(file, supplierName.trim(), note.trim(),
-                                                    Number(shippingFee) || 0, Number(vatPercent) || 0, supplierId || null)
+      const res = await receiptService.importExcel(
+        file, supplierName.trim(), note.trim(),
+        Number(shippingFee) || 0, Number(vatPercent) || 0,
+        supplierId || null,
+        receiptDate !== today ? receiptDate : null  // null = hôm nay (backend tự dùng now())
+      )
       setResult(res)
       if (res.successItems > 0) {
         toast.success(`✅ Tạo phiếu nhập ${res.receiptNo} thành công! (${res.successItems} SP)`)
@@ -1000,6 +1025,21 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
                   placeholder="VD: Nhập hàng tháng 4"
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
               </div>
+              {/* ── Ngày nhập kho ── */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  📅 Ngày nhập kho
+                  <span className="ml-1 text-gray-400 font-normal">— mặc định hôm nay</span>
+                </label>
+                <input type="date" value={receiptDate} max={today}
+                  onChange={e => setReceiptDate(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                {receiptDate && receiptDate < today && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    ⚠️ Nhập ngày quá khứ — nhớ điền cột N (Ngày HSD) trong Excel để FEFO chính xác
+                  </p>
+                )}
+              </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">🚚 Phí vận chuyển (₫)</label>
                 <input type="text" inputMode="numeric"
@@ -1012,6 +1052,7 @@ function ImportReceiptExcelForm({ onClose, onSuccess }) {
                 <label className="block text-xs font-medium text-gray-700 mb-1">🧾 Thuế GTGT (VAT %)</label>
                 <input type="text" inputMode="decimal" value={vatPercent}
                   onChange={e => { const r=e.target.value.replace(/[^\d.]/g,''); setVatPercent(r) }}
+                  onBlur={() => { const n=parseFloat(vatPercent); setVatPercent(isNaN(n)||n<0?0:n>100?100:n) }}
                   placeholder="0"
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
               </div>

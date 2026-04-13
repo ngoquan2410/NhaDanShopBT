@@ -44,7 +44,12 @@ public class InventoryReceiptService {
         receipt.setReceiptNo(numberGen.nextReceiptNo());
         receipt.setSupplierName(req.supplierName());
         receipt.setNote(req.note());
-        receipt.setReceiptDate(LocalDateTime.now());
+
+        // Dùng receiptDate từ request nếu có và không phải tương lai, ngược lại dùng now()
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime receiptDate = (req.receiptDate() != null && !req.receiptDate().isAfter(now))
+                ? req.receiptDate() : now;
+        receipt.setReceiptDate(receiptDate);
 
         // Sprint 1 S1-3: set supplier FK nếu có supplierId
         if (req.supplierId() != null) {
@@ -225,12 +230,13 @@ public class InventoryReceiptService {
             // Tạo Batch — gắn variant
             // Sprint 1 S1-2: ưu tiên expiryDateOverride từ request nếu admin nhập ngày HSD thực tế
             LocalDate expiryDate;
+            LocalDate importLocalDate = saved.getReceiptDate().toLocalDate(); // dùng receiptDate, không phải now()
             if (itemReq.expiryDateOverride() != null) {
                 expiryDate = itemReq.expiryDateOverride();
             } else if (variant.getExpiryDays() != null && variant.getExpiryDays() > 0) {
-                expiryDate = LocalDate.now().plusDays(variant.getExpiryDays());
+                expiryDate = importLocalDate.plusDays(variant.getExpiryDays());
             } else {
-                expiryDate = LocalDate.now().plusYears(10); // không có HSD → dùng ngày rất xa
+                expiryDate = importLocalDate.plusYears(10); // không có HSD → dùng ngày rất xa
             }
             String batchCode = buildBatchCode(saved.getReceiptNo(), variant.getVariantCode());
             ProductBatch batch = new ProductBatch();
@@ -293,14 +299,13 @@ public class InventoryReceiptService {
     }
 
     /**
-     * Chỉ cho sửa metadata: ghi chú và nhà cung cấp.
+     * Chỉ cho sửa metadata: ghi chú, nhà cung cấp, và ngày nhập.
      * Không thay đổi tồn kho, giá vốn, hay bất kỳ dữ liệu nghiệp vụ nào khác.
      */
     @Transactional
     public InventoryReceiptResponse updateReceiptMeta(Long id, com.example.nhadanshop.dto.ReceiptMetaUpdateRequest req) {
         InventoryReceipt receipt = receiptRepo.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy phiếu nhập ID: " + id));
-        // Chỉ update note và supplier — không được sửa items/amount
         if (req.note() != null) {
             receipt.setNote(req.note().isBlank() ? null : req.note().trim());
         }
@@ -311,6 +316,13 @@ public class InventoryReceiptService {
             receipt.setSupplierName(supplier.getName());
         } else if (req.supplierName() != null) {
             receipt.setSupplierName(req.supplierName().isBlank() ? null : req.supplierName().trim());
+        }
+        // Cho phép sửa ngày nhập — không được là tương lai
+        if (req.receiptDate() != null) {
+            if (req.receiptDate().isAfter(LocalDateTime.now())) {
+                throw new IllegalArgumentException("Ngày nhập không được là ngày tương lai");
+            }
+            receipt.setReceiptDate(req.receiptDate());
         }
         return DtoMapper.toResponse(receiptRepo.save(receipt));
     }

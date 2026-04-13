@@ -665,8 +665,9 @@ export default function RevenuePage() {
             <div>
               <label className="block text-xs text-gray-500 mb-1 font-medium">Không có GD trong (ngày)</label>
               <div className="flex items-center gap-2">
-                <input type="number" min={1} max={365} value={slowDays}
-                  onChange={e => setSlowDays(Math.max(1, Number(e.target.value)))}
+                <input type="text" inputMode="numeric" value={slowDays}
+                  onChange={e => { const r=e.target.value.replace(/\D/g,''); setSlowDays(r) }}
+                  onBlur={() => { const n=parseInt(slowDays); setSlowDays(isNaN(n)||n<1?1:n>365?365:n) }}
                   className="w-24 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400" />
                 <span className="text-sm text-gray-500">ngày</span>
               </div>

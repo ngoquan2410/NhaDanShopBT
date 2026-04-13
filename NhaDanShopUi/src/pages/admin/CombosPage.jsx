@@ -127,8 +127,11 @@ function ComboForm({ initial, products, categories, onSubmit, loading, onClose }
               <span className="ml-1 text-gray-400 font-normal">(lẻ: {totalRetail.toLocaleString('vi-VN')} ₫)</span>
             )}
           </label>
-          <input required type="number" min={0} step={1000} value={form.sellPrice}
-            onChange={e => set('sellPrice', e.target.value)} placeholder="150000"
+          <input required type="text" inputMode="numeric"
+            value={form.sellPrice === 0 || form.sellPrice === '' ? '' : Number(form.sellPrice).toLocaleString('vi-VN')}
+            onChange={e => { const r=e.target.value.replace(/\./g,'').replace(/,/g,''); if(r===''||/^\d+$/.test(r)) set('sellPrice',r===''?0:Number(r)) }}
+            onBlur={() => { if(form.sellPrice===''||form.sellPrice===0) set('sellPrice',0) }}
+            placeholder="150000"
             className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
           {saving > 0 && <p className="text-xs text-green-600 mt-0.5">✅ Tiết kiệm: {saving.toLocaleString('vi-VN')} ₫</p>}
           {saving < 0 && <p className="text-xs text-orange-500 mt-0.5">⚠️ Cao hơn lẻ {Math.abs(saving).toLocaleString('vi-VN')} ₫</p>}
@@ -195,8 +198,9 @@ function ComboForm({ initial, products, categories, onSubmit, loading, onClose }
               </div>
               <div className="w-20">
                 {idx === 0 && <label className="block text-xs text-gray-500 mb-1">SL cần</label>}
-                <input type="number" min={1} value={item.quantity}
-                  onChange={e => setItem(idx, 'quantity', e.target.value)}
+                <input type="text" inputMode="numeric" value={item.quantity}
+                  onChange={e => { const r=e.target.value.replace(/\D/g,''); setItem(idx,'quantity',r) }}
+                  onBlur={() => { const n=parseInt(item.quantity); setItem(idx,'quantity',isNaN(n)||n<1?1:n) }}
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
               </div>
               <div className="w-28 pb-2 text-right shrink-0">

@@ -385,19 +385,22 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Tồn kho ban đầu</label>
                       <input type="text" inputMode="numeric" value={v.stockQty}
-                        onChange={e => { const r = e.target.value.replace(/\D/g,''); setV(idx, 'stockQty', r===''?0:Number(r)) }}
+                        onChange={e => { const r = e.target.value.replace(/\D/g,''); setV(idx, 'stockQty', r===''?'':Number(r)) }}
+                        onBlur={() => { if(v.stockQty===''||v.stockQty===null) setV(idx,'stockQty',0) }}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Ngưỡng cảnh báo tồn</label>
                       <input type="text" inputMode="numeric" value={v.minStockQty}
-                        onChange={e => { const r = e.target.value.replace(/\D/g,''); setV(idx, 'minStockQty', r===''?0:Number(r)) }}
+                        onChange={e => { const r = e.target.value.replace(/\D/g,''); setV(idx, 'minStockQty', r===''?'':Number(r)) }}
+                        onBlur={() => { if(v.minStockQty===''||v.minStockQty===null) setV(idx,'minStockQty',0) }}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Số ngày HSD</label>
                       <input type="text" inputMode="numeric" value={v.expiryDays||''} placeholder="Không có"
-                        onChange={e => { const r = e.target.value.replace(/\D/g,''); setV(idx, 'expiryDays', r===''?0:Number(r)) }}
+                        onChange={e => { const r = e.target.value.replace(/\D/g,''); setV(idx, 'expiryDays', r===''?'':Number(r)) }}
+                        onBlur={() => { if(v.expiryDays===''||v.expiryDays===null) setV(idx,'expiryDays',0) }}
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
                   </div>
@@ -969,19 +972,22 @@ function VariantManager({ product, onClose }) {
             <div>
               <label className="block text-xs text-gray-500 mb-1">Tồn kho</label>
               <input type="text" inputMode="numeric" value={form?.stockQty||0}
-                onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,stockQty:r===''?0:Number(r)})) }}
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,stockQty:r===''?'':Number(r)})) }}
+                onBlur={() => { if(form?.stockQty===''||form?.stockQty===null) setForm(p=>({...p,stockQty:0})) }}
                 className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Ngưỡng cảnh báo tồn</label>
               <input type="text" inputMode="numeric" value={form?.minStockQty||5}
-                onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,minStockQty:r===''?0:Number(r)})) }}
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,minStockQty:r===''?'':Number(r)})) }}
+                onBlur={() => { if(form?.minStockQty===''||form?.minStockQty===null) setForm(p=>({...p,minStockQty:0})) }}
                 className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Số ngày HSD</label>
               <input type="text" inputMode="numeric" value={form?.expiryDays||''} placeholder="Không có"
-                onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,expiryDays:r===''?null:Number(r)})) }}
+                onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,expiryDays:r===''?'':Number(r)})) }}
+                onBlur={() => { if(form?.expiryDays===''||form?.expiryDays===null) setForm(p=>({...p,expiryDays:null})) }}
                 className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
             </div>
           </div>

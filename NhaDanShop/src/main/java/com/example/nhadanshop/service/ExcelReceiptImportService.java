@@ -457,7 +457,7 @@ public class ExcelReceiptImportService {
     @Transactional(rollbackFor = Exception.class)
     public ExcelReceiptResult importReceiptFromExcel(
             MultipartFile file, String supplierName, Long supplierId, String note,
-            BigDecimal shippingFee, BigDecimal vatPercent) throws IOException {
+            BigDecimal shippingFee, BigDecimal vatPercent, LocalDateTime receiptDate) throws IOException {
 
         validateFile(file);
         if (shippingFee == null || shippingFee.compareTo(BigDecimal.ZERO) < 0) shippingFee = BigDecimal.ZERO;
@@ -761,7 +761,11 @@ public class ExcelReceiptImportService {
         receipt.setReceiptNo(numberGenerator.nextReceiptNo());
         receipt.setSupplierName(supplierName);
         receipt.setNote(note);
-        receipt.setReceiptDate(LocalDateTime.now());
+        // Dùng receiptDate từ tham số nếu hợp lệ (không tương lai), ngược lại dùng now()
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime finalReceiptDate = (receiptDate != null && !receiptDate.isAfter(now))
+                ? receiptDate : now;
+        receipt.setReceiptDate(finalReceiptDate);
         receipt.setShippingFee(shippingFee);
         // Sprint 1 S1-3: set supplier FK nếu có supplierId
         if (supplierId != null) {
@@ -1067,12 +1071,13 @@ public class ExcelReceiptImportService {
             if (variant != null) {
                 // Sprint 1 S1-2: ưu tiên expiryDateOverride từ cột N Excel → fallback sang expiryDays
                 LocalDate expiryDate;
+                LocalDate importLocalDate = finalReceiptDate.toLocalDate();
                 if (vr.expiryDateOverride() != null) {
                     expiryDate = vr.expiryDateOverride();
                 } else if (variant.getExpiryDays() != null && variant.getExpiryDays() > 0) {
-                    expiryDate = LocalDate.now().plusDays(variant.getExpiryDays());
+                    expiryDate = importLocalDate.plusDays(variant.getExpiryDays());
                 } else {
-                    expiryDate = LocalDate.now().plusYears(10);
+                    expiryDate = importLocalDate.plusYears(10);
                 }
                 String batchCode = buildUniqueBatchCode(savedReceipt.getReceiptNo(), variant.getVariantCode());
                 ProductBatch batch = new ProductBatch();

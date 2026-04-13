@@ -181,13 +181,18 @@ export default function BarcodeLabelPrinter({ items, receiptDate, receiptNo, onC
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <label className="text-xs text-gray-500">Số nhãn:</label>
                   <input
-                    type="number"
-                    min={1}
-                    max={999}
+                    type="text"
+                    inputMode="numeric"
                     value={it.labelQty}
-                    onChange={e => setLabelQtys(prev =>
-                      prev.map((x, i) => i === idx ? { ...x, labelQty: Math.max(1, Number(e.target.value)) } : x)
-                    )}
+                    onChange={e => {
+                      const r = e.target.value.replace(/\D/g, '')
+                      setLabelQtys(prev => prev.map((x, i) => i === idx ? { ...x, labelQty: r } : x))
+                    }}
+                    onBlur={() => {
+                      const n = parseInt(it.labelQty)
+                      setLabelQtys(prev => prev.map((x, i) => i === idx
+                        ? { ...x, labelQty: isNaN(n)||n<1?1:n>999?999:n } : x))
+                    }}
                     className="w-16 border rounded px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>

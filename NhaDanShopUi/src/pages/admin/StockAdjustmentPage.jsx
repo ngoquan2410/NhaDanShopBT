@@ -287,8 +287,9 @@ export default function StockAdjustmentPage() {
                             <td className="px-3 py-1.5 text-gray-700">{it.productName}</td>
                             <td className="px-3 py-1.5 text-right text-gray-500">{it.systemQty} {it.sellUnit}</td>
                             <td className="px-3 py-1.5">
-                              <input type="number" min={0} value={it.actualQty}
-                                onChange={e => setItemActual(idx, e.target.value)}
+                              <input type="text" inputMode="numeric" value={it.actualQty}
+                                onChange={e => { const r=e.target.value.replace(/\D/g,''); setItemActual(idx, r) }}
+                                onBlur={() => { const n=parseInt(it.actualQty); setItemActual(idx, isNaN(n)||n<0?0:n) }}
                                 className="w-full border rounded px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-orange-400" />
                             </td>
                             <td className="px-3 py-1.5 text-right font-semibold">
