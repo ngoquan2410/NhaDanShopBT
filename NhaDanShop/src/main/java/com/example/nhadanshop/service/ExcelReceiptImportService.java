@@ -303,6 +303,65 @@ public class ExcelReceiptImportService {
                         errorMsg = "'" + upperCode + "' là Combo — nhập kho combo qua Excel hiện chưa hỗ trợ. Dùng form nhập kho thủ công.";
                     } else if (!productOpt.get().getActive()) {
                         errorMsg = "SP '" + upperCode + "' đã ngừng kinh doanh";
+                    } else {
+                        // ── Validate variant + importUnit (đồng bộ với Pass 1) ──────────
+                        String trimmedVariantCode = (variantCode != null && !variantCode.isBlank())
+                                ? variantCode.trim() : null;
+                        String passImportUnit = (importUnit != null && !importUnit.isBlank())
+                                ? importUnit.trim() : null;
+
+                        if (trimmedVariantCode != null) {
+                            // Có variant_code → tìm chính xác và kiểm tra importUnit
+                            var varOpt = variantRepo.findByVariantCodeIgnoreCase(trimmedVariantCode);
+                            if (varOpt.isPresent()) {
+                                ProductVariant ev = varOpt.get();
+                                // Variant thuộc SP khác
+                                if (!ev.getProduct().getId().equals(productOpt.get().getId())) {
+                                    errorMsg = "Variant '" + trimmedVariantCode + "' thuộc SP '"
+                                            + ev.getProduct().getCode() + "', không phải '" + upperCode + "'";
+                                } else {
+                                    boolean isLegacy = ev.getImportUnit() == null || ev.getImportUnit().isBlank();
+                                    // ImportUnit không khớp DB
+                                    if (!isLegacy && passImportUnit != null
+                                            && !passImportUnit.equalsIgnoreCase(ev.getImportUnit())) {
+                                        errorMsg = "Variant '" + trimmedVariantCode + "' có importUnit='"
+                                                + ev.getImportUnit() + "', Excel nhập='" + passImportUnit + "' — không khớp.";
+                                    }
+                                }
+                            }
+                            // Variant chưa tồn tại → sẽ tạo mới (không lỗi, đã có warnMsg bên dưới)
+                        } else if (passImportUnit != null) {
+                            // Không có variant_code → smart-match theo importUnit
+                            java.util.List<ProductVariant> allVariants =
+                                    variantRepo.findByProductIdOrderByIsDefaultDescVariantCodeAsc(productOpt.get().getId());
+                            if (!allVariants.isEmpty()) {
+                                final String fIU = passImportUnit;
+                                // Kiểm tra tất cả variant đều có importUnit
+                                boolean allHave = allVariants.stream()
+                                        .allMatch(v -> v.getImportUnit() != null && !v.getImportUnit().isBlank());
+                                if (allHave) {
+                                    // Không có variant nào khớp importUnit → lỗi
+                                    boolean anyMatch = allVariants.stream()
+                                            .anyMatch(v -> fIU.equalsIgnoreCase(v.getImportUnit()));
+                                    if (!anyMatch) {
+                                        String avail = allVariants.stream()
+                                                .map(v -> v.getVariantCode() + "(" + v.getImportUnit() + ")")
+                                                .collect(java.util.stream.Collectors.joining(", "));
+                                        errorMsg = "SP '" + upperCode + "' không có variant với importUnit='"
+                                                + fIU + "'. Có: [" + avail + "]";
+                                    }
+                                }
+                                // Nếu có legacy variant (importUnit=null) → vẫn cho qua, warning
+                                if (errorMsg == null && !allHave) {
+                                    boolean anyMatch = allVariants.stream()
+                                            .anyMatch(v -> v.getImportUnit() != null
+                                                    && fIU.equalsIgnoreCase(v.getImportUnit()));
+                                    if (!anyMatch) {
+                                        warnMsg = "importUnit='" + fIU + "' không khớp variant nào có sẵn → sẽ dùng variant mặc định";
+                                    }
+                                }
+                            }
+                        }
                     }
                 } else {
                     if (name == null || name.isBlank()) {
@@ -642,7 +701,11 @@ public class ExcelReceiptImportService {
                         }
                         boolean isLegacy = matchedVar != null && (matchedVar.getImportUnit() == null || matchedVar.getImportUnit().isBlank());
                         if (!isLegacy && matchedVar != null && passImportUnit != null && !passImportUnit.equalsIgnoreCase(matchedVar.getImportUnit())) {
-                            passImportUnit = null; passSellUnit = null; passPieces = null;
+                            // Fix Case B: không silently drop — báo lỗi rõ ràng giống Case A (có variant_code)
+                            errors.add("❌ Dòng " + lineNum + " [SP Don]: Variant '" + matchedVar.getVariantCode()
+                                    + "' có importUnit='" + matchedVar.getImportUnit()
+                                    + "', Excel nhập='" + passImportUnit + "' — không khớp."
+                                    + " Hãy điền đúng importUnit hoặc thêm cột B (variant_code)."); continue;
                         }
                         validatedRows.add(new ValidatedRow(VariantAction.EXISTING_EXACT, product, matchedVar, isLegacy, null,
                                 null, null, null, null, qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
