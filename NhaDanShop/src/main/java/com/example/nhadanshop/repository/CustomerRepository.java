@@ -35,7 +35,7 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
      */
     @Query(value = """
             SELECT * FROM customers c
-            WHERE c.active = TRUE
+            WHERE c.is_active = TRUE
               AND (immutable_unaccent(lower(c.name)) LIKE '%' || immutable_unaccent(lower(:q)) || '%'
                 OR c.phone LIKE '%' || :q || '%'
                 OR lower(c.code) LIKE '%' || lower(:q) || '%')
