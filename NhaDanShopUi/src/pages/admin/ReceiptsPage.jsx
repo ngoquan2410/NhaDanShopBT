@@ -163,6 +163,15 @@ function VariantReceiptRow({ idx, item, products, onSet, onRemove }) {
         </div>
       </div>
 
+      {/* Warning: variant chưa có expiryDays và chưa điền expiryDateOverride */}
+      {selectedVariant && !selectedVariant.expiryDays && !item.expiryDateOverride && (
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-1">
+          ⚠️ Biến thể <b>{selectedVariant.variantCode}</b> chưa có số ngày HSD.
+          Vui lòng điền <b>Hạn sử dụng</b> ở trên (ngày in trên bao bì) để FEFO chính xác.
+          Hoặc vào <b>Quản lý Biến thể</b> → cập nhật số ngày HSD.
+        </div>
+      )}
+
       {/* Live preview */}
       {product && qty > 0 && unitCost > 0 && (
         <div className={`rounded-lg px-3 py-2 text-xs flex flex-wrap gap-x-4 gap-y-1 bg-green-50 border border-green-200 text-green-800`}>
@@ -313,6 +322,21 @@ function ReceiptForm({ products, onSubmit, loading }) {
     const validCombos = comboItems.filter(it => it.comboId)
     if (validItems.length === 0 && validCombos.length === 0) {
       toast.error('Phiếu nhập phải có ít nhất 1 sản phẩm hoặc combo'); return
+    }
+    // Validate: variant không có expiryDays phải điền expiryDateOverride
+    for (const it of validItems) {
+      const product = products.find(p => String(p.id) === String(it.productId))
+      if (!product) continue
+      const variants = product.variants || []
+      const selectedV = it.variantId
+        ? variants.find(v => String(v.id) === String(it.variantId))
+        : variants.find(v => v.isDefault) || variants[0]
+      if (selectedV && !selectedV.expiryDays && !it.expiryDateOverride) {
+        toast.error(
+          `SP "${product.name}" (${selectedV.variantCode}): Chưa có số ngày HSD.\n` +
+          `Vui lòng điền Hạn sử dụng (ngày trên bao bì) hoặc cập nhật số ngày HSD trong Quản lý Biến thể.`
+        ); return
+      }
     }
     onSubmit({
       supplierName, supplierId: supplierId || null, note,

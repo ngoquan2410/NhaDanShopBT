@@ -172,7 +172,12 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
         if (!v.sellUnit.trim()) { alert('Đơn vị bán lẻ không được để trống'); return }
         if (Number(v.sellPrice) < 0) { alert('Giá bán không được âm'); return }
         if (Number(v.costPrice) < 0) { alert('Giá vốn không được âm'); return }
-        // Giá bán = 0 → vẫn cho phép, cảnh báo sau khi nhập hàng
+        // Số ngày HSD bắt buộc > 0
+        const ed = Number(v.expiryDays)
+        if (!v.expiryDays || isNaN(ed) || ed <= 0) {
+          alert(`Biến thể "${v.variantName || v.variantCode}": Số ngày HSD bắt buộc phải > 0.\nNếu SP không có HSD thực sự, điền 3650 (10 năm).`)
+          return
+        }
       }
       const hasDefault = variants.some(v => v.isDefault)
       if (!hasDefault && variants.length > 0) setDefault(0)
@@ -397,11 +402,13 @@ function ProductForm({ initial, categories, onSubmit, loading }) {
                         className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Số ngày HSD</label>
-                      <input type="text" inputMode="numeric" value={v.expiryDays||''} placeholder="Không có"
+                      <label className="block text-xs text-gray-500 mb-1">Số ngày HSD <span className="text-red-500">*</span></label>
+                      <input type="text" inputMode="numeric" value={v.expiryDays||''} placeholder="VD: 180 (bắt buộc)"
                         onChange={e => { const r = e.target.value.replace(/\D/g,''); setV(idx, 'expiryDays', r===''?'':Number(r)) }}
-                        onBlur={() => { if(v.expiryDays===''||v.expiryDays===null) setV(idx,'expiryDays',0) }}
-                        className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                        className={`w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 ${(!v.expiryDays || Number(v.expiryDays) <= 0) ? 'border-red-400 focus:ring-red-400' : 'focus:ring-purple-400'}`} />
+                      {(!v.expiryDays || Number(v.expiryDays) <= 0) && (
+                        <p className="text-xs text-red-500 mt-0.5">⚠️ Bắt buộc &gt; 0. Không có HSD → điền 3650</p>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -889,6 +896,12 @@ function VariantManager({ product, onClose }) {
   }
 
   const handleSave = async () => {
+    // Validate expiryDays bắt buộc > 0
+    const ed = Number(form.expiryDays)
+    if (!form.expiryDays || isNaN(ed) || ed <= 0) {
+      alert('Số ngày HSD bắt buộc phải > 0.\nNếu SP không có HSD thực sự, điền 3650 (10 năm).')
+      return
+    }
     const payload = {
       ...form,
       piecesPerUnit: Number(form.piecesPerUnit) || 1,
@@ -896,7 +909,7 @@ function VariantManager({ product, onClose }) {
       costPrice: Number(form.costPrice) || 0,
       stockQty: Number(form.stockQty) || 0,
       minStockQty: Number(form.minStockQty) || 5,
-      expiryDays: form.expiryDays ? Number(form.expiryDays) : null,
+      expiryDays: Number(form.expiryDays),
     }
     if (form.id) await update.mutateAsync({ vid: form.id, data: payload })
     else await create.mutateAsync(payload)
@@ -984,11 +997,13 @@ function VariantManager({ product, onClose }) {
                 className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Số ngày HSD</label>
-              <input type="text" inputMode="numeric" value={form?.expiryDays||''} placeholder="Không có"
+              <label className="block text-xs text-gray-500 mb-1">Số ngày HSD <span className="text-red-500">*</span></label>
+              <input type="text" inputMode="numeric" value={form?.expiryDays||''} placeholder="VD: 180 (bắt buộc)"
                 onChange={e => { const r=e.target.value.replace(/\D/g,''); setForm(p=>({...p,expiryDays:r===''?'':Number(r)})) }}
-                onBlur={() => { if(form?.expiryDays===''||form?.expiryDays===null) setForm(p=>({...p,expiryDays:null})) }}
-                className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+                className={`w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 ${(!form?.expiryDays || Number(form?.expiryDays) <= 0) ? 'border-red-400 focus:ring-red-400' : 'focus:ring-green-400'}`} />
+              {(!form?.expiryDays || Number(form?.expiryDays) <= 0) && (
+                <p className="text-xs text-red-500 mt-0.5">⚠️ Bắt buộc &gt; 0. Không có HSD → điền 3650</p>
+              )}
             </div>
           </div>
           {f('Ghi chú quy đổi', 'conversionNote')}
@@ -999,7 +1014,10 @@ function VariantManager({ product, onClose }) {
           </div>
           <div className="flex gap-2 justify-end">
             <button onClick={() => setForm(null)} className="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50">Hủy</button>
-            <button onClick={handleSave} disabled={!form.variantCode || !form.variantName || !form.sellUnit || create.isLoading || update.isLoading}
+            <button onClick={handleSave}
+              disabled={!form.variantCode || !form.variantName || !form.sellUnit
+                || !form.expiryDays || Number(form.expiryDays) <= 0
+                || create.isLoading || update.isLoading}
               className="px-4 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-60">
               {create.isLoading || update.isLoading ? 'Đang lưu...' : 'Lưu'}
             </button>

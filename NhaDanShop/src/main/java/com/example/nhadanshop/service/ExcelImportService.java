@@ -378,8 +378,8 @@ public class ExcelImportService {
                     errorMsg = "Cột J (ĐV bán lẻ) bắt buộc — VD: bịch, hộp, gói, hũ...";
                 } else if (pieces != null && pieces < 1) {
                     errorMsg = "Cột K (Số lẻ/ĐV) phải >= 1";
-                } else if (expiryDays != null && expiryDays < 0) {
-                    errorMsg = "Cột G (Hạn dùng) phải >= 0";
+                } else if (expiryDays == null || expiryDays <= 0) {
+                    errorMsg = "Cột G (Hạn dùng) bắt buộc và phải > 0. Nếu SP không có HSD, điền 3650 (10 năm).";
                 } else if (minStockQty != null && minStockQty < 0) {
                     errorMsg = "Cột M (Tồn tối thiểu) phải >= 0";
                 } else {

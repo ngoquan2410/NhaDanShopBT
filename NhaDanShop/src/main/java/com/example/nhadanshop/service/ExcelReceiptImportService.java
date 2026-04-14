@@ -100,7 +100,8 @@ public class ExcelReceiptImportService {
     private static final int COL_IMPORT_UNIT     = 10; // K
     private static final int COL_SELL_UNIT       = 11; // L
     private static final int COL_PIECES          = 12; // M
-    private static final int COL_EXPIRY_DATE     = 13; // N (Sprint 1 S1-2 — optional, ghi đè HSD)
+    private static final int COL_EXPIRY_DATE     = 13; // N (optional — ngày HSD thực tế trên bao bì, ghi đè expiryDays)
+    private static final int COL_EXPIRY_DAYS     = 14; // O (optional CASE C, bắt buộc CASE A/B — số ngày HSD của variant)
 
     // ── Column indices — OLD FORMAT (12 cột A..L, không có cột B variant) ───
     private static final int OLD_COL_NAME        = 1;  // B
@@ -156,10 +157,12 @@ public class ExcelReceiptImportService {
             String importUnit,
             String sellUnit,
             Integer piecesPerImportUnit,
-            /** Sprint 1 S1-2: Ngày HSD thực tế ghi đè từ cột N Excel — null → tự tính từ expiryDays */
-            java.time.LocalDate expiryDateOverride) {
+            /** Cột N: Ngày HSD thực tế ghi đè từ Excel — null → tự tính từ expiryDays */
+            java.time.LocalDate expiryDateOverride,
+            /** Cột O: Số ngày HSD — set vào variant khi tạo mới (CASE A/B bắt buộc, CASE C optional) */
+            Integer expiryDays) {
 
-        /** Constructor backward-compat (không có expiryDateOverride) */
+        /** Backward-compat không có expiryDateOverride, expiryDays */
         ValidatedRow(VariantAction action, Product product, ProductVariant resolvedVariant,
                      boolean isLegacyVariant, String excelVariantCode,
                      String newProductName, String newCategoryName, String newUnit, String newCode,
@@ -169,7 +172,21 @@ public class ExcelReceiptImportService {
             this(action, product, resolvedVariant, isLegacyVariant, excelVariantCode,
                  newProductName, newCategoryName, newUnit, newCode,
                  qty, cost, sellPrice, discountPct, isCombo, lineNum, lineNote,
-                 importUnit, sellUnit, piecesPerImportUnit, null);
+                 importUnit, sellUnit, piecesPerImportUnit, null, null);
+        }
+
+        /** Backward-compat với expiryDateOverride nhưng không có expiryDays */
+        ValidatedRow(VariantAction action, Product product, ProductVariant resolvedVariant,
+                     boolean isLegacyVariant, String excelVariantCode,
+                     String newProductName, String newCategoryName, String newUnit, String newCode,
+                     int qty, BigDecimal cost, BigDecimal sellPrice, BigDecimal discountPct,
+                     boolean isCombo, int lineNum, String lineNote,
+                     String importUnit, String sellUnit, Integer piecesPerImportUnit,
+                     java.time.LocalDate expiryDateOverride) {
+            this(action, product, resolvedVariant, isLegacyVariant, excelVariantCode,
+                 newProductName, newCategoryName, newUnit, newCode,
+                 qty, cost, sellPrice, discountPct, isCombo, lineNum, lineNote,
+                 importUnit, sellUnit, piecesPerImportUnit, expiryDateOverride, null);
         }
     }
 
@@ -518,7 +535,8 @@ public class ExcelReceiptImportService {
                     String excelImportUnit;
                     String excelSellUnit;
                     Integer excelPieces;
-                    LocalDate expiryDateOverride = null; // Sprint 1 S1-2: cột N
+                    LocalDate expiryDateOverride = null; // cột N — ngày HSD thực tế trên bao bì
+                    Integer expiryDaysFromExcel  = null; // cột O — số ngày HSD (bắt buộc CASE A/B, optional CASE C)
 
                     if (isNewFormat) {
                         productCode     = getCellString(row, COL_PRODUCT_CODE);
@@ -532,7 +550,8 @@ public class ExcelReceiptImportService {
                         excelImportUnit = getCellString(row, COL_IMPORT_UNIT);
                         excelSellUnit   = getCellString(row, COL_SELL_UNIT);
                         excelPieces     = getCellIntOptional(row, COL_PIECES);
-                        expiryDateOverride = getCellLocalDate(row, COL_EXPIRY_DATE); // Sprint 1 S1-2: cột N
+                        expiryDateOverride  = getCellLocalDate(row, COL_EXPIRY_DATE);    // cột N
+                        expiryDaysFromExcel = getCellIntOptional(row, COL_EXPIRY_DAYS);  // cột O
                     } else {
                         productCode     = getCellString(row, COL_PRODUCT_CODE);
                         variantCode     = null;
@@ -564,6 +583,10 @@ public class ExcelReceiptImportService {
                     }
                     if (discountPct.compareTo(BigDecimal.ZERO) < 0 || discountPct.compareTo(BigDecimal.valueOf(100)) > 0) {
                         errors.add("❌ Dòng " + lineNum + " [SP Don]: Chiết khấu % phải 0–100"); continue;
+                    }
+                    // Validate cột O: nếu có điền thì phải > 0
+                    if (expiryDaysFromExcel != null && expiryDaysFromExcel <= 0) {
+                        errors.add("❌ Dòng " + lineNum + " [SP Don]: Cột O (Số ngày HSD) phải > 0. Nếu SP không có HSD, điền 3650 (10 năm)."); continue;
                     }
 
                     String passImportUnit = (excelImportUnit != null && !excelImportUnit.isBlank()) ? excelImportUnit.trim() : null;
@@ -597,11 +620,17 @@ public class ExcelReceiptImportService {
                         if (pendingNewVariantCodes.contains(newVariantCode)) {
                             errors.add("❌ Dòng " + lineNum + " [SP Don]: Variant '" + newVariantCode + "' đã xuất hiện ở dòng trước."); continue;
                         }
+                        // CASE A: SP/Variant mới — bắt buộc cột O (số ngày HSD)
+                        if (expiryDaysFromExcel == null) {
+                            errors.add("❌ Dòng " + lineNum + " [SP Don]: SP mới '" + name.trim()
+                                    + "' — bắt buộc điền cột O (Số ngày HSD)."
+                                    + " Nếu SP không có HSD, điền 3650 (10 năm)."); continue;
+                        }
                         ValidatedRow vRow = new ValidatedRow(
                                 VariantAction.NEW_PRODUCT, null, null, false, newVariantCode,
                                 name.trim(), categoryName.trim(), unit.trim(), upperCode,
                                 qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
-                                passImportUnit, passSellUnit, passPieces, expiryDateOverride);
+                                passImportUnit, passSellUnit, passPieces, expiryDateOverride, expiryDaysFromExcel);
                         validatedRows.add(vRow);
                         pendingNewProductRows.put(upperCode, vRow);
                         pendingNewVariantCodes.add(newVariantCode);
@@ -619,12 +648,18 @@ public class ExcelReceiptImportService {
                             while (pendingNewVariantCodes.contains(newVCodeForPending)) newVCodeForPending = base + "-" + sfx++;
                         }
                         pendingNewVariantCodes.add(newVCodeForPending);
+                        // CASE B: Variant mới cho SP đang pending — bắt buộc cột O
+                        if (expiryDaysFromExcel == null) {
+                            errors.add("❌ Dòng " + lineNum + " [SP Don]: Variant mới '" + newVCodeForPending
+                                    + "' — bắt buộc điền cột O (Số ngày HSD)."
+                                    + " Nếu SP không có HSD, điền 3650 (10 năm)."); continue;
+                        }
                         warnings.add("ℹ️ Dòng " + lineNum + ": SP '" + upperCode + "' plan tạo mới → thêm variant '" + newVCodeForPending + "'.");
                         validatedRows.add(new ValidatedRow(
                                 VariantAction.CREATE_NEW, null, null, false, newVCodeForPending,
                                 null, null, null, upperCode,
                                 qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
-                                passImportUnit, passSellUnit, passPieces, expiryDateOverride));
+                                passImportUnit, passSellUnit, passPieces, expiryDateOverride, expiryDaysFromExcel));
                         continue;
                     }
 
@@ -665,9 +700,15 @@ public class ExcelReceiptImportService {
                     if (!hasVariantCode) {
                         List<ProductVariant> allVariants = variantRepo.findByProductIdOrderByIsDefaultDescVariantCodeAsc(product.getId());
                         if (allVariants.isEmpty()) {
+                            // CASE B: SP chưa có variant nào → tạo mới — bắt buộc cột O
+                            if (expiryDaysFromExcel == null) {
+                                errors.add("❌ Dòng " + lineNum + " [SP Don]: SP '" + product.getCode()
+                                        + "' chưa có variant — bắt buộc điền cột O (Số ngày HSD)."
+                                        + " Nếu SP không có HSD, điền 3650 (10 năm)."); continue;
+                            }
                             validatedRows.add(new ValidatedRow(VariantAction.CREATE_NEW, product, null, false, null,
                                     null, null, null, null, qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
-                                    passImportUnit, passSellUnit, passPieces, expiryDateOverride));
+                                    passImportUnit, passSellUnit, passPieces, expiryDateOverride, expiryDaysFromExcel));
                             warnings.add("⚠️ Dòng " + lineNum + ": SP '" + product.getCode() + "' chưa có variant → tạo mới.");
                             continue;
                         }
@@ -701,15 +742,20 @@ public class ExcelReceiptImportService {
                         }
                         boolean isLegacy = matchedVar != null && (matchedVar.getImportUnit() == null || matchedVar.getImportUnit().isBlank());
                         if (!isLegacy && matchedVar != null && passImportUnit != null && !passImportUnit.equalsIgnoreCase(matchedVar.getImportUnit())) {
-                            // Fix Case B: không silently drop — báo lỗi rõ ràng giống Case A (có variant_code)
                             errors.add("❌ Dòng " + lineNum + " [SP Don]: Variant '" + matchedVar.getVariantCode()
                                     + "' có importUnit='" + matchedVar.getImportUnit()
                                     + "', Excel nhập='" + passImportUnit + "' — không khớp."
                                     + " Hãy điền đúng importUnit hoặc thêm cột B (variant_code)."); continue;
                         }
+                        // CASE C: Variant đã có, expiryDays=null VÀ cột O trống → warning
+                        if (matchedVar != null && matchedVar.getExpiryDays() == null && expiryDaysFromExcel == null) {
+                            warnings.add("⚠️ Dòng " + lineNum + ": Variant '" + matchedVar.getVariantCode()
+                                    + "' chưa có số ngày HSD → expiryDate = +10 năm."
+                                    + " Điền cột O hoặc cột N (ngày HSD) để FEFO chính xác.");
+                        }
                         validatedRows.add(new ValidatedRow(VariantAction.EXISTING_EXACT, product, matchedVar, isLegacy, null,
                                 null, null, null, null, qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
-                                passImportUnit, passSellUnit, passPieces, expiryDateOverride));
+                                passImportUnit, passSellUnit, passPieces, expiryDateOverride, expiryDaysFromExcel));
                         continue;
                     }
 
@@ -727,13 +773,25 @@ public class ExcelReceiptImportService {
                             warnings.add("⚠️ Dòng " + lineNum + ": pieces DB=" + ev.getPiecesPerUnit() + " vs Excel=" + passPieces + " → dùng DB.");
                             passPieces = ev.getPiecesPerUnit();
                         }
+                        // CASE C (có variantCode): expiryDays=null VÀ cột O trống → warning
+                        if (ev.getExpiryDays() == null && expiryDaysFromExcel == null) {
+                            warnings.add("⚠️ Dòng " + lineNum + ": Variant '" + ev.getVariantCode()
+                                    + "' chưa có số ngày HSD → expiryDate = +10 năm."
+                                    + " Điền cột O hoặc cột N (ngày HSD) để FEFO chính xác.");
+                        }
                         validatedRows.add(new ValidatedRow(VariantAction.EXISTING_EXACT, product, ev, isLegacy, variantCode,
                                 null, null, null, null, qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
-                                passImportUnit, passSellUnit, passPieces, expiryDateOverride));
+                                passImportUnit, passSellUnit, passPieces, expiryDateOverride, expiryDaysFromExcel));
                     } else {
+                        // CASE B: variant_code mới — bắt buộc cột O
+                        if (expiryDaysFromExcel == null) {
+                            errors.add("❌ Dòng " + lineNum + " [SP Don]: Variant mới '" + variantCode
+                                    + "' — bắt buộc điền cột O (Số ngày HSD)."
+                                    + " Nếu SP không có HSD, điền 3650 (10 năm)."); continue;
+                        }
                         validatedRows.add(new ValidatedRow(VariantAction.CREATE_NEW, product, null, false, variantCode,
                                 null, null, null, null, qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
-                                passImportUnit, passSellUnit, passPieces, expiryDateOverride));
+                                passImportUnit, passSellUnit, passPieces, expiryDateOverride, expiryDaysFromExcel));
                         warnings.add("ℹ️ Dòng " + lineNum + " [SP Don]: Variant '" + variantCode + "' chưa tồn tại → sẽ tạo mới.");
                     }
                 } // end for SP Don rows
@@ -848,6 +906,8 @@ public class ExcelReceiptImportService {
                         ? vr.sellPrice() : vr.cost());
                 nv.setCostPrice(vr.cost());
                 nv.setStockQty(0); nv.setMinStockQty(5); nv.setIsDefault(true); nv.setActive(true);
+                // CASE A: expiryDays từ cột O (Pass 1 đã bắt buộc > 0)
+                nv.setExpiryDays(vr.expiryDays());
                 nv.setCreatedAt(LocalDateTime.now()); nv.setUpdatedAt(LocalDateTime.now());
                 variant = variantRepo.saveAndFlush(nv);
                 variantCache.put("vid:" + variant.getId(), variant);
@@ -914,6 +974,8 @@ public class ExcelReceiptImportService {
                         ? vr.sellPrice() : BigDecimal.ZERO);
                 nv2.setCostPrice(vr.cost());
                 nv2.setStockQty(0); nv2.setMinStockQty(5); nv2.setIsDefault(noDefaultYet); nv2.setActive(true);
+                // CASE B: expiryDays từ cột O (Pass 1 đã bắt buộc > 0)
+                nv2.setExpiryDays(vr.expiryDays());
                 nv2.setCreatedAt(LocalDateTime.now()); nv2.setUpdatedAt(LocalDateTime.now());
                 variant = variantRepo.saveAndFlush(nv2);
                 variantCache.put("vid:" + variant.getId(), variant);
@@ -980,6 +1042,17 @@ public class ExcelReceiptImportService {
                     variantRepo.save(existVar);
                     warnings.add("ℹ️ Dòng " + vr.lineNum() + ": Cập nhật giá bán variant '"
                             + existVar.getVariantCode() + "' → " + vr.sellPrice().toPlainString() + " ₫");
+                }
+                // CASE C: cập nhật expiryDays nếu cột O có giá trị — trống = KHÔNG cập nhật
+                if (existVar != null && vr.expiryDays() != null) {
+                    Integer oldDays = existVar.getExpiryDays();
+                    existVar.setExpiryDays(vr.expiryDays());
+                    existVar.setUpdatedAt(LocalDateTime.now());
+                    variantRepo.save(existVar);
+                    warnings.add("ℹ️ Dòng " + vr.lineNum() + ": Cập nhật số ngày HSD variant '"
+                            + existVar.getVariantCode() + "': "
+                            + (oldDays != null ? oldDays : "chưa có") + " → " + vr.expiryDays() + " ngày"
+                            + " (lô cũ không thay đổi, áp dụng từ lô này trở đi)");
                 }
                 variant = existVar;
             }
@@ -1069,14 +1142,20 @@ public class ExcelReceiptImportService {
 
             // Tạo Batch — 1 batch per row (costPrice tạm thời, sẽ update sau khi phân bổ shipping/VAT)
             if (variant != null) {
-                // Sprint 1 S1-2: ưu tiên expiryDateOverride từ cột N Excel → fallback sang expiryDays
+                // Ưu tiên tính expiryDate: cột N > cột O > variant.expiryDays (DB) > fallback +10 năm
                 LocalDate expiryDate;
                 LocalDate importLocalDate = finalReceiptDate.toLocalDate();
                 if (vr.expiryDateOverride() != null) {
+                    // Ưu tiên 1: cột N — ngày thực tế in trên bao bì
                     expiryDate = vr.expiryDateOverride();
+                } else if (vr.expiryDays() != null && vr.expiryDays() > 0) {
+                    // Ưu tiên 2: cột O — expiryDays từ Excel lần này (đã update variant trên)
+                    expiryDate = importLocalDate.plusDays(vr.expiryDays());
                 } else if (variant.getExpiryDays() != null && variant.getExpiryDays() > 0) {
+                    // Ưu tiên 3: variant.expiryDays (DB) — template cũ
                     expiryDate = importLocalDate.plusDays(variant.getExpiryDays());
                 } else {
+                    // Fallback: +10 năm (không quản lý HSD)
                     expiryDate = importLocalDate.plusYears(10);
                 }
                 String batchCode = buildUniqueBatchCode(savedReceipt.getReceiptNo(), variant.getVariantCode());
