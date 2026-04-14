@@ -60,7 +60,7 @@ public class ExcelComboImportService {
         List<String> warnings = new ArrayList<>();
         List<String> created  = new ArrayList<>();
 
-        try (XSSFWorkbook wb = new XSSFWorkbook(file.getInputStream())) {
+        try (XSSFWorkbook wb = new XSSFWorkbook(file.getInputStream()) ) {
             Sheet sheet = wb.getSheet("Du lieu Combo");
             if (sheet == null) sheet = wb.getSheetAt(0);
 
