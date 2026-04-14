@@ -133,11 +133,11 @@ public class InventoryReceiptController {
             @RequestParam(value = "note",         required = false, defaultValue = "") String note,
             @RequestParam(value = "shippingFee",  required = false, defaultValue = "0") java.math.BigDecimal shippingFee,
             @RequestParam(value = "vatPercent",   required = false, defaultValue = "0") java.math.BigDecimal vatPercent,
-            @RequestParam(value = "receiptDate",  required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate receiptDate
+            @RequestParam(value = "receiptDate",  required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDateTime receiptDateTime
     ) throws IOException {
         // Chuyển LocalDate → LocalDateTime (đầu ngày), null → service tự dùng now()
-        LocalDateTime receiptDateTime = (receiptDate != null) ? receiptDate.atStartOfDay() : null;
+        //LocalDateTime receiptDateTime = (receiptDate != null) ? receiptDate.atStartOfDay() : null;
         return excelReceiptImportService.importReceiptFromExcel(
-                file, supplierName, supplierId, note, shippingFee, vatPercent, receiptDateTime);
+                file, supplierName, supplierId, note, shippingFee, vatPercent, receiptDateTime != null ? receiptDateTime: null);
     }
 }
