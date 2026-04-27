@@ -17,6 +17,7 @@ public class SalesInvoice {
 
     /** Trạng thái hóa đơn */
     public enum Status { COMPLETED, CANCELLED }
+    public enum SourceType { POS, ONLINE_PENDING, MANUAL }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -35,6 +36,12 @@ public class SalesInvoice {
     @JoinColumn(name = "customer_id")
     private Customer customer;
 
+    @Column(name = "customer_phone", length = 30)
+    private String customerPhone;
+
+    @Column(name = "payment_method", length = 20)
+    private String paymentMethod;
+
     @Column(name = "note", length = 500)
     private String note;
 
@@ -49,6 +56,34 @@ public class SalesInvoice {
 
     @Column(name = "discount_amount", nullable = false, precision = 18, scale = 2)
     private BigDecimal discountAmount = BigDecimal.ZERO;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source_type", nullable = false, length = 30)
+    private SourceType sourceType = SourceType.POS;
+
+    @Column(name = "pending_order_id")
+    private Long pendingOrderId;
+
+    @Column(name = "shipping_address_json", columnDefinition = "text")
+    private String shippingAddressJson;
+
+    @Column(name = "gift_lines_snapshot_json", columnDefinition = "text")
+    private String giftLinesSnapshotJson;
+
+    @Column(name = "promotion_snapshot_json", columnDefinition = "text")
+    private String promotionSnapshotJson;
+
+    @Column(name = "voucher_snapshot_json", columnDefinition = "text")
+    private String voucherSnapshotJson;
+
+    @Column(name = "shipping_quote_snapshot_json", columnDefinition = "text")
+    private String shippingQuoteSnapshotJson;
+
+    @Column(name = "pricing_breakdown_snapshot_json", columnDefinition = "text")
+    private String pricingBreakdownSnapshotJson;
+
+    @Column(name = "vat_percent", nullable = false, precision = 5, scale = 2)
+    private BigDecimal vatPercent = BigDecimal.ZERO;
 
     // ── Soft Cancel fields ────────────────────────────────────────────────────
     @Enumerated(EnumType.STRING)
@@ -88,6 +123,8 @@ public class SalesInvoice {
         if (updatedAt  == null) updatedAt  = now;
         if (totalAmount == null) totalAmount = BigDecimal.ZERO;
         if (status == null) status = Status.COMPLETED;
+        if (sourceType == null) sourceType = SourceType.POS;
+        if (vatPercent == null) vatPercent = BigDecimal.ZERO;
     }
 
     @PreUpdate

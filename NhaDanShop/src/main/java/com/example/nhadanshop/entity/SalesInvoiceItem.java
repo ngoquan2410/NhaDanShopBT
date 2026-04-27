@@ -5,6 +5,8 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 
 @Getter
 @Setter
@@ -67,6 +69,9 @@ public class SalesInvoiceItem {
      */
     @Column(name = "combo_unit_price", precision = 18, scale = 2)
     private BigDecimal comboUnitPrice;
+
+    @OneToMany(mappedBy = "invoiceItem", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<SalesInvoiceItemBatchAllocation> batchAllocations = new ArrayList<>();
 }
 
 

@@ -17,5 +17,13 @@ public record InventoryReceiptResponse(
         String createdBy,
         List<InventoryReceiptItemResponse> items,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        /** Persisted: {@code confirmed} or {@code voided}. */
+        String status,
+        boolean canDelete,
+        /** Present when {@code canDelete} is false; e.g. {@code "downstream_consumption"} or {@code "voided"}. */
+        String deleteBlockReason,
+        LocalDateTime voidedAt,
+        String voidedBy,
+        String voidReason
 ) {}

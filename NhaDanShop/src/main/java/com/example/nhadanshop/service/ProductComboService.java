@@ -79,7 +79,27 @@ public class ProductComboService {
     }
 
     public void delete(Long id) {
-        productRepo.delete(findComboOrThrow(id));
+        Product combo = findComboOrThrow(id);
+        if (productRepo.isComboStructurallyUsed(id)) {
+            archiveCombo(combo);
+        } else {
+            productRepo.delete(combo);
+        }
+    }
+
+    /**
+     * Soft-archive: product + all its variants inactive; keeps combo item rows and default variant for history/admin.
+     * Does not touch stock, batches, or movements.
+     */
+    private void archiveCombo(Product combo) {
+        combo.setActive(false);
+        combo.setUpdatedAt(LocalDateTime.now());
+        productRepo.save(combo);
+        variantRepo.findByProductIdOrderByIsDefaultDescVariantCodeAsc(combo.getId()).forEach(v -> {
+            v.setActive(false);
+            v.setUpdatedAt(LocalDateTime.now());
+            variantRepo.save(v);
+        });
     }
 
     public ProductComboResponse toggleActive(Long id) {
@@ -102,6 +122,16 @@ public class ProductComboService {
         if (!combo.isCombo()) return;
         List<ProductComboItem> items = comboItemRepo.findByComboProduct(combo);
         if (items.isEmpty()) { syncComboVariant(combo, 0, BigDecimal.ZERO); return; }
+
+        for (ProductComboItem ci : items) {
+            ProductVariant cv = ci.getProduct().getDefaultVariant();
+            int stock = cv != null && cv.getStockQty() != null ? cv.getStockQty() : 0;
+            if (stock < 0) {
+                throw new IllegalStateException(
+                        "Tồn thành phần âm trong combo '" + combo.getCode() + "': sản phẩm '"
+                                + ci.getProduct().getCode() + "' stockQty=" + stock);
+            }
+        }
 
         int virtualStock = items.stream()
                 .mapToInt(ci -> {
@@ -164,6 +194,7 @@ public class ProductComboService {
         v.setStockQty(0);
         v.setMinStockQty(0);
         v.setIsDefault(true);
+        v.setIsSellable(true);
         v.setActive(combo.getActive());
         v.setImageUrl(combo.getImageUrl());
         if (v.getCreatedAt() == null) v.setCreatedAt(LocalDateTime.now());

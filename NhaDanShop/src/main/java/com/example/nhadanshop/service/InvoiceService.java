@@ -1,8 +1,14 @@
 package com.example.nhadanshop.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.nhadanshop.dto.InvoiceItemRequest;
+import com.example.nhadanshop.dto.PricingBreakdownSnapshotDto;
+import com.example.nhadanshop.dto.PromotionSnapshotDto;
 import com.example.nhadanshop.dto.SalesInvoiceRequest;
 import com.example.nhadanshop.dto.SalesInvoiceResponse;
+import com.example.nhadanshop.entity.PendingOrder;
+import com.example.nhadanshop.entity.PendingOrderItem;
 import com.example.nhadanshop.entity.*;
 import com.example.nhadanshop.repository.*;
 import jakarta.persistence.EntityNotFoundException;
@@ -10,17 +16,24 @@ import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
@@ -41,13 +54,16 @@ public class InvoiceService {
     private final ProductComboService comboService;
     private final CustomerRepository customerRepository;
     private final CustomerService customerService;
+    private final StockMutationService stockMutationService;
+    private final Clock clock;
+    private final ObjectMapper objectMapper;
 
     @Transactional
     public SalesInvoiceResponse createInvoice(SalesInvoiceRequest req) {
         SalesInvoice invoice = new SalesInvoice();
         invoice.setInvoiceNo(numberGen.nextInvoiceNo());
         invoice.setNote(req.note());
-        invoice.setInvoiceDate(LocalDateTime.now());
+        invoice.setInvoiceDate(LocalDateTime.now(clock));
 
         String currentUsername = SecurityContextHolder.getContext().getAuthentication().getName();
         userRepo.findByUsername(currentUsername).ifPresent(invoice::setCreatedBy);
@@ -55,6 +71,7 @@ public class InvoiceService {
         // Sprint 2: set customer FK + snapshot name
         if (req.customerId() != null) {
             customerRepository.findById(req.customerId()).ifPresent(customer -> {
+                ActiveEntityGuards.requireActiveCustomerForBinding(customer, req.customerId());
                 invoice.setCustomer(customer);
                 invoice.setCustomerName(customer.getName()); // snapshot
             });
@@ -102,7 +119,10 @@ public class InvoiceService {
                     "Vui long dung comboId de ban combo theo mo hinh KiotViet.");
 
             // [Sprint 0] Resolve variant — null variantId → dùng default variant
-            ProductVariant variant = variantService.resolveVariant(itemReq.variantId(), product.getId());
+            ProductVariant variant = variantService.resolveVariant(itemReq.variantId(), product.getId(), true);
+            Long variantId = variant.getId();
+            variant = variantRepo.findByIdForUpdate(variantId)
+                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy variant ID: " + variantId));
 
             // Kiểm tra tồn kho theo variant
             if (variant.getStockQty() < itemReq.quantity()) {
@@ -113,13 +133,8 @@ public class InvoiceService {
             }
 
             // FEFO deduct theo variant_id
-            BigDecimal fefoAvgCost = batchService.deductStockFEFOAndComputeCost(
+            ProductBatchService.DeductionResult deductionResult = batchService.deductStockFEFOWithTrace(
                     product.getId(), variant.getId(), itemReq.quantity());
-
-            // Trừ variant.stockQty (single source of truth)
-            variant.setStockQty(variant.getStockQty() - itemReq.quantity());
-            variant.setUpdatedAt(LocalDateTime.now());
-            variantRepo.save(variant);
             affectedProductIds.add(product.getId());
 
             BigDecimal lineDiscPct = itemReq.discountPercent() != null ? itemReq.discountPercent() : BigDecimal.ZERO;
@@ -136,8 +151,9 @@ public class InvoiceService {
             item.setOriginalUnitPrice(variant.getSellPrice());
             item.setLineDiscountPercent(lineDiscPct);
             item.setUnitPrice(actualUnitPrice);
-            item.setUnitCostSnapshot(fefoAvgCost.compareTo(BigDecimal.ZERO) > 0
-                    ? fefoAvgCost : variant.getCostPrice());
+            item.setUnitCostSnapshot(deductionResult.averageCost().compareTo(BigDecimal.ZERO) > 0
+                    ? deductionResult.averageCost() : variant.getCostPrice());
+            appendBatchAllocations(item, deductionResult.batchDeductions());
             // comboSourceId = null (bán lẻ thường)
 
             totalAmount = totalAmount.add(actualUnitPrice.multiply(BigDecimal.valueOf(itemReq.quantity())));
@@ -157,6 +173,7 @@ public class InvoiceService {
         invoice.setDiscountAmount(discountAmount);
 
         SalesInvoice saved = invoiceRepo.save(invoice);
+        appendInvoiceDeductionMovements(saved);
 
         // ── Refresh virtual stock của tất cả combo chứa SP bị ảnh hưởng ──────
         affectedProductIds.forEach(comboService::refreshCombosContaining);
@@ -168,6 +185,123 @@ public class InvoiceService {
         }
 
         return DtoMapper.toResponse(saved);
+    }
+
+    @Transactional
+    public SalesInvoice createInvoiceFromPendingOrder(
+            PendingOrder order,
+            String confirmedBy
+    ) {
+        SalesInvoice invoice = new SalesInvoice();
+        invoice.setInvoiceNo(numberGen.nextInvoiceNo());
+        invoice.setInvoiceDate(LocalDateTime.now(clock));
+        invoice.setSourceType(SalesInvoice.SourceType.ONLINE_PENDING);
+        invoice.setPendingOrderId(order.getId());
+        invoice.setCustomerName(order.getCustomerName());
+        invoice.setCustomerPhone(order.getCustomerPhone());
+        invoice.setPaymentMethod(order.getPaymentMethod());
+        invoice.setNote(buildPendingOrderInvoiceNote(order, confirmedBy));
+        invoice.setShippingAddressJson(order.getShippingAddressJson());
+        invoice.setGiftLinesSnapshotJson(order.getGiftLinesSnapshotJson());
+        invoice.setPromotionSnapshotJson(order.getPromotionSnapshotJson());
+        invoice.setVoucherSnapshotJson(order.getVoucherSnapshotJson());
+        invoice.setShippingQuoteSnapshotJson(order.getShippingQuoteSnapshotJson());
+        invoice.setPricingBreakdownSnapshotJson(order.getPricingBreakdownSnapshotJson());
+
+        String currentUsername = SecurityContextHolder.getContext().getAuthentication().getName();
+        userRepo.findByUsername(currentUsername).ifPresent(invoice::setCreatedBy);
+
+        Long customerId = parseNullableLong(order.getCustomerId());
+        if (customerId != null) {
+            customerRepository.findById(customerId).ifPresent(customer -> {
+                ActiveEntityGuards.requireActiveCustomerForBinding(customer, customerId);
+                invoice.setCustomer(customer);
+            });
+        }
+
+        PromotionSnapshotDto promotionSnapshot = readJson(order.getPromotionSnapshotJson(), new TypeReference<>() {});
+        if (promotionSnapshot != null) {
+            invoice.setPromotionId(parseNullableLong(promotionSnapshot.promotionId()));
+            invoice.setPromotionName(promotionSnapshot.name());
+        }
+
+        PricingBreakdownSnapshotDto pricing = readJson(order.getPricingBreakdownSnapshotJson(), new TypeReference<>() {});
+        if (pricing == null) {
+            throw new IllegalStateException("Pending order thiếu pricingBreakdownSnapshot để tạo hóa đơn");
+        }
+
+        invoice.setVatPercent(nvl(pricing.vatPercent()));
+        invoice.setTotalAmount(
+                nvl(pricing.subtotal())
+                        .add(nvl(pricing.shippingFee()))
+                        .add(nvl(pricing.vatAmount()))
+        );
+        invoice.setDiscountAmount(
+                nvl(pricing.manualDiscount())
+                        .add(nvl(pricing.promotionDiscount()))
+                        .add(nvl(pricing.voucherDiscount()))
+                        .add(nvl(pricing.shippingDiscount()))
+        );
+
+        List<SalesInvoiceItem> items = new ArrayList<>();
+        Set<Long> affectedProductIds = new java.util.HashSet<>();
+        for (PendingOrderItem orderItem : order.getItems()) {
+            Product product = productRepo.findById(orderItem.getProduct().getId())
+                    .orElseThrow(() -> new EntityNotFoundException(
+                            "Khong tim thay san pham ID: " + orderItem.getProduct().getId()));
+
+            if (!product.getActive()) {
+                throw new IllegalArgumentException("San pham '" + product.getName() + "' da ngung kinh doanh");
+            }
+            if (product.isCombo()) {
+                throw new IllegalArgumentException(
+                        "San pham '" + product.getName() + "' la combo. Slice 2 chi ho tro xac nhan lai theo dong pending-order.");
+            }
+
+            Long variantId = orderItem.getVariant() != null ? orderItem.getVariant().getId() : null;
+            ProductVariant resolvedVariant = variantService.resolveVariant(variantId, product.getId(), true);
+            Long lockedVariantId = resolvedVariant.getId();
+            ProductVariant variant = variantRepo.findByIdForUpdate(lockedVariantId)
+                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy variant ID: " + lockedVariantId));
+
+            if (variant.getStockQty() < orderItem.getQuantity()) {
+                throw new IllegalArgumentException(
+                        "San pham '" + product.getName() + "' [" + variant.getVariantCode() + "] " +
+                                "khong du hang. Ton kho: " + variant.getStockQty() +
+                                ", yeu cau: " + orderItem.getQuantity());
+            }
+
+            ProductBatchService.DeductionResult deductionResult = batchService.deductStockFEFOWithTrace(
+                    product.getId(), variant.getId(), orderItem.getQuantity());
+            affectedProductIds.add(product.getId());
+
+            SalesInvoiceItem item = new SalesInvoiceItem();
+            item.setInvoice(invoice);
+            item.setProduct(product);
+            item.setVariant(variant);
+            item.setQuantity(orderItem.getQuantity());
+            item.setOriginalUnitPrice(nvl(orderItem.getUnitPrice()));
+            item.setLineDiscountPercent(BigDecimal.ZERO);
+            item.setUnitPrice(nvl(orderItem.getUnitPrice()));
+            item.setUnitCostSnapshot(deductionResult.averageCost().compareTo(BigDecimal.ZERO) > 0
+                    ? deductionResult.averageCost() : variant.getCostPrice());
+            appendBatchAllocations(item, deductionResult.batchDeductions());
+            items.add(item);
+        }
+
+        invoice.getItems().addAll(items);
+        SalesInvoice saved = invoiceRepo.save(invoice);
+        appendInvoiceDeductionMovements(saved);
+        affectedProductIds.forEach(comboService::refreshCombosContaining);
+
+        if (saved.getCustomer() != null) {
+            customerService.addSpend(
+                    saved.getCustomer().getId(),
+                    saved.getTotalAmount().subtract(saved.getDiscountAmount())
+            );
+        }
+
+        return saved;
     }
 
     // ── Combo KiotViet: Expand combo → nhiều line items ───────────────────────
@@ -210,7 +344,7 @@ public class InvoiceService {
         // Kiểm tra tồn kho đủ cho tất cả thành phần trước khi trừ
         for (ProductComboItem ci : comboItems) {
             Product component = ci.getProduct();
-            ProductVariant compVariant = variantService.resolveVariant(null, component.getId());
+            ProductVariant compVariant = variantService.resolveVariant(null, component.getId(), false);
             int required = ci.getQuantity() * comboQty;
             if (compVariant.getStockQty() < required) {
                 throw new IllegalArgumentException(
@@ -234,17 +368,15 @@ public class InvoiceService {
         for (int i = 0; i < comboItems.size(); i++) {
             ProductComboItem ci = comboItems.get(i);
             Product component = ci.getProduct();
-            ProductVariant compVariant = variantService.resolveVariant(null, component.getId());
+            ProductVariant compVariant = variantService.resolveVariant(null, component.getId(), false);
+            Long compVariantId = compVariant.getId();
+            compVariant = variantRepo.findByIdForUpdate(compVariantId)
+                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy variant ID: " + compVariantId));
             int requiredQty = ci.getQuantity() * comboQty;
 
             // FEFO deduct
-            BigDecimal fefoAvgCost = batchService.deductStockFEFOAndComputeCost(
+            ProductBatchService.DeductionResult deductionResult = batchService.deductStockFEFOWithTrace(
                     component.getId(), compVariant.getId(), requiredQty);
-
-            // Trừ variant stock
-            compVariant.setStockQty(compVariant.getStockQty() - requiredQty);
-            compVariant.setUpdatedAt(LocalDateTime.now());
-            variantRepo.save(compVariant);
             affectedProductIds.add(component.getId());
 
             // Phân bổ doanh thu combo theo tỷ lệ giá vốn thành phần (hoặc chia đều nếu cost = 0)
@@ -277,8 +409,9 @@ public class InvoiceService {
             item.setOriginalUnitPrice(compVariant.getSellPrice());
             item.setLineDiscountPercent(BigDecimal.ZERO);
             item.setUnitPrice(allocatedRevenue);   // giá phân bổ từ combo
-            item.setUnitCostSnapshot(fefoAvgCost.compareTo(BigDecimal.ZERO) > 0
-                    ? fefoAvgCost : compVariant.getCostPrice());
+            item.setUnitCostSnapshot(deductionResult.averageCost().compareTo(BigDecimal.ZERO) > 0
+                    ? deductionResult.averageCost() : compVariant.getCostPrice());
+            appendBatchAllocations(item, deductionResult.batchDeductions());
             item.setComboSourceId(comboId);
             item.setComboUnitPrice(comboSellPrice); // snapshot giá combo
             items.add(item);
@@ -344,13 +477,69 @@ public class InvoiceService {
         return totalAmount;
     }
 
+    private String buildPendingOrderInvoiceNote(PendingOrder order, String confirmedBy) {
+        String suffix = Stream.of(order.getNote())
+                .filter(v -> v != null && !v.isBlank())
+                .findFirst()
+                .orElse(null);
+        String base = "[" + order.getPaymentMethod() + "]";
+        if (confirmedBy != null && !confirmedBy.isBlank()) {
+            base = base + " [confirmedBy:" + confirmedBy.trim() + "]";
+        }
+        return suffix == null || suffix.isBlank() ? base : base + " " + suffix;
+    }
+
+    private Long parseNullableLong(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private <T> T readJson(String value, TypeReference<T> typeReference) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return objectMapper.readValue(value, typeReference);
+        } catch (Exception e) {
+            throw new IllegalStateException("Không thể deserialize pending-order snapshot", e);
+        }
+    }
+
+    private BigDecimal nvl(BigDecimal value) {
+        return value != null ? value : BigDecimal.ZERO;
+    }
+
     public SalesInvoiceResponse getInvoice(Long id) {
-        return DtoMapper.toResponse(invoiceRepo.findById(id)
+        return DtoMapper.toResponse(invoiceRepo.findByIdForResponse(id)
                 .orElseThrow(() -> new EntityNotFoundException("Khong tim thay hoa don ID: " + id)));
     }
 
     public Page<SalesInvoiceResponse> listInvoices(Pageable pageable) {
-        return invoiceRepo.findAllByOrderByInvoiceDateDesc(pageable).map(DtoMapper::toResponse);
+        Page<Long> invoiceIdPage = invoiceRepo.findInvoiceIdsForList(pageable);
+        List<Long> invoiceIds = invoiceIdPage.getContent();
+        if (invoiceIds.isEmpty()) {
+            return Page.empty(pageable);
+        }
+
+        Map<Long, Integer> orderIndex = new HashMap<>();
+        for (int i = 0; i < invoiceIds.size(); i++) {
+            orderIndex.put(invoiceIds.get(i), i);
+        }
+
+        Map<Long, SalesInvoice> invoiceById = invoiceRepo.findAllByIdInForList(invoiceIds).stream()
+                // Preserve DB ordering from paged id query.
+                .sorted(java.util.Comparator.comparingInt(inv -> orderIndex.getOrDefault(inv.getId(), Integer.MAX_VALUE)))
+                .collect(Collectors.toMap(SalesInvoice::getId, inv -> inv, (left, right) -> left, LinkedHashMap::new));
+
+        List<SalesInvoiceResponse> responses = invoiceIds.stream()
+                .map(invoiceById::get)
+                .filter(Objects::nonNull)
+                .map(DtoMapper::toResponse)
+                .toList();
+
+        return new PageImpl<>(responses, pageable, invoiceIdPage.getTotalElements());
     }
 
     public Page<SalesInvoiceResponse> listInvoicesByDateRange(LocalDateTime from, LocalDateTime to, Pageable pageable) {
@@ -362,43 +551,30 @@ public class InvoiceService {
         return invoiceRepo.findByCustomerIdOrderByInvoiceDateDesc(customerId, pageable).map(DtoMapper::toResponse);
     }
 
+    /**
+     * Hard delete is not supported for business invoices. Only two statuses exist today:
+     * {@link SalesInvoice.Status#COMPLETED} and {@link SalesInvoice.Status#CANCELLED}.
+     * <p>
+     * Phase 1 policy: use {@code PATCH /api/invoices/{id}/cancel} to void stock effect while
+     * keeping the row and allocation history. Physical {@code DELETE} is rejected.
+     */
     @Transactional
     public void deleteInvoice(Long id) {
-        SalesInvoice inv = invoiceRepo.findById(id)
+        SalesInvoice inv = invoiceRepo.findByIdForUpdate(id)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy hóa đơn ID: " + id));
 
-        // Bảo vệ: chỉ cho xóa hóa đơn trong ngày hôm nay
-        if (!inv.getInvoiceDate().toLocalDate().equals(java.time.LocalDate.now())) {
-            throw new IllegalStateException(
-                "Chỉ được xóa hóa đơn trong ngày hôm nay. " +
-                "Hóa đơn " + inv.getInvoiceNo() +
-                " được tạo ngày " + inv.getInvoiceDate().toLocalDate() +
-                " — không thể xóa. Hãy dùng chức năng Hủy hóa đơn thay thế.");
-        }
-
         if (inv.isCancelled()) {
-            throw new IllegalStateException("Hóa đơn " + inv.getInvoiceNo() + " đã bị hủy trước đó.");
+            throw new IllegalStateException(
+                    "Hóa đơn " + inv.getInvoiceNo() + " đã bị hủy; không thể xóa vật lý. Hóa đơn đã hủy vẫn giữ lại cho đối soát.");
         }
 
-        String actor = SecurityContextHolder.getContext().getAuthentication() != null
-                ? SecurityContextHolder.getContext().getAuthentication().getName() : "unknown";
-        BigDecimal finalAmt = inv.getTotalAmount().subtract(
-                inv.getDiscountAmount() != null ? inv.getDiscountAmount() : BigDecimal.ZERO);
-        log.warn("[AUDIT-DELETE] Hóa đơn={} | user={} | tổng={} ₫ | khách={}",
-                inv.getInvoiceNo(), actor, finalAmt,
-                inv.getCustomerName() != null ? inv.getCustomerName() : "khách lẻ");
-
-        Set<Long> affectedProductIds = new java.util.HashSet<>();
-        for (SalesInvoiceItem item : inv.getItems()) {
-            if (item.getVariant() != null) {
-                item.getVariant().setStockQty(item.getVariant().getStockQty() + item.getQuantity());
-                variantRepo.save(item.getVariant());
-            }
-            restoreStockFEFOAccurate(item);
-            affectedProductIds.add(item.getProduct().getId());
+        if (inv.getStatus() == SalesInvoice.Status.COMPLETED) {
+            throw new IllegalStateException(
+                    "Không thể xóa vật lý hóa đơn đã hoàn tất. Dùng PATCH /api/invoices/" + id
+                            + "/cancel để hủy hóa đơn và hoàn tồn kho (giữ bản ghi lịch sử).");
         }
-        invoiceRepo.delete(inv);
-        affectedProductIds.forEach(comboService::refreshCombosContaining);
+
+        throw new IllegalStateException("Không thể xóa hóa đơn ở trạng thái: " + inv.getStatus());
     }
 
     /**
@@ -409,7 +585,7 @@ public class InvoiceService {
      */
     @Transactional
     public SalesInvoiceResponse cancelInvoice(Long id, String reason, String actor) {
-        SalesInvoice inv = invoiceRepo.findById(id)
+        SalesInvoice inv = invoiceRepo.findByIdForUpdate(id)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy hóa đơn ID: " + id));
 
         if (inv.isCancelled()) {
@@ -424,19 +600,17 @@ public class InvoiceService {
 
         // Đánh dấu CANCELLED
         inv.setStatus(SalesInvoice.Status.CANCELLED);
-        inv.setCancelledAt(java.time.LocalDateTime.now());
+        inv.setCancelledAt(java.time.LocalDateTime.now(clock));
         inv.setCancelledBy(actor);
         inv.setCancelReason(reason != null && !reason.isBlank() ? reason.trim() : null);
 
         // Hoàn tồn kho
         Set<Long> affectedProductIds = new java.util.HashSet<>();
         for (SalesInvoiceItem item : inv.getItems()) {
+            restoreStockFromAllocations(item);
             if (item.getVariant() != null) {
-                item.getVariant().setStockQty(item.getVariant().getStockQty() + item.getQuantity());
-                variantRepo.save(item.getVariant());
+                stockMutationService.syncVariantStockWithBatches(item.getVariant().getId());
             }
-            // Issue 15: restore FEFO chính xác
-            restoreStockFEFOAccurate(item);
             affectedProductIds.add(item.getProduct().getId());
         }
 
@@ -445,11 +619,88 @@ public class InvoiceService {
         return DtoMapper.toResponse(inv);
     }
 
-    /**
-     * Issue 15: Fix FEFO restore — tìm batch có costPrice khớp unitCostSnapshot để restore đúng lô.
-     * Nếu không tìm được batch khớp giá → fallback về batch mới nhất còn hàng.
-     */
-    private void restoreStockFEFOAccurate(SalesInvoiceItem item) {
+    private void appendBatchAllocations(SalesInvoiceItem item, List<ProductBatchService.BatchDeduction> deductions) {
+        if (deductions == null || deductions.isEmpty()) {
+            return;
+        }
+        for (ProductBatchService.BatchDeduction deduction : deductions) {
+            SalesInvoiceItemBatchAllocation allocation = new SalesInvoiceItemBatchAllocation();
+            allocation.setInvoiceItem(item);
+            allocation.setBatch(batchRepo.getReferenceById(deduction.batchId()));
+            allocation.setDeductedQty(deduction.deductedQty());
+            item.getBatchAllocations().add(allocation);
+        }
+    }
+
+    private void appendInvoiceDeductionMovements(SalesInvoice invoice) {
+        if (invoice == null || invoice.getItems() == null || invoice.getItems().isEmpty()) {
+            return;
+        }
+        String invoiceTrace = invoice.getId() != null
+                ? "invoice:" + invoice.getId()
+                : invoice.getInvoiceNo();
+        for (SalesInvoiceItem item : invoice.getItems()) {
+            if (item.getBatchAllocations() == null || item.getBatchAllocations().isEmpty()) {
+                continue;
+            }
+            if (item.getVariant() == null || item.getVariant().getId() == null) {
+                throw new IllegalStateException("Invoice item thiếu variant để ghi inventory movement");
+            }
+            String sourceId = item.getId() != null
+                    ? invoiceTrace + ":item:" + item.getId()
+                    : invoiceTrace;
+            String note = "invoiceNo=" + invoice.getInvoiceNo();
+            for (SalesInvoiceItemBatchAllocation allocation : item.getBatchAllocations()) {
+                if (allocation.getBatch() == null || allocation.getBatch().getId() == null) {
+                    throw new IllegalStateException("Allocation thiếu batch để ghi inventory movement");
+                }
+                if (allocation.getDeductedQty() == null || allocation.getDeductedQty() <= 0) {
+                    throw new IllegalStateException("Allocation có deducted_qty không hợp lệ để ghi inventory movement");
+                }
+                stockMutationService.appendMovement(
+                        item.getVariant().getId(),
+                        allocation.getBatch().getId(),
+                        -allocation.getDeductedQty(),
+                        "invoice",
+                        sourceId,
+                        note);
+            }
+        }
+    }
+
+    private void restoreStockFromAllocations(SalesInvoiceItem item) {
+        List<SalesInvoiceItemBatchAllocation> allocations = item.getBatchAllocations();
+        if (allocations != null && !allocations.isEmpty()) {
+            Map<Long, Integer> restoreQtyByBatchId = new HashMap<>();
+            for (SalesInvoiceItemBatchAllocation allocation : allocations) {
+                if (allocation.getBatch() == null || allocation.getBatch().getId() == null) {
+                    throw new IllegalStateException("Allocation thiếu batch_id cho invoiceItem=" + item.getId());
+                }
+                if (allocation.getDeductedQty() == null || allocation.getDeductedQty() <= 0) {
+                    throw new IllegalStateException("Allocation có deducted_qty không hợp lệ cho invoiceItem=" + item.getId());
+                }
+                restoreQtyByBatchId.merge(allocation.getBatch().getId(), allocation.getDeductedQty(), Integer::sum);
+            }
+
+            List<ProductBatch> lockedBatches = batchRepo.findAllByIdInForUpdate(new ArrayList<>(restoreQtyByBatchId.keySet()));
+            if (lockedBatches.size() != restoreQtyByBatchId.size()) {
+                throw new IllegalStateException("Không tìm đủ batch để hoàn tồn cho invoiceItem=" + item.getId());
+            }
+
+            for (ProductBatch batch : lockedBatches) {
+                int restoreQty = restoreQtyByBatchId.getOrDefault(batch.getId(), 0);
+                if (restoreQty > 0) {
+                    batch.setRemainingQty(batch.getRemainingQty() + restoreQty);
+                    batchRepo.save(batch);
+                    appendInvoiceCancelMovement(item, batch, restoreQty);
+                    log.debug("[LEDGER-RESTORE] invoiceItem={} batch={} +{} -> remaining={}",
+                            item.getId(), batch.getBatchCode(), restoreQty, batch.getRemainingQty());
+                }
+            }
+            return;
+        }
+
+        // Legacy invoice (before ledger rollout): fallback heuristic restore.
         Long productId = item.getProduct().getId();
         Long variantId = item.getVariant() != null ? item.getVariant().getId() : null;
         int qty = item.getQuantity();
@@ -479,6 +730,29 @@ public class InvoiceService {
         batchRepo.save(target);
         log.debug("[FEFO-RESTORE] batch={} variantId={} +{} → remaining={}",
                 target.getBatchCode(), variantId, qty, target.getRemainingQty());
+    }
+
+    private void appendInvoiceCancelMovement(SalesInvoiceItem item, ProductBatch batch, int restoreQty) {
+        if (item.getVariant() == null || item.getVariant().getId() == null) {
+            throw new IllegalStateException("Invoice item thiếu variant để ghi cancel inventory movement");
+        }
+        SalesInvoice invoice = item.getInvoice();
+        String invoiceTrace = invoice != null && invoice.getId() != null
+                ? "invoice:" + invoice.getId()
+                : "invoice";
+        String sourceId = item.getId() != null
+                ? invoiceTrace + ":item:" + item.getId() + ":cancel"
+                : invoiceTrace + ":cancel";
+        String note = invoice != null && invoice.getInvoiceNo() != null
+                ? "cancel invoiceNo=" + invoice.getInvoiceNo()
+                : "cancel invoice";
+        stockMutationService.appendMovement(
+                item.getVariant().getId(),
+                batch.getId(),
+                restoreQty,
+                "invoice_cancel",
+                sourceId,
+                note);
     }
 }
 

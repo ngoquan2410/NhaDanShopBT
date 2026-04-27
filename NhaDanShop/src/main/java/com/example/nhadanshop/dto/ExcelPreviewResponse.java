@@ -46,6 +46,8 @@ public record ExcelPreviewResponse(
             String sellUnit,
             Integer pieces,
             String note,
+            /** Cột P (optional, format mới): bán hàng / isSellable — mặc định true nếu trống */
+            Boolean isSellable,
             // Trạng thái
             boolean isValid,
             boolean isCombo,

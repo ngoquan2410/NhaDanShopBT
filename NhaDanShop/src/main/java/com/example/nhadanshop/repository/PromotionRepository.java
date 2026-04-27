@@ -24,4 +24,10 @@ public interface PromotionRepository extends JpaRepository<Promotion, Long> {
            "AND p.startDate <= :now AND p.endDate >= :now AND p.type = :type")
     List<Promotion> findCurrentlyActiveByType(@Param("now") LocalDateTime now,
                                               @Param("type") String type);
+
+    @Query(value = "SELECT count(*) > 0 FROM promotions WHERE get_product_id = :productId", nativeQuery = true)
+    boolean existsByGiftTargetProductId(@Param("productId") long productId);
+
+    @Query(value = "SELECT count(*) > 0 FROM promotion_products WHERE product_id = :productId", nativeQuery = true)
+    boolean existsInLinkedProducts(@Param("productId") long productId);
 }

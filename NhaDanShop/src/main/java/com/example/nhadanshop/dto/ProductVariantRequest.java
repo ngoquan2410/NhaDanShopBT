@@ -52,5 +52,17 @@ public record ProductVariantRequest(
 
         String imageUrl,
 
-        @Size(max = 100) String conversionNote
+        @Size(max = 100) String conversionNote,
+
+        /**
+         * Optional. null = do not change active flag on update.
+         * New variants default to active=true in the service.
+         */
+        Boolean active,
+
+        /**
+         * Optional. null on create → true. null on update → leave unchanged.
+         * false = keep for inventory/admin, hidden from POS/storefront sales.
+         */
+        Boolean isSellable
 ) {}

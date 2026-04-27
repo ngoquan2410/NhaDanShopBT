@@ -1,7 +1,9 @@
 package com.example.nhadanshop.repository;
 
 import com.example.nhadanshop.entity.ProductVariant;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -16,12 +18,19 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
     /** Tất cả variants của 1 SP, default lên trước */
     List<ProductVariant> findByProductIdOrderByIsDefaultDescVariantCodeAsc(Long productId);
 
-    /** Tất cả active variants của 1 SP */
-    List<ProductVariant> findByProductIdAndActiveTrue(Long productId);
+    /** Active variants of one product, same ordering as the full list (default first, then code). */
+    List<ProductVariant> findByProductIdAndActiveTrueOrderByIsDefaultDescVariantCodeAsc(Long productId);
+
+    /** Active + sellable (POS/storefront selection). */
+    List<ProductVariant> findByProductIdAndActiveTrueAndIsSellableTrueOrderByIsDefaultDescVariantCodeAsc(Long productId);
 
     /** Lookup variant theo mã — dùng khi scan barcode hoặc import Excel */
     Optional<ProductVariant> findByVariantCode(String variantCode);
     Optional<ProductVariant> findByVariantCodeIgnoreCase(String variantCode);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT v FROM ProductVariant v WHERE v.id = :id")
+    Optional<ProductVariant> findByIdForUpdate(@Param("id") Long id);
 
     /** Default variant của SP — tự động chọn khi không chỉ định variantId */
     Optional<ProductVariant> findByProductIdAndIsDefaultTrue(Long productId);
@@ -56,7 +65,34 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
             """)
     List<ProductVariant> findAllActiveWithProductAndCategory();
 
+    @Query("""
+            SELECT v FROM ProductVariant v
+            JOIN FETCH v.product p
+            LEFT JOIN FETCH p.category
+            WHERE v.active = TRUE
+              AND v.stockQty > 0
+              AND p.active = TRUE
+              AND p.productType = com.example.nhadanshop.entity.Product.ProductType.SINGLE
+            ORDER BY v.id ASC
+            """)
+    List<ProductVariant> findAllActiveInStockWithProductAndCategory();
+
     /** Variants của 1 SP có mã tìm kiếm */
     @Query("SELECT v FROM ProductVariant v WHERE v.product.id = :productId AND LOWER(v.variantCode) LIKE LOWER(CONCAT('%', :q, '%'))")
     List<ProductVariant> searchByProductIdAndCode(@Param("productId") Long productId, @Param("q") String q);
+
+    /**
+     * Conservative "used variant" predicate for archive policy: any batch, transaction line,
+     * pending order line, or inventory movement row referencing this variant.
+     */
+    @Query("""
+            SELECT
+              (EXISTS (SELECT 1 FROM ProductBatch b WHERE b.variant.id = :variantId)
+              OR EXISTS (SELECT 1 FROM SalesInvoiceItem s WHERE s.variant.id = :variantId)
+              OR EXISTS (SELECT 1 FROM InventoryReceiptItem r WHERE r.variant.id = :variantId)
+              OR EXISTS (SELECT 1 FROM StockAdjustmentItem a WHERE a.variant.id = :variantId)
+              OR EXISTS (SELECT 1 FROM PendingOrderItem p WHERE p.variant.id = :variantId)
+              OR EXISTS (SELECT 1 FROM InventoryMovement m WHERE m.variant.id = :variantId))
+            """)
+    boolean isVariantStructurallyUsed(@Param("variantId") Long variantId);
 }

@@ -88,10 +88,30 @@ public class SecurityConfig {
                         .requestMatchers("/api/images/**").hasRole("ADMIN")
                         // Store public
                         .requestMatchers(HttpMethod.GET, "/api/products/**", "/api/categories/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/vouchers/active").permitAll()
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/addresses/provinces",
+                                "/api/addresses/districts",
+                                "/api/addresses/wards",
+                                "/api/address-autocomplete",
+                                "/api/address-place-detail")
+                        .permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/shipping/quote").permitAll()
+                        // Public temporarily for current checkout/pending-payment compatibility.
+                        // A later slice should split this from the fuller admin settings surface.
+                        .requestMatchers(HttpMethod.GET, "/api/store/payment-settings").permitAll()
+                        // Public generation stays for live stored settings; preview overrides are
+                        // rejected for anonymous callers inside VietQrController.
+                        .requestMatchers(HttpMethod.POST, "/api/vietqr/generate").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/webhooks/casso").permitAll()
+                        .requestMatchers(HttpMethod.PUT, "/api/store/payment-settings").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/products/check-availability").authenticated()
                         // Admin
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/reports/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/inventory/**").authenticated()
+                        .requestMatchers("/api/inventory/**").hasRole("ADMIN")
                         // Receipts
                         .requestMatchers(HttpMethod.GET, "/api/receipts/**").authenticated()
                         .requestMatchers("/api/receipts/**").hasRole("ADMIN")
@@ -100,17 +120,26 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/invoices/**").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/invoices/**").hasRole("ADMIN")
                         // Pending orders
-                        .requestMatchers(HttpMethod.POST, "/api/pending-orders").authenticated()
-                        .requestMatchers(HttpMethod.GET, "/api/pending-orders/*").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/pending-orders").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/pending-orders/by-code/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/pending-orders/*").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/pending-orders/*/mark-waiting-confirm").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/pending-orders/*/change-payment-method").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/pending-orders").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/pending-orders/*/confirm").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/pending-orders/*/cancel").hasRole("ADMIN")
+                        .requestMatchers("/api/payment-events/**").hasRole("ADMIN")
                         // Products & categories CRUD
                         .requestMatchers(HttpMethod.POST, "/api/categories/**", "/api/products/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/categories/**", "/api/products/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/categories/**", "/api/products/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/categories/**", "/api/products/**").hasRole("ADMIN")
                         // Batches
                         .requestMatchers(HttpMethod.GET, "/api/batches/**").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/batches/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/batches/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/batches/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/batches/**").hasRole("ADMIN")
                         // Suppliers (Sprint 1 S1-3)
                         .requestMatchers(HttpMethod.GET, "/api/suppliers/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/suppliers/**").hasRole("ADMIN")

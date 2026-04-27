@@ -16,6 +16,9 @@ import java.util.List;
 @Table(name = "inventory_receipts")
 public class InventoryReceipt {
 
+    public static final String STATUS_CONFIRMED = "confirmed";
+    public static final String STATUS_VOIDED = "voided";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -58,6 +61,18 @@ public class InventoryReceipt {
     @JoinColumn(name = "created_by")
     private User createdBy;
 
+    @Column(name = "status", nullable = false, length = 32)
+    private String status = STATUS_CONFIRMED;
+
+    @Column(name = "voided_at")
+    private LocalDateTime voidedAt;
+
+    @Column(name = "voided_by", length = 255)
+    private String voidedBy;
+
+    @Column(name = "void_reason", columnDefinition = "TEXT")
+    private String voidReason;
+
     @OneToMany(mappedBy = "receipt", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<InventoryReceiptItem> items = new ArrayList<>();
 
@@ -68,6 +83,7 @@ public class InventoryReceipt {
         if (createdAt == null) createdAt = now;
         if (updatedAt == null) updatedAt = now;
         if (totalAmount == null) totalAmount = BigDecimal.ZERO;
+        if (status == null) status = STATUS_CONFIRMED;
     }
 
     @PreUpdate

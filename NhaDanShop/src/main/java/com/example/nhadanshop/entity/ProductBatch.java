@@ -29,6 +29,17 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 public class ProductBatch {
 
+    /**
+     * Slice 1 — metadata only. Allowed values must match the DB CHECK constraint
+     * defined in V18__product_batch_status.sql. No FEFO / projection / reporting
+     * predicate consumes this field yet; switching callers happens in later slices.
+     */
+    public static final String STATUS_ACTIVE = "active";
+    public static final String STATUS_DEPLETED = "depleted";
+    public static final String STATUS_VOIDED = "voided";
+    public static final String STATUS_BLOCKED = "blocked";
+    public static final String STATUS_ARCHIVED = "archived";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -80,9 +91,18 @@ public class ProductBatch {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    /**
+     * Slice 1 metadata: lifecycle marker for the batch. Defaults to {@link #STATUS_ACTIVE}
+     * for any newly constructed entity; existing rows are backfilled by V18.
+     * Slice 2 adds sellable-only repository queries; services still use legacy FEFO until a later slice.
+     */
+    @Column(name = "status", nullable = false, length = 32)
+    private String status = STATUS_ACTIVE;
+
     @PrePersist
     void prePersist() {
         if (createdAt == null) createdAt = LocalDateTime.now();
+        if (status == null || status.isBlank()) status = STATUS_ACTIVE;
     }
 
     /** Còn hàng trong lô không? */

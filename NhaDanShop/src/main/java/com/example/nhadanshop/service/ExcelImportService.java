@@ -7,6 +7,7 @@ import com.example.nhadanshop.dto.ProductVariantRequest;
 import com.example.nhadanshop.entity.Category;
 import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.entity.ProductImportUnit;
+import com.example.nhadanshop.util.ImportSellableParser;
 import com.example.nhadanshop.repository.CategoryRepository;
 import com.example.nhadanshop.repository.ProductImportUnitRepository;
 import com.example.nhadanshop.repository.ProductRepository;
@@ -32,12 +33,13 @@ import java.util.*;
  *  Pass 1 (previewProducts): validate toàn bộ, KHÔNG ghi DB → ProductExcelPreviewResponse
  *  Pass 2 (importProducts):  re-validate + ghi DB, chỉ chạy khi Pass 1 sạch
  *
- * Layout cột Excel (14 cột A-N, header row 3, data từ row 4):
+ * Layout cột Excel (A–M bắt buộc theo nghiệp vụ; cột N tùy chọn), header row 3, data từ row 4:
  *   A: Mã SP (optional → auto-gen)   B: Tên SP (*)      C: Danh mục (*)
- *   D: Đơn vị bán lẻ (*)             E: Giá vốn (*)     F: Giá bán (*)
- *   G: Tồn kho ban đầu               H: Hạn dùng (ngày) I: Hoạt động (TRUE/FALSE)
- *   J: ĐV nhập kho                   K: ĐV bán lẻ       L: Số lẻ/ĐV nhập
- *   M: Ghi chú quy đổi               N: Tồn kho tối thiểu (mặc định 5)
+ *   D: Giá vốn (*)                  E: Giá bán (*)     F: Tồn kho ban đầu
+ *   G: Hạn dùng (ngày)              H: Hoạt động      I: ĐV nhập kho
+ *   J: ĐV bán lẻ (*)                K: Số lẻ/ĐV nhập   L: Ghi chú quy đổi
+ *   M: Tồn kho tối thiểu (mặc định 5)
+ *   N: Bán hàng? / isSellable (optional — mặc định true nếu trống; template cũ không cột N vẫn hợp lệ)
  *
  * Validation rules (đồng bộ với ProductService.create() + ProductVariantService.createVariant()):
  *   R1: Tên SP bắt buộc
@@ -65,8 +67,7 @@ public class ExcelImportService {
     @Lazy
     private final ProductVariantService variantService;
 
-    // ── Column indices (0-based) — 13 cột A-M ────────────────────────────────
-    // Bỏ cột D (Don vi) cũ → dùng cột J (ĐV bán lẻ) làm chính
+    // ── Column indices (0-based) — A..M dữ liệu chính; N (optional) = isSellable
     private static final int COL_CODE              = 0;   // A: Mã SP
     private static final int COL_NAME              = 1;   // B: Tên SP (*)
     private static final int COL_CATEGORY          = 2;   // C: Danh mục (*)
@@ -80,6 +81,7 @@ public class ExcelImportService {
     private static final int COL_PIECES_PER_IMPORT = 10;  // K: Số lẻ/ĐV nhập
     private static final int COL_CONVERSION_NOTE   = 11;  // L: Ghi chú quy đổi
     private static final int COL_MIN_STOCK         = 12;  // M: Tồn kho tối thiểu
+    private static final int COL_IS_SELLABLE       = 13;  // N: Bán hàng? (optional)
 
     // ── Internal record ───────────────────────────────────────────────────────
     private record ParsedRow(
@@ -90,6 +92,8 @@ public class ExcelImportService {
             String importUnit, String sellUnit, Integer pieces,
             String conversionNote,
             Integer minStockQty,
+            /** null = mặc định true khi tạo variant */
+            Boolean isSellable,
             String errorMessage, String warningMessage,
             boolean willSkip,
             boolean isNewCategory,
@@ -154,6 +158,7 @@ public class ExcelImportService {
                     pr.costPrice(), pr.sellPrice(),
                     pr.stockQty(), pr.expiryDays(), pr.active(),
                     pr.importUnit(), pr.sellUnit(), pr.pieces(), pr.conversionNote(),
+                    ImportSellableParser.defaultTrue(pr.isSellable()),
                     isValid, willSkip, pr.isNewCategory(), pr.isAutoCode(),
                     pr.resolvedCode(), status, errorMsg, warningMsg
             ));
@@ -286,7 +291,9 @@ public class ExcelImportService {
                         row.expiryDays(),
                         true,                                      // isDefault
                         null,                                      // imageUrl (Task 4: N/A — SP mới)
-                        row.conversionNote()
+                        row.conversionNote(),
+                        true,
+                        row.isSellable()
                 );
                 variantService.createVariant(saved.getId(), varReq);
 
@@ -353,6 +360,8 @@ public class ExcelImportService {
                 Integer pieces        = getCellInt(row, COL_PIECES_PER_IMPORT);
                 String conversionNote = getCellString(row, COL_CONVERSION_NOTE);
                 Integer minStockQty   = getCellInt(row, COL_MIN_STOCK);
+                ImportSellableParser.Result sellableCell = ImportSellableParser.parse(getCellString(row, COL_IS_SELLABLE));
+                Boolean isSellable    = sellableCell.value();
 
                 // Normalize
                 if (rawCode != null)      rawCode      = rawCode.trim().toUpperCase();
@@ -382,6 +391,8 @@ public class ExcelImportService {
                     errorMsg = "Cột G (Hạn dùng) bắt buộc và phải > 0. Nếu SP không có HSD, điền 3650 (10 năm).";
                 } else if (minStockQty != null && minStockQty < 0) {
                     errorMsg = "Cột M (Tồn tối thiểu) phải >= 0";
+                } else if (sellableCell.invalid()) {
+                    errorMsg = "Cột N (Bán hàng?/isSellable) không hợp lệ — dùng true/false, có/không, nguyên liệu...";
                 } else {
                     // R8: Mã tay — unique trong DB
                     if (rawCode != null && !rawCode.isBlank()) {
@@ -450,6 +461,7 @@ public class ExcelImportService {
                         costPrice, sellPrice, stockQty, expiryDays, active,
                         importUnit, sellUnit, pieces, conversionNote,
                         minStockQty,
+                        isSellable,
                         errorMsg, warningMsg, willSkip, isNewCat, isAutoCode, resolvedCode
                 ));
             }

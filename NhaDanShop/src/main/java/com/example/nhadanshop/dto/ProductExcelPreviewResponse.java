@@ -22,7 +22,7 @@ public record ProductExcelPreviewResponse(
 
     public record ProductPreviewRow(
             int lineNumber,
-            // Dữ liệu đọc từ Excel — layout 13 cột A-M (không có cột Đơn vị cũ)
+            // Dữ liệu đọc từ Excel — cột M = tồn tối thiểu; cột N (optional) = Bán hàng?/isSellable
             String code,            // Cột A: Mã SP
             String name,            // Cột B: Tên SP (*)
             String categoryName,    // Cột C: Danh mục (*)
@@ -35,6 +35,8 @@ public record ProductExcelPreviewResponse(
             String sellUnit,        // Cột J: ĐV bán lẻ (*) — bắt buộc
             Integer piecesPerUnit,  // Cột K: Số lẻ/ĐV nhập
             String conversionNote,  // Cột L: Ghi chú
+            /** Cột N (optional): Bán hàng? / isSellable — mặc định true nếu trống (template cũ không cột N vẫn ok) */
+            boolean isSellable,
             // Trạng thái sau validate
             boolean isValid,
             boolean willSkip,

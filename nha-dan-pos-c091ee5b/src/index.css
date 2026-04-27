@@ -1,0 +1,222 @@
+@import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* === NhaDanShop Design System === */
+    --font-sans: 'Be Vietnam Pro', system-ui, -apple-system, sans-serif;
+
+    /* Base surfaces */
+    --background: 220 20% 97%;
+    --foreground: 220 25% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 25% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 25% 10%;
+
+    /* Primary — trustworthy blue */
+    --primary: 215 80% 48%;
+    --primary-foreground: 0 0% 100%;
+    --primary-soft: 215 80% 96%;
+    --primary-hover: 215 80% 42%;
+
+    /* Secondary — cool neutral */
+    --secondary: 220 14% 94%;
+    --secondary-foreground: 220 20% 25%;
+
+    /* Muted */
+    --muted: 220 14% 94%;
+    --muted-foreground: 220 10% 46%;
+
+    /* Accent — warm highlight */
+    --accent: 32 95% 52%;
+    --accent-foreground: 0 0% 100%;
+    --accent-soft: 32 95% 96%;
+
+    /* Destructive */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-soft: 0 72% 96%;
+
+    /* Semantic status colors */
+    --success: 152 60% 40%;
+    --success-foreground: 0 0% 100%;
+    --success-soft: 152 60% 95%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 92% 15%;
+    --warning-soft: 38 92% 95%;
+    --danger: 0 72% 51%;
+    --danger-foreground: 0 0% 100%;
+    --danger-soft: 0 72% 96%;
+    --info: 205 85% 50%;
+    --info-foreground: 0 0% 100%;
+    --info-soft: 205 85% 96%;
+
+    /* Borders & inputs */
+    --border: 220 13% 90%;
+    --input: 220 13% 90%;
+    --ring: 215 80% 48%;
+    --radius: 0.5rem;
+
+    /* Sidebar */
+    --sidebar-background: 220 25% 12%;
+    --sidebar-foreground: 220 10% 85%;
+    --sidebar-primary: 215 80% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 20% 18%;
+    --sidebar-accent-foreground: 220 10% 90%;
+    --sidebar-border: 220 20% 20%;
+    --sidebar-ring: 215 80% 55%;
+    --sidebar-muted: 220 15% 40%;
+
+    /* Storefront — premium retail */
+    --storefront-bg: 30 30% 98%;
+    --storefront-surface: 0 0% 100%;
+    --storefront-hero: 215 80% 48%;
+    --storefront-hero-foreground: 0 0% 100%;
+    --storefront-ink: 220 30% 12%;
+    --storefront-muted: 220 12% 48%;
+    --storefront-soft: 30 40% 96%;
+    --storefront-accent: 14 88% 55%;
+    --storefront-accent-soft: 14 90% 96%;
+    --storefront-gold: 38 85% 52%;
+
+    /* Premium gradients & shadows */
+    --gradient-hero: linear-gradient(135deg, hsl(215 85% 22%) 0%, hsl(215 80% 38%) 55%, hsl(200 85% 48%) 100%);
+    --gradient-hero-overlay: radial-gradient(circle at 80% 20%, hsl(32 95% 60% / 0.35), transparent 55%);
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(220 25% 99%) 100%);
+    --gradient-combo: linear-gradient(135deg, hsl(14 88% 96%) 0%, hsl(38 95% 95%) 100%);
+    --shadow-card: 0 1px 2px hsl(220 30% 12% / 0.04), 0 4px 12px hsl(220 30% 12% / 0.04);
+    --shadow-card-hover: 0 6px 16px hsl(215 60% 25% / 0.10), 0 12px 32px hsl(215 60% 25% / 0.08);
+    --shadow-cta: 0 6px 18px hsl(215 80% 48% / 0.28);
+
+    /* Chart colors */
+    --chart-1: 215 80% 48%;
+    --chart-2: 152 60% 40%;
+    --chart-3: 32 95% 52%;
+    --chart-4: 280 60% 55%;
+    --chart-5: 0 72% 51%;
+  }
+
+  .dark {
+    --background: 220 25% 7%;
+    --foreground: 220 10% 92%;
+    --card: 220 25% 10%;
+    --card-foreground: 220 10% 92%;
+    --popover: 220 25% 10%;
+    --popover-foreground: 220 10% 92%;
+    --primary: 215 80% 55%;
+    --primary-foreground: 0 0% 100%;
+    --primary-soft: 215 40% 15%;
+    --primary-hover: 215 80% 60%;
+    --secondary: 220 20% 16%;
+    --secondary-foreground: 220 10% 85%;
+    --muted: 220 20% 16%;
+    --muted-foreground: 220 10% 55%;
+    --accent: 32 95% 52%;
+    --accent-foreground: 0 0% 100%;
+    --accent-soft: 32 40% 15%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-soft: 0 40% 15%;
+    --success: 152 55% 45%;
+    --success-soft: 152 30% 15%;
+    --warning: 38 85% 55%;
+    --warning-soft: 38 40% 15%;
+    --danger: 0 62% 45%;
+    --danger-soft: 0 40% 15%;
+    --info: 205 80% 55%;
+    --info-soft: 205 40% 15%;
+    --border: 220 20% 18%;
+    --input: 220 20% 18%;
+    --ring: 215 80% 55%;
+    --sidebar-background: 220 25% 7%;
+    --sidebar-foreground: 220 10% 85%;
+    --sidebar-primary: 215 80% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 20% 12%;
+    --sidebar-accent-foreground: 220 10% 90%;
+    --sidebar-border: 220 20% 14%;
+    --sidebar-ring: 215 80% 55%;
+    --sidebar-muted: 220 15% 40%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-sans);
+    @apply tracking-tight;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/30;
+  }
+
+  .admin-dense {
+    @apply text-sm leading-tight;
+  }
+
+  .storefront-relaxed {
+    @apply text-base leading-relaxed;
+  }
+
+  .sf-hero-bg { background-image: var(--gradient-hero); }
+  .sf-hero-overlay { background-image: var(--gradient-hero-overlay); }
+  .sf-card-bg { background-image: var(--gradient-card); }
+  .sf-combo-bg { background-image: var(--gradient-combo); }
+  .sf-shadow { box-shadow: var(--shadow-card); }
+  .sf-shadow-hover { box-shadow: var(--shadow-card-hover); }
+  .sf-shadow-cta { box-shadow: var(--shadow-cta); }
+  .sf-chip {
+    @apply shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-full border bg-card text-foreground/70 hover:text-foreground hover:border-primary/40 transition-all;
+  }
+  .sf-chip-active {
+    @apply bg-foreground text-background border-foreground hover:text-background;
+  }
+  .sf-section-title {
+    @apply text-xl md:text-2xl font-bold tracking-tight;
+  }
+  .sf-eyebrow {
+    @apply text-[11px] uppercase tracking-[0.18em] font-semibold text-muted-foreground;
+  }
+  .input-base {
+    @apply w-full h-9 px-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:bg-muted disabled:text-muted-foreground;
+  }
+}
+
+.print-area,
+.print-root {
+  position: fixed;
+  left: -100vw;
+  top: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

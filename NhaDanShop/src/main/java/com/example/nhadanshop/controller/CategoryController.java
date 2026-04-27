@@ -1,5 +1,6 @@
 package com.example.nhadanshop.controller;
 
+import com.example.nhadanshop.dto.CategoryPatchRequest;
 import com.example.nhadanshop.dto.CategoryRequest;
 import com.example.nhadanshop.dto.CategoryResponse;
 import com.example.nhadanshop.service.CategoryService;
@@ -18,8 +19,9 @@ public class CategoryController {
     private final CategoryService categoryService;
 
     @GetMapping
-    public List<CategoryResponse> all() {
-        return categoryService.findAll();
+    public List<CategoryResponse> all(
+            @RequestParam(value = "includeInactive", required = false, defaultValue = "false") boolean includeInactive) {
+        return categoryService.findAll(includeInactive);
     }
 
     @GetMapping("/{id}")
@@ -38,9 +40,14 @@ public class CategoryController {
         return categoryService.update(id, req);
     }
 
+    @PatchMapping("/{id}")
+    public CategoryResponse patch(@PathVariable Long id, @Valid @RequestBody CategoryPatchRequest req) {
+        return categoryService.patch(id, req);
+    }
+
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long id) {
-        categoryService.softDelete(id);
+        categoryService.deleteOrArchive(id);
     }
 }

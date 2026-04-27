@@ -1,6 +1,7 @@
 package com.example.nhadanshop.service;
 
 import com.example.nhadanshop.dto.ProfitReportResponse;
+import com.example.nhadanshop.entity.SalesInvoice;
 import com.example.nhadanshop.repository.SalesInvoiceRepository;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -25,6 +27,7 @@ import java.util.List;
 public class ReportService {
 
     private final SalesInvoiceRepository invoiceRepo;
+    private final Clock businessClock;
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     /** Thống kê lợi nhuận theo khoảng thời gian tùy chỉnh */
@@ -35,7 +38,7 @@ public class ReportService {
         BigDecimal totalRevenue  = invoiceRepo.sumTotalAmountBetween(fromDt, toDt);
         BigDecimal totalCost     = invoiceRepo.sumCostBetween(fromDt, toDt);
         BigDecimal totalDiscount = invoiceRepo.sumDiscountAmountBetween(fromDt, toDt);
-        long totalInvoices       = invoiceRepo.countByInvoiceDateBetween(fromDt, toDt);
+        long totalInvoices       = invoiceRepo.countByInvoiceDateBetweenAndStatus(fromDt, toDt, SalesInvoice.Status.COMPLETED);
 
         // Doanh thu thực = tổng hóa đơn - tổng chiết khấu KM
         BigDecimal netRevenue = nullSafe(totalRevenue).subtract(nullSafe(totalDiscount));
@@ -50,7 +53,7 @@ public class ReportService {
 
     /** Thống kê tuần hiện tại (Thứ 2 – Chủ nhật) */
     public ProfitReportResponse getCurrentWeekReport() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(businessClock);
         LocalDate monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
         LocalDate sunday = today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY));
         return getProfitReport(monday, sunday);
@@ -58,7 +61,7 @@ public class ReportService {
 
     /** Thống kê tháng hiện tại */
     public ProfitReportResponse getCurrentMonthReport() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(businessClock);
         LocalDate firstDay = today.with(TemporalAdjusters.firstDayOfMonth());
         LocalDate lastDay = today.with(TemporalAdjusters.lastDayOfMonth());
         return getProfitReport(firstDay, lastDay);

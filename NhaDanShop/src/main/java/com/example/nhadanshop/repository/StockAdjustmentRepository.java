@@ -1,11 +1,15 @@
 package com.example.nhadanshop.repository;
 
 import com.example.nhadanshop.entity.StockAdjustment;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+
+import java.util.Optional;
 
 public interface StockAdjustmentRepository extends JpaRepository<StockAdjustment, Long> {
 
@@ -15,4 +19,8 @@ public interface StockAdjustmentRepository extends JpaRepository<StockAdjustment
            "FROM StockAdjustment a WHERE a.adjNo LIKE :pattern")
     Integer findMaxSeqForPrefix(@Param("prefix") String prefix,
                                 @Param("pattern") String pattern);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT a FROM StockAdjustment a WHERE a.id = :id")
+    Optional<StockAdjustment> findByIdForUpdate(@Param("id") Long id);
 }

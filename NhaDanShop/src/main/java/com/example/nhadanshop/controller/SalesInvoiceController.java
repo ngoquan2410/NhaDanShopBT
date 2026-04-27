@@ -2,6 +2,8 @@ package com.example.nhadanshop.controller;
 
 import com.example.nhadanshop.dto.SalesInvoiceRequest;
 import com.example.nhadanshop.dto.SalesInvoiceResponse;
+import com.example.nhadanshop.service.IdempotencyScopes;
+import com.example.nhadanshop.service.IdempotencyService;
 import com.example.nhadanshop.service.InvoiceService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +23,7 @@ import java.time.LocalTime;
 public class SalesInvoiceController {
 
     private final InvoiceService invoiceService;
+    private final IdempotencyService idempotencyService;
 
     /**
      * Lấy danh sách hóa đơn, hỗ trợ lọc theo ngày hoặc theo KH.
@@ -51,8 +54,14 @@ public class SalesInvoiceController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public SalesInvoiceResponse create(@Valid @RequestBody SalesInvoiceRequest req) {
-        return invoiceService.createInvoice(req);
+    public SalesInvoiceResponse create(
+            @Valid @RequestBody SalesInvoiceRequest req,
+            @RequestHeader(value = IdempotencyScopes.HEADER_NAME, required = false) String idempotencyKey) {
+        return idempotencyService.execute(
+                IdempotencyScopes.INVOICE_CREATE,
+                idempotencyKey,
+                SalesInvoiceResponse.class,
+                () -> invoiceService.createInvoice(req));
     }
 
     /**
@@ -63,19 +72,29 @@ public class SalesInvoiceController {
     @PatchMapping("/{id}/cancel")
     public SalesInvoiceResponse cancel(
             @PathVariable Long id,
-            @RequestBody(required = false) @Valid com.example.nhadanshop.dto.CancelInvoiceRequest req) {
+            @RequestBody(required = false) @Valid com.example.nhadanshop.dto.CancelInvoiceRequest req,
+            @RequestHeader(value = IdempotencyScopes.HEADER_NAME, required = false) String idempotencyKey) {
         String actor = org.springframework.security.core.context.SecurityContextHolder
                 .getContext().getAuthentication() != null
                 ? org.springframework.security.core.context.SecurityContextHolder
                     .getContext().getAuthentication().getName()
                 : "unknown";
         String reason = req != null ? req.reason() : null;
-        return invoiceService.cancelInvoice(id, reason, actor);
+        return idempotencyService.execute(
+                IdempotencyScopes.invoiceCancel(id),
+                idempotencyKey,
+                SalesInvoiceResponse.class,
+                () -> invoiceService.cancelInvoice(id, reason, actor));
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable Long id) {
-        invoiceService.deleteInvoice(id);
+    public void delete(
+            @PathVariable Long id,
+            @RequestHeader(value = IdempotencyScopes.HEADER_NAME, required = false) String idempotencyKey) {
+        idempotencyService.executeVoid(
+                IdempotencyScopes.invoiceDelete(id),
+                idempotencyKey,
+                () -> invoiceService.deleteInvoice(id));
     }
 }

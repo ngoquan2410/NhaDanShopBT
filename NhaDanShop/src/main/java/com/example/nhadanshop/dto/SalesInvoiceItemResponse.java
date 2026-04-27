@@ -1,6 +1,7 @@
 package com.example.nhadanshop.dto;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 public record SalesInvoiceItemResponse(
         Long id,
@@ -23,5 +24,7 @@ public record SalesInvoiceItemResponse(
         Long comboSourceId,
         String comboSourceCode,
         String comboSourceName,
-        BigDecimal comboUnitPrice  // giá bán của combo tại thời điểm giao dịch
+        BigDecimal comboUnitPrice,  // giá bán của combo tại thời điểm giao dịch
+        /** FEFO batch allocations; empty when none or not loaded. */
+        List<SalesInvoiceItemAllocationResponse> allocations
 ) {}

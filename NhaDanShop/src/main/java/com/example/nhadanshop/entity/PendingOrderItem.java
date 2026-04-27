@@ -32,10 +32,22 @@ public class PendingOrderItem {
     @JoinColumn(name = "variant_id")
     private ProductVariant variant;
 
+    @Column(name = "line_id", length = 100)
+    private String lineId;
+
+    @Column(name = "product_name_snapshot", length = 255)
+    private String productNameSnapshot;
+
+    @Column(name = "variant_name_snapshot", length = 255)
+    private String variantNameSnapshot;
+
     @Column(nullable = false)
     private Integer quantity;
 
     /** Giá bán tại thời điểm đặt hàng */
     @Column(name = "unit_price", nullable = false, precision = 18, scale = 2)
     private BigDecimal unitPrice;
+
+    @Column(name = "line_subtotal", nullable = false, precision = 18, scale = 2)
+    private BigDecimal lineSubtotal;
 }

@@ -16,6 +16,7 @@ public record StockAdjustmentRequest(
     public record ItemRequest(
             @NotNull Long variantId,
             @NotNull @Min(0) Integer actualQty, // số lượng thực tế đếm được
+            Long sourceBatchId,
             @Size(max = 200) String note
     ) {}
 }

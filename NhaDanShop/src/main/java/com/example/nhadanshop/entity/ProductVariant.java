@@ -118,6 +118,13 @@ public class ProductVariant {
     @Column(name = "is_default", nullable = false)
     private Boolean isDefault = false;
 
+    /**
+     * FALSE = not offered on POS/online; still may receive stock / be used in admin.
+     * TRUE = can sell on customer-facing paths. Do not conflate with {@link #active} (archive).
+     */
+    @Column(name = "is_sellable", nullable = false)
+    private Boolean isSellable = true;
+
     @Column(name = "image_url", length = 500)
     private String imageUrl;
 

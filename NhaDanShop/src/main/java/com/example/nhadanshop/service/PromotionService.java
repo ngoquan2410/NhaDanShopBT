@@ -7,7 +7,9 @@ import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.entity.Promotion;
 import com.example.nhadanshop.repository.CategoryRepository;
 import com.example.nhadanshop.repository.ProductRepository;
+import com.example.nhadanshop.repository.PendingOrderRepository;
 import com.example.nhadanshop.repository.PromotionRepository;
+import com.example.nhadanshop.repository.SalesInvoiceRepository;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +31,8 @@ public class PromotionService {
     private final PromotionRepository promotionRepo;
     private final CategoryRepository categoryRepo;
     private final ProductRepository productRepo;
+    private final SalesInvoiceRepository salesInvoiceRepository;
+    private final PendingOrderRepository pendingOrderRepository;
 
     // ─────────────────── CRUD ────────────────────────────────────────────────
 
@@ -60,9 +64,26 @@ public class PromotionService {
     }
 
     public void delete(Long id) {
-        if (!promotionRepo.existsById(id))
+        if (!promotionRepo.existsById(id)) {
             throw new EntityNotFoundException("Không tìm thấy khuyến mãi ID: " + id);
+        }
+        if (isPromotionInUse(id)) {
+            Promotion p = promotionRepo.findById(id)
+                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy khuyến mãi ID: " + id));
+            p.setActive(false);
+            promotionRepo.save(p);
+            return;
+        }
         promotionRepo.deleteById(id);
+    }
+
+    /**
+     * Conservative: any FK, pending snapshot, or JSON snapshot (promotion or gift line) → treated as in use.
+     */
+    private boolean isPromotionInUse(long id) {
+        return salesInvoiceRepository.countByPromotionId(id) > 0
+                || salesInvoiceRepository.existsReferenceToPromotionInInvoiceJsonSnapshots(id)
+                || pendingOrderRepository.existsReferenceToPromotionInPendingSnapshots(id);
     }
 
     /** Bật / tắt trạng thái active */

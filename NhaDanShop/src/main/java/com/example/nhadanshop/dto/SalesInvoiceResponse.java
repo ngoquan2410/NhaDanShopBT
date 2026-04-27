@@ -10,6 +10,9 @@ public record SalesInvoiceResponse(
         LocalDateTime invoiceDate,
         String customerName,
         Long customerId,
+        String customerPhone,
+        ShippingAddressDto shippingAddress,
+        String paymentMethod,
         String note,
         BigDecimal totalAmount,
         BigDecimal discountAmount,
@@ -24,7 +27,13 @@ public record SalesInvoiceResponse(
         String status,          // "COMPLETED" | "CANCELLED"
         LocalDateTime cancelledAt,
         String cancelledBy,
-        String cancelReason
+        String cancelReason,
+        String sourceType,
+        String pendingOrderId,
+        List<GiftLineSnapshotDto> giftLinesSnapshot,
+        PromotionSnapshotDto promotionSnapshot,
+        VoucherSnapshotDto voucherSnapshot,
+        ShippingQuoteSnapshotDto shippingQuoteSnapshot,
+        PricingBreakdownSnapshotDto pricingBreakdownSnapshot,
+        BigDecimal vatPercent
 ) {}
-
-

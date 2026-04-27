@@ -14,7 +14,12 @@ public record StockAdjustmentResponse(
         String confirmedBy,
         LocalDateTime confirmedAt,
         List<ItemResponse> items,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        LocalDateTime reversedAt,
+        String reversedBy,
+        String reversalReason,
+        Long reversalAdjustmentId,
+        Long reversesAdjustmentId
 ) {
     public record ItemResponse(
             Long id,
@@ -27,6 +32,7 @@ public record StockAdjustmentResponse(
             Integer systemQty,
             Integer actualQty,
             Integer diffQty,
+            Long sourceBatchId,
             String note
     ) {}
 }

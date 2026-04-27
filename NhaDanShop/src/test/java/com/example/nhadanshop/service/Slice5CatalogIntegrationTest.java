@@ -1,0 +1,151 @@
+package com.example.nhadanshop.service;
+
+import com.example.nhadanshop.entity.Category;
+import com.example.nhadanshop.entity.Product;
+import com.example.nhadanshop.entity.ProductBatch;
+import com.example.nhadanshop.entity.ProductVariant;
+import com.example.nhadanshop.repository.CategoryRepository;
+import com.example.nhadanshop.repository.ProductBatchRepository;
+import com.example.nhadanshop.repository.ProductRepository;
+import com.example.nhadanshop.repository.ProductVariantRepository;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.TestPropertySource;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Slice 5: isSellable sales guards, safe product delete, category archive when in use.
+ */
+@DataJpaTest
+@TestPropertySource(properties = {
+        "spring.flyway.enabled=false",
+        "spring.jpa.hibernate.ddl-auto=create-drop"
+})
+@Import({ProductVariantService.class, ProductService.class, CategoryService.class})
+class Slice5CatalogIntegrationTest {
+
+    @Autowired
+    private ProductVariantService productVariantService;
+    @Autowired
+    private ProductService productService;
+    @Autowired
+    private CategoryService categoryService;
+    @Autowired
+    private CategoryRepository categoryRepository;
+    @Autowired
+    private ProductRepository productRepository;
+    @Autowired
+    private ProductVariantRepository variantRepository;
+    @Autowired
+    private ProductBatchRepository batchRepository;
+    @Test
+    void sellableFalse_blocksSalesResolve_true() {
+        ProductVariant v = newVariant("SL5-A", true, false);
+        assertThrows(
+                IllegalStateException.class,
+                () -> productVariantService.resolveVariant(v.getId(), v.getProduct().getId(), true));
+        assertNotNull(
+                productVariantService.resolveVariant(v.getId(), v.getProduct().getId(), false));
+    }
+
+    @Test
+    void productHardDeleteWhenUnused() {
+        Product p = newProduct("SL5-NEW");
+        long id = p.getId();
+        productService.deleteOrArchive(id);
+        assertTrue(productRepository.findById(id).isEmpty());
+    }
+
+    @Test
+    void productArchivesWhenStructurallyUsed() {
+        Product p = newProduct("SL5-USED");
+        ProductVariant v = newVariant("SL5-B", p, true, true);
+        ProductBatch b = new ProductBatch();
+        b.setProduct(p);
+        b.setVariant(v);
+        b.setBatchCode("B-SL5-1");
+        b.setExpiryDate(LocalDate.now().plusDays(10));
+        b.setImportQty(1);
+        b.setRemainingQty(1);
+        b.setCostPrice(BigDecimal.ONE);
+        batchRepository.save(b);
+        long id = p.getId();
+        productService.deleteOrArchive(id);
+        assertTrue(productRepository.findById(id).orElseThrow().getActive() == false);
+    }
+
+    @Test
+    void categoryArchivesWhenProductExists() {
+        Category c = new Category();
+        c.setName("CAT-SL5-1");
+        c.setDescription("d");
+        c.setActive(true);
+        c = categoryRepository.save(c);
+        Product p = new Product();
+        p.setCode("CP-SL5");
+        p.setName("C Product");
+        p.setCategory(c);
+        p.setActive(true);
+        p.setProductType(Product.ProductType.SINGLE);
+        productRepository.save(p);
+        categoryService.deleteOrArchive(c.getId());
+        assertTrue(categoryRepository.findById(c.getId()).orElseThrow().getActive() == false);
+    }
+
+    @Test
+    void categoryHardDeleteWhenEmptyAndNoPromotion() {
+        Category c = new Category();
+        c.setName("CAT-SL5-EMPTY");
+        c.setDescription("d");
+        c.setActive(true);
+        c = categoryRepository.save(c);
+        long id = c.getId();
+        categoryService.deleteOrArchive(id);
+        assertFalse(categoryRepository.findById(id).isPresent());
+    }
+
+    private Product newProduct(String code) {
+        Category cat = new Category();
+        cat.setName("CAT-" + code);
+        cat.setDescription("t");
+        cat.setActive(true);
+        cat = categoryRepository.save(cat);
+        Product p = new Product();
+        p.setCode(code);
+        p.setName("N " + code);
+        p.setCategory(cat);
+        p.setActive(true);
+        p.setProductType(Product.ProductType.SINGLE);
+        return productRepository.save(p);
+    }
+
+    private ProductVariant newVariant(String code, boolean active, boolean sellable) {
+        return newVariant(code, newProduct("P-" + code), active, sellable);
+    }
+
+    private ProductVariant newVariant(String code, Product p, boolean active, boolean sellable) {
+        ProductVariant v = new ProductVariant();
+        v.setProduct(p);
+        v.setVariantCode(code);
+        v.setVariantName("V" + code);
+        v.setSellUnit("cai");
+        v.setPiecesPerUnit(1);
+        v.setSellPrice(BigDecimal.TEN);
+        v.setCostPrice(BigDecimal.ONE);
+        v.setStockQty(0);
+        v.setMinStockQty(0);
+        v.setActive(active);
+        v.setIsDefault(true);
+        v.setIsSellable(sellable);
+        return variantRepository.save(v);
+    }
+}

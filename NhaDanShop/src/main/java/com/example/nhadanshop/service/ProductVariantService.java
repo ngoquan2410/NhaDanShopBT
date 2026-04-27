@@ -1,10 +1,10 @@
 package com.example.nhadanshop.service;
 
+import com.example.nhadanshop.dto.ProductVariantPatchRequest;
 import com.example.nhadanshop.dto.ProductVariantRequest;
 import com.example.nhadanshop.dto.ProductVariantResponse;
 import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.entity.ProductVariant;
-import com.example.nhadanshop.repository.ProductBatchRepository;
 import com.example.nhadanshop.repository.ProductRepository;
 import com.example.nhadanshop.repository.ProductVariantRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -25,15 +25,31 @@ public class ProductVariantService {
 
     private final ProductVariantRepository variantRepo;
     private final ProductRepository productRepo;
-    private final ProductBatchRepository batchRepo;
 
     // ── Query ─────────────────────────────────────────────────────────────────
 
-    public List<ProductVariantResponse> getVariantsByProduct(Long productId) {
-        if (!productRepo.existsById(productId))
+    /**
+     * @param activeOnly if true, return only {@code is_active = true} (new sale / selection).
+     *                    If false (default), return all variants so admin can see archived rows and {@code active} on each.
+     */
+    public List<ProductVariantResponse> getVariantsByProduct(
+            long productId,
+            boolean activeOnly,
+            boolean forSaleOnly) {
+        if (!productRepo.existsById(productId)) {
             throw new EntityNotFoundException("Không tìm thấy SP ID: " + productId);
-        return variantRepo.findByProductIdOrderByIsDefaultDescVariantCodeAsc(productId)
-                .stream().map(DtoMapper::toResponse).toList();
+        }
+        if (forSaleOnly) {
+            return variantRepo
+                    .findByProductIdAndActiveTrueAndIsSellableTrueOrderByIsDefaultDescVariantCodeAsc(productId)
+                    .stream()
+                    .map(DtoMapper::toResponse)
+                    .toList();
+        }
+        var list = activeOnly
+                ? variantRepo.findByProductIdAndActiveTrueOrderByIsDefaultDescVariantCodeAsc(productId)
+                : variantRepo.findByProductIdOrderByIsDefaultDescVariantCodeAsc(productId);
+        return list.stream().map(DtoMapper::toResponse).toList();
     }
 
     public ProductVariantResponse getVariantById(Long variantId) {
@@ -45,13 +61,30 @@ public class ProductVariantService {
      * Tìm theo variant_code trước, nếu không có thì fallback tìm theo product.code (default variant).
      */
     public ProductVariantResponse getVariantByCode(String code) {
-        // Ưu tiên: tìm theo variant_code
+        // POS / bán hàng: chỉ mã còn bán, sellable, SP active
         var byVariantCode = variantRepo.findByVariantCodeIgnoreCase(code.trim());
-        if (byVariantCode.isPresent()) return DtoMapper.toResponse(byVariantCode.get());
+        if (byVariantCode.isPresent()) {
+            ProductVariant v = byVariantCode.get();
+            if (!Boolean.TRUE.equals(v.getProduct().getActive())) {
+                throw new EntityNotFoundException(
+                        "Không tìm thấy sản phẩm/biến thể với mã: '" + code + "' (sản phẩm ngừng kinh doanh).");
+            }
+            if (!Boolean.TRUE.equals(v.getActive())) {
+                throw new EntityNotFoundException(
+                        "Không tìm thấy sản phẩm/biến thể với mã: '" + code + "' (đã ngừng kinh doanh).");
+            }
+            if (!Boolean.TRUE.equals(v.getIsSellable())) {
+                throw new EntityNotFoundException(
+                        "Không tìm thấy sản phẩm/biến thể bán lẻ với mã: '" + code + "' (chỉ dùng kho/NG).");
+            }
+            return DtoMapper.toResponse(v);
+        }
 
         // Fallback: tìm theo product.code → trả về default variant
         return productRepo.findByCode(code.trim().toUpperCase())
+                .filter(p -> Boolean.TRUE.equals(p.getActive()))
                 .flatMap(p -> variantRepo.findByProductIdAndIsDefaultTrue(p.getId()))
+                .filter(v -> Boolean.TRUE.equals(v.getActive()) && Boolean.TRUE.equals(v.getIsSellable()))
                 .map(DtoMapper::toResponse)
                 .orElseThrow(() -> new EntityNotFoundException(
                     "Không tìm thấy sản phẩm/biến thể với mã: '" + code + "'"));
@@ -122,37 +155,91 @@ public class ProductVariantService {
         // sellPrice và costPrice đều optional — null = không thay đổi; 0 = chấp nhận (điền sau)
         if (req.sellPrice() != null) v.setSellPrice(req.sellPrice());
         if (req.costPrice() != null) v.setCostPrice(req.costPrice());
-        if (req.stockQty() != null) v.setStockQty(req.stockQty());
+        if (req.stockQty() != null) {
+            throw new IllegalArgumentException(
+                    "Không cho phép cập nhật trực tiếp stockQty. Vui lòng dùng luồng nhập/xuất/điều chỉnh tồn kho.");
+        }
         if (req.minStockQty() != null) v.setMinStockQty(req.minStockQty());
         if (req.expiryDays() != null) v.setExpiryDays(req.expiryDays());
         if (req.isDefault() != null) v.setIsDefault(req.isDefault());
         if (req.imageUrl() != null) v.setImageUrl(req.imageUrl());
         if (req.conversionNote() != null) v.setConversionNote(req.conversionNote());
+        if (req.active() != null) v.setActive(req.active());
+        if (req.isSellable() != null) v.setIsSellable(req.isSellable());
         v.setUpdatedAt(LocalDateTime.now());
 
         return DtoMapper.toResponse(variantRepo.save(v));
     }
 
-    // ── Delete ────────────────────────────────────────────────────────────────
-
     @Transactional
-    public void deleteVariant(Long variantId) {
+    public ProductVariantResponse patchVariant(long productId, long variantId, ProductVariantPatchRequest p) {
         ProductVariant v = findOrThrow(variantId);
+        if (!v.getProduct().getId().equals(productId)) {
+            throw new IllegalArgumentException("Variant " + variantId + " không thuộc sản phẩm " + productId);
+        }
+        if (p.variantCode() != null && !p.variantCode().equalsIgnoreCase(v.getVariantCode())
+                && variantRepo.existsByVariantCode(p.variantCode())) {
+            throw new IllegalArgumentException("Mã variant '" + p.variantCode() + "' đã tồn tại.");
+        }
+        if (p.variantCode() != null && !p.variantCode().equalsIgnoreCase(v.getVariantCode())) {
+            validateVariantCodeNamespace(p.variantCode(), productId);
+        }
+        if (Boolean.TRUE.equals(p.isDefault()) && !Boolean.TRUE.equals(v.getIsDefault())) {
+            variantRepo.clearDefaultByProductId(v.getProduct().getId());
+        }
+        if (p.variantCode() != null) v.setVariantCode(p.variantCode());
+        if (p.variantName() != null) v.setVariantName(p.variantName());
+        if (p.sellUnit() != null) v.setSellUnit(p.sellUnit());
+        if (p.importUnit() != null) v.setImportUnit(p.importUnit().isEmpty() ? null : p.importUnit());
+        if (p.piecesPerUnit() != null) v.setPiecesPerUnit(p.piecesPerUnit());
+        if (p.sellPrice() != null) v.setSellPrice(p.sellPrice());
+        if (p.costPrice() != null) v.setCostPrice(p.costPrice());
+        if (p.minStockQty() != null) v.setMinStockQty(p.minStockQty());
+        if (p.expiryDays() != null) v.setExpiryDays(p.expiryDays());
+        if (p.isDefault() != null) v.setIsDefault(p.isDefault());
+        if (p.imageUrl() != null) v.setImageUrl(p.imageUrl().isEmpty() ? null : p.imageUrl());
+        if (p.conversionNote() != null) v.setConversionNote(p.conversionNote().isEmpty() ? null : p.conversionNote());
+        if (p.active() != null) v.setActive(p.active());
+        if (p.isSellable() != null) v.setIsSellable(p.isSellable());
+        v.setUpdatedAt(LocalDateTime.now());
+        return DtoMapper.toResponse(variantRepo.save(v));
+    }
+
+    // ── Delete / archive (Phase 2 soft policy) ────────────────────────────────
+
+    /**
+     * If the variant is referenced (batches, movements, or any transaction line) or
+     * {@code is_active} should be used instead of physical delete, sets {@code active=false}
+     * and returns the DTO. Does not change stock, batches, or movements.
+     * <p>
+     * If the variant is unused and safe, physically deletes the row and returns {@code null}
+     * (HTTP 204 from controller).
+     */
+    @Transactional
+    public ProductVariantResponse deleteVariantOrArchive(long productId, long variantId) {
+        ProductVariant v = findOrThrow(variantId);
+        if (!v.getProduct().getId().equals(productId)) {
+            throw new IllegalArgumentException("Variant " + variantId + " không thuộc sản phẩm " + productId);
+        }
 
         if (Boolean.TRUE.equals(v.getIsDefault())) {
             long count = variantRepo.findByProductIdOrderByIsDefaultDescVariantCodeAsc(
                     v.getProduct().getId()).size();
-            if (count == 1)
+            if (count == 1) {
                 throw new IllegalStateException(
                     "Không thể xóa variant mặc định duy nhất của SP '" + v.getProduct().getCode() + "'.");
+            }
         }
 
-        if (batchRepo.existsByVariantId(variantId))
-            throw new IllegalStateException(
-                "Variant '" + v.getVariantCode() + "' đã có lô hàng tồn kho. " +
-                "Hãy chuyển lô sang variant khác hoặc đặt is_active=false thay vì xóa.");
+        boolean used = variantRepo.isVariantStructurallyUsed(variantId);
+        if (used) {
+            v.setActive(false);
+            v.setUpdatedAt(LocalDateTime.now());
+            return DtoMapper.toResponse(variantRepo.save(v));
+        }
 
         variantRepo.delete(v);
+        return null;
     }
 
     // ── Helper: Resolve variant từ variantId hoặc productId ──────────────────
@@ -166,22 +253,76 @@ public class ProductVariantService {
      * Dùng bởi InventoryReceiptService, InvoiceService, PendingOrderService.
      */
     public ProductVariant resolveVariant(Long variantId, Long productId) {
+        return resolveVariant(variantId, productId, false);
+    }
+
+    /**
+     * @param requireSellableForSales when true (bán hàng / POS / pending-order bán), enforce
+     *                                product active, variant active, variant sellable
+     */
+    public ProductVariant resolveVariant(Long variantId, Long productId, boolean requireSellableForSales) {
         if (variantId != null) {
             ProductVariant v = variantRepo.findById(variantId)
                     .orElseThrow(() -> new EntityNotFoundException(
                             "Không tìm thấy variant ID: " + variantId));
-            // Validate variant thuộc đúng product
             if (!v.getProduct().getId().equals(productId)) {
                 throw new IllegalArgumentException(
                     "Variant '" + v.getVariantCode() + "' không thuộc SP ID: " + productId);
             }
+            if (requireSellableForSales) {
+                assertReadyForCustomerSale(v);
+            } else {
+                if (!Boolean.TRUE.equals(v.getActive())) {
+                    throw new IllegalStateException(
+                        "Variant '" + v.getVariantCode() + "' đã ngừng kinh doanh; không dùng cho giao dịch mới.");
+                }
+            }
             return v;
         }
-        // Fallback: default variant
-        return variantRepo.findByProductIdAndIsDefaultTrue(productId)
+        ProductVariant def = variantRepo.findByProductIdAndIsDefaultTrue(productId)
                 .orElseThrow(() -> new EntityNotFoundException(
                     "SP ID " + productId + " chưa có default variant. " +
                     "Hãy tạo variant và set is_default=true."));
+        if (requireSellableForSales) {
+            assertReadyForCustomerSale(def);
+        } else {
+            if (!Boolean.TRUE.equals(def.getActive())) {
+                throw new IllegalStateException(
+                    "Default variant của SP ID " + productId + " đã ngừng kinh doanh; không dùng cho giao dịch mới.");
+            }
+        }
+        return def;
+    }
+
+    private void assertReadyForCustomerSale(ProductVariant v) {
+        Product p = v.getProduct();
+        if (!Boolean.TRUE.equals(p.getActive())) {
+            throw new IllegalStateException(
+                    "Sản phẩm '" + p.getName() + "' đã ngừng kinh doanh; không bán thêm trên kênh bán hàng.");
+        }
+        if (!Boolean.TRUE.equals(v.getActive())) {
+            throw new IllegalStateException(
+                    "Variant '" + v.getVariantCode() + "' đã ngừng kinh doanh; không bán thêm trên kênh bán hàng.");
+        }
+        if (!Boolean.TRUE.equals(v.getIsSellable())) {
+            throw new IllegalStateException(
+                    "Variant '" + v.getVariantCode() + "' không bán lẻ (isSellable=false); dùng cho kho/NG, không bán tại quầy/online.");
+        }
+    }
+
+    @Transactional
+    public ProductVariantResponse setDefaultVariant(long productId, long variantId) {
+        ProductVariant v = findOrThrow(variantId);
+        if (!v.getProduct().getId().equals(productId)) {
+            throw new IllegalArgumentException("Variant " + variantId + " không thuộc sản phẩm " + productId);
+        }
+        if (!Boolean.TRUE.equals(v.getActive())) {
+            throw new IllegalStateException("Không thể đặt variant đã lưu kho (ngừng KD) làm mặc định.");
+        }
+        variantRepo.clearDefaultByProductId(productId);
+        v.setIsDefault(true);
+        v.setUpdatedAt(LocalDateTime.now());
+        return DtoMapper.toResponse(variantRepo.save(v));
     }
 
     /**
@@ -246,6 +387,7 @@ public class ProductVariantService {
         v.setStockQty(0);
         v.setExpiryDays(null);
         v.setActive(product.getActive());
+        v.setIsSellable(true);
         v.setIsDefault(true);
         v.setImageUrl(product.getImageUrl());
         v.setConversionNote(null);
@@ -288,12 +430,18 @@ public class ProductVariantService {
         // Giá bán và giá vốn đều optional — null → 0 (sẽ cập nhật sau khi nhập kho)
         v.setSellPrice(req.sellPrice() != null ? req.sellPrice() : BigDecimal.ZERO);
         v.setCostPrice(req.costPrice() != null ? req.costPrice() : BigDecimal.ZERO);
-        v.setStockQty(req.stockQty() != null ? req.stockQty() : 0);
+        if (req.stockQty() != null && req.stockQty() != 0) {
+            throw new IllegalArgumentException(
+                    "Không cho phép set stockQty khi tạo variant. stockQty được tính từ batch.");
+        }
+        v.setStockQty(0);
         v.setMinStockQty(req.minStockQty() != null ? req.minStockQty() : 5);
         v.setExpiryDays(req.expiryDays());
         v.setIsDefault(Boolean.TRUE.equals(req.isDefault()));
         v.setImageUrl(req.imageUrl());
         v.setConversionNote(req.conversionNote());
+        v.setActive(req.active() != null ? req.active() : true);
+        v.setIsSellable(req.isSellable() == null || Boolean.TRUE.equals(req.isSellable()));
         return v;
     }
 }

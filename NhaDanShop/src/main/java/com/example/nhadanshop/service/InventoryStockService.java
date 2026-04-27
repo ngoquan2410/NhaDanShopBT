@@ -123,10 +123,12 @@ public class InventoryStockService {
             int totalSold     = soldInPeriod.getOrDefault(vid, 0);
             int closingStock  = openingStock + totalReceived - totalSold;
 
+            requireNonNegativeStockReportFigures(vid, v.getVariantCode(), openingStock, closingStock);
+
             // closingValue = closingStock * avgCostPrice (fallback về variant.costPrice nếu chưa có batch)
             BigDecimal avgCost = avgCostByVariant.getOrDefault(vid, v.getCostPrice());
             if (avgCost == null) avgCost = BigDecimal.ZERO;
-            BigDecimal closingValue = avgCost.multiply(BigDecimal.valueOf(Math.max(0, closingStock)));
+            BigDecimal closingValue = avgCost.multiply(BigDecimal.valueOf(closingStock));
 
             String sellUnit = v.getSellUnit() != null ? v.getSellUnit() : "cai";
 
@@ -135,15 +137,28 @@ public class InventoryStockService {
                     p.getCategory() != null ? p.getCategory().getName() : "",
                     sellUnit,
                     vid, v.getVariantCode(), v.getVariantName(),
-                    Math.max(0, openingStock),
+                    openingStock,
                     totalReceived, totalSold,
-                    Math.max(0, closingStock),
+                    closingStock,
                     closingValue,
                     v.getMinStockQty() != null ? v.getMinStockQty() : 5,
                     from, to
             ));
         }
         return new InventoryStockReport(from, to, rows);
+    }
+
+    /**
+     * CRIT-007: không kẹp âm về 0 — tồn đầu/cuối kỳ âm là dấu hiệu lệch dữ liệu hoặc lịch sử không khớp tồn hiện tại.
+     */
+    private static void requireNonNegativeStockReportFigures(
+            long variantId, String variantCode, int openingStock, int closingStock) {
+        if (openingStock < 0 || closingStock < 0) {
+            throw new IllegalStateException(String.format(
+                    "Báo cáo tồn kho: tồn đầu kỳ hoặc cuối kỳ âm — kiểm tra đồng bộ nhập/bán/tồn hiện tại. "
+                            + "variantId=%d variantCode=%s openingStock=%d closingStock=%d",
+                    variantId, variantCode != null ? variantCode : "?", openingStock, closingStock));
+        }
     }
 
     /**

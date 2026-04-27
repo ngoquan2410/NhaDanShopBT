@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.*;
@@ -34,6 +35,7 @@ public class RevenueService {
 
     private final SalesInvoiceRepository invoiceRepo;
     private final ProductVariantRepository variantRepo; // Sprint 2 — slow products
+    private final Clock businessClock;
 
     private static final DateTimeFormatter DAY_FMT   = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("MM/yyyy");
@@ -57,6 +59,8 @@ public class RevenueService {
             LocalDate d;
             if (r[0] instanceof java.sql.Date sqlDate) {
                 d = sqlDate.toLocalDate();
+            } else if (r[0] instanceof LocalDate ld) {
+                d = ld;
             } else {
                 d = LocalDate.parse(r[0].toString().substring(0, 10));
             }
@@ -570,15 +574,11 @@ public class RevenueService {
      * @param days số ngày không có giao dịch (VD: 30 = không bán trong 30 ngày)
      */
     public List<SlowProductDto> getSlowProducts(int days) {
-        LocalDateTime threshold = LocalDateTime.now().minusDays(Math.max(1, days));
+        LocalDateTime now = LocalDateTime.now(businessClock);
+        LocalDateTime threshold = now.minusDays(Math.max(1, days));
 
-        // Load tất cả active variants còn hàng
-        List<ProductVariant> allVariants = variantRepo.findAll().stream()
-                .filter(v -> Boolean.TRUE.equals(v.getActive())
-                        && v.getStockQty() != null && v.getStockQty() > 0
-                        && v.getProduct() != null && Boolean.TRUE.equals(v.getProduct().getActive())
-                        && !v.getProduct().isCombo())
-                .toList();
+        // Load variants cần xét trong 1 query thay vì findAll + filter in-memory
+        List<ProductVariant> allVariants = variantRepo.findAllActiveInStockWithProductAndCategory();
 
         if (allVariants.isEmpty()) return List.of();
 
@@ -596,7 +596,7 @@ public class RevenueService {
             // Slow nếu: chưa bán bao giờ, HOẶC lần bán cuối < threshold
             if (lastSale == null || lastSale.isBefore(threshold)) {
                 long daysWithout = lastSale == null ? -1L
-                        : Duration.between(lastSale, LocalDateTime.now()).toDays();
+                        : Duration.between(lastSale, now).toDays();
                 result.add(new SlowProductDto(
                         v.getId(), v.getVariantCode(), v.getVariantName(),
                         v.getProduct().getId(), v.getProduct().getCode(), v.getProduct().getName(),

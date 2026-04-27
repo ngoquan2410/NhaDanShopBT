@@ -1,9 +1,12 @@
 package com.example.nhadanshop.repository;
 
 import com.example.nhadanshop.entity.InventoryReceipt;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -16,6 +19,10 @@ import java.util.Optional;
 public interface InventoryReceiptRepository extends JpaRepository<InventoryReceipt, Long> {
 
     Optional<InventoryReceipt> findByReceiptNo(String receiptNo);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM InventoryReceipt r WHERE r.id = :id")
+    Optional<InventoryReceipt> findByIdForUpdate(@Param("id") Long id);
 
     /**
      * Lấy số thứ tự lớn nhất của receipt_no theo ngày, ví dụ prefix = "RCP-20260321-"
@@ -32,6 +39,10 @@ public interface InventoryReceiptRepository extends JpaRepository<InventoryRecei
             LocalDateTime from, LocalDateTime to, Pageable pageable);
 
     Page<InventoryReceipt> findAllByOrderByReceiptDateDesc(Pageable pageable);
+
+    @EntityGraph(attributePaths = {"createdBy", "supplier", "items", "items.product", "items.variant"})
+    @Query("SELECT r FROM InventoryReceipt r ORDER BY r.receiptDate DESC")
+    Page<InventoryReceipt> findAllWithDetails(Pageable pageable);
 
     /**
      * Tổng số lượng nhập kho đã quy đổi sang đơn vị BÁN LẺ.
@@ -55,6 +66,7 @@ public interface InventoryReceiptRepository extends JpaRepository<InventoryRecei
                    ), 0)
             FROM InventoryReceiptItem item
             WHERE item.receipt.receiptDate BETWEEN :from AND :to
+              AND item.receipt.status = 'confirmed'
             GROUP BY item.product.id
             """)
     List<Object[]> sumReceivedQtyByProductBetween(
@@ -77,6 +89,7 @@ public interface InventoryReceiptRepository extends JpaRepository<InventoryRecei
             FROM InventoryReceiptItem item
             WHERE item.variant IS NOT NULL
               AND item.receipt.receiptDate BETWEEN :from AND :to
+              AND item.receipt.status = 'confirmed'
             GROUP BY item.variant.id
             """)
     List<Object[]> sumReceivedQtyByVariantBetween(
@@ -102,6 +115,7 @@ public interface InventoryReceiptRepository extends JpaRepository<InventoryRecei
             FROM InventoryReceiptItem item
             WHERE item.variant IS NOT NULL
               AND item.receipt.receiptDate >= :from
+              AND item.receipt.status = 'confirmed'
             GROUP BY item.variant.id
             """)
     List<Object[]> sumReceivedQtyByVariantAfter(

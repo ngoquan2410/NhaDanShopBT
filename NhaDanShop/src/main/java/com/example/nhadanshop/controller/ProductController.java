@@ -29,9 +29,18 @@ public class ProductController {
     private final ExcelTemplateService excelTemplateService;
     private final ProductVariantService variantService; // Sprint 0
 
+    /**
+     * Danh sách phân trang + lọc. Mặc định chỉ SP đang active;
+     * {@code includeInactive=true} để quản trị thấy cả đã lưu kho.
+     */
     @GetMapping
-    public List<ProductResponse> all() {
-        return productService.findAll();
+    public Page<ProductResponse> list(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false, defaultValue = "false") boolean includeInactive,
+            @RequestParam(required = false) String productType,
+            @PageableDefault(size = 50, sort = "name") Pageable pageable) {
+        return productService.search(search, categoryId, includeInactive, productType, pageable);
     }
 
     /**
@@ -81,10 +90,15 @@ public class ProductController {
         return productService.update(id, req);
     }
 
+    @PatchMapping("/{id}")
+    public ProductResponse patch(@PathVariable Long id, @Valid @RequestBody ProductPatchRequest req) {
+        return productService.patch(id, req);
+    }
+
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long id) {
-        productService.softDelete(id);
+        productService.deleteOrArchive(id);
     }
 
     // ── Import Excel ──────────────────────────────────────────────────────────
@@ -150,9 +164,17 @@ public class ProductController {
 
     // ── Variant endpoints (Sprint 0) ──────────────────────────────────────────
 
+    /**
+     * Danh sách variant của SP. Mặc định trả về tất cả (kể cả đã archive) để quản trị / lịch sử.
+     * Truyền {@code activeOnly=true} để chỉ lấy variant đang kinh doanh (chọn bán / lọc an toàn).
+     * {@code forSaleOnly=true} → active + isSellable (POS/online).
+     */
     @GetMapping("/{id}/variants")
-    public List<ProductVariantResponse> getVariants(@PathVariable Long id) {
-        return variantService.getVariantsByProduct(id);
+    public List<ProductVariantResponse> getVariants(
+            @PathVariable Long id,
+            @RequestParam(value = "activeOnly", required = false, defaultValue = "false") boolean activeOnly,
+            @RequestParam(value = "forSaleOnly", required = false, defaultValue = "false") boolean forSaleOnly) {
+        return variantService.getVariantsByProduct(id, activeOnly, forSaleOnly);
     }
 
     @PostMapping("/{id}/variants")
@@ -168,10 +190,31 @@ public class ProductController {
         return variantService.updateVariant(vid, req);
     }
 
+    @PatchMapping("/{id}/variants/{vid}")
+    public ProductVariantResponse patchVariant(@PathVariable Long id, @PathVariable Long vid,
+                                             @Valid @RequestBody ProductVariantPatchRequest req) {
+        return variantService.patchVariant(id, vid, req);
+    }
+
+    /**
+     * Đặt variant mặc định; các variant khác của cùng SP bỏ default.
+     */
+    @PostMapping("/{id}/default-variant/{variantId}")
+    public ProductVariantResponse setDefaultVariant(@PathVariable Long id, @PathVariable Long variantId) {
+        return variantService.setDefaultVariant(id, variantId);
+    }
+
+    /**
+     * Xóa vật lý chỉ khi variant chưa từng dùng (không lô, không dòng chứng từ, không movement).
+     * Nếu đã từng dùng → gán {@code is_active=false} (HTTP 200 + body), giữ tồn kho & lịch sử.
+     */
     @DeleteMapping("/{id}/variants/{vid}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteVariant(@PathVariable Long id, @PathVariable Long vid) {
-        variantService.deleteVariant(vid);
+    public ResponseEntity<ProductVariantResponse> deleteVariant(@PathVariable Long id, @PathVariable Long vid) {
+        ProductVariantResponse body = variantService.deleteVariantOrArchive(id, vid);
+        if (body == null) {
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.ok(body);
     }
 
     @GetMapping("/low-stock-variants")

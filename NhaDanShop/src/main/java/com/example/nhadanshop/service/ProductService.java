@@ -1,5 +1,6 @@
 package com.example.nhadanshop.service;
 
+import com.example.nhadanshop.dto.ProductPatchRequest;
 import com.example.nhadanshop.dto.ProductRequest;
 import com.example.nhadanshop.dto.ProductResponse;
 import com.example.nhadanshop.entity.Category;
@@ -8,6 +9,7 @@ import com.example.nhadanshop.entity.ProductImportUnit;
 import com.example.nhadanshop.repository.CategoryRepository;
 import com.example.nhadanshop.repository.ProductImportUnitRepository;
 import com.example.nhadanshop.repository.ProductRepository;
+import com.example.nhadanshop.repository.PromotionRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -28,6 +30,7 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
+    private final PromotionRepository promotionRepository;
     private final ProductImportUnitRepository importUnitRepository;
     @org.springframework.context.annotation.Lazy
     private final ProductVariantService variantService;
@@ -37,6 +40,28 @@ public class ProductService {
                 .stream()
                 .map(DtoMapper::toResponse)
                 .toList();
+    }
+
+    public Page<ProductResponse> search(
+            String search,
+            Long categoryId,
+            boolean includeInactive,
+            String productTypeStr,
+            Pageable pageable) {
+        Product.ProductType pType = null;
+        if (productTypeStr != null && !productTypeStr.isBlank()) {
+            try {
+                pType = Product.ProductType.valueOf(productTypeStr.trim().toUpperCase());
+            } catch (IllegalArgumentException ignored) { /* all types */ }
+        }
+        return productRepository
+                .searchProducts(
+                        search != null && !search.isBlank() ? search.trim() : null,
+                        categoryId,
+                        includeInactive,
+                        pType,
+                        pageable)
+                .map(DtoMapper::toResponse);
     }
 
     public Page<ProductResponse> findByCategory(Long categoryId, Pageable pageable) {
@@ -94,7 +119,8 @@ public class ProductService {
                             vReq.variantCode(), vReq.variantName(), vReq.sellUnit(),
                             vReq.importUnit(), vReq.piecesPerUnit(), vReq.sellPrice(),
                             vReq.costPrice(), vReq.stockQty(), vReq.minStockQty(),
-                            vReq.expiryDays(), true, vReq.imageUrl(), vReq.conversionNote()
+                            vReq.expiryDays(), true, vReq.imageUrl(), vReq.conversionNote(), vReq.active(),
+                            vReq.isSellable()
                         );
                     }
                     variantService.createVariant(saved.getId(), vReq);
@@ -160,11 +186,48 @@ public class ProductService {
     }
 
     @Transactional
-    public void softDelete(Long id) {
+    public ProductResponse patch(Long id, ProductPatchRequest req) {
         Product p = findEntityById(id);
-        p.setActive(false);
+        if (req.code() != null && !req.code().isBlank()) {
+            String newCode = req.code().trim().toUpperCase();
+            if (!newCode.equals(p.getCode()) && productRepository.existsByCodeAndIdNot(newCode, id)) {
+                throw new IllegalStateException("Mã sản phẩm '" + newCode + "' đã được dùng bởi sản phẩm khác");
+            }
+            p.setCode(newCode);
+        }
+        if (req.name() != null && !req.name().isBlank()) p.setName(req.name());
+        if (req.categoryId() != null) {
+            var category = categoryRepository.findById(req.categoryId())
+                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy category ID: " + req.categoryId()));
+            p.setCategory(category);
+        }
+        if (req.active() != null) p.setActive(req.active());
+        if (req.imageUrl() != null) p.setImageUrl(req.imageUrl());
+        if (req.productType() != null && !req.productType().isBlank()) {
+            try {
+                p.setProductType(Product.ProductType.valueOf(req.productType().trim().toUpperCase()));
+            } catch (IllegalArgumentException ignored) { /* keep */ }
+        }
         p.setUpdatedAt(LocalDateTime.now());
-        productRepository.save(p);
+        return DtoMapper.toResponse(productRepository.save(p));
+    }
+
+    @Transactional
+    public void deleteOrArchive(Long id) {
+        Product p = findEntityById(id);
+        if (isProductStructurallyUsed(id)) {
+            p.setActive(false);
+            p.setUpdatedAt(LocalDateTime.now());
+            productRepository.save(p);
+        } else {
+            productRepository.delete(p);
+        }
+    }
+
+    public boolean isProductStructurallyUsed(Long id) {
+        return productRepository.isProductStructurallyUsedCore(id)
+                || promotionRepository.existsByGiftTargetProductId(id)
+                || promotionRepository.existsInLinkedProducts(id);
     }
 
     @Transactional

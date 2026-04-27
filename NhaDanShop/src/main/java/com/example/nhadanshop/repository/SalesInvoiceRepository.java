@@ -1,15 +1,20 @@
 package com.example.nhadanshop.repository;
 
 import com.example.nhadanshop.entity.SalesInvoice;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.EntityGraph.EntityGraphType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,10 +23,10 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
 
     Optional<SalesInvoice> findByInvoiceNo(String invoiceNo);
 
-    /**
-     * Lấy số thứ tự lớn nhất của invoice_no theo ngày, ví dụ prefix = "INV-20260321-"
-     * Trả về max sequence (phần số cuối) hoặc 0 nếu chưa có.
-     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT i FROM SalesInvoice i WHERE i.id = :id")
+    Optional<SalesInvoice> findByIdForUpdate(@Param("id") Long id);
+
     @Query(value = """
             SELECT COALESCE(MAX(CAST(SUBSTRING(invoice_no, LENGTH(:prefix) + 1, 10) AS INT)), 0)
             FROM sales_invoices
@@ -34,102 +39,125 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
 
     Page<SalesInvoice> findAllByOrderByInvoiceDateDesc(Pageable pageable);
 
-    /** Tổng doanh thu trong khoảng thời gian */
+    @EntityGraph(attributePaths = {"createdBy", "customer", "items", "items.product", "items.variant"})
+    @Query("SELECT i FROM SalesInvoice i ORDER BY i.invoiceDate DESC")
+    Page<SalesInvoice> findAllWithDetails(Pageable pageable);
+
+    @Query("""
+            SELECT i.id
+            FROM SalesInvoice i
+            ORDER BY i.invoiceDate DESC, i.id DESC
+            """)
+    Page<Long> findInvoiceIdsForList(Pageable pageable);
+
+    @EntityGraph(type = EntityGraphType.FETCH, attributePaths = {"createdBy", "customer", "items", "items.product", "items.variant"})
+    @Query("""
+            SELECT DISTINCT i
+            FROM SalesInvoice i
+            WHERE i.id IN :ids
+            """)
+    List<SalesInvoice> findAllByIdInForList(@Param("ids") Collection<Long> ids);
+
+    /**
+     * GET /api/invoices/{id} — same eager roots as list paths.
+     * Does not include {@code items.batchAllocations} in the graph: Hibernate cannot fetch two
+     * List (bag) associations in one query ({@code SalesInvoice.items} plus
+     * {@code SalesInvoiceItem.batchAllocations}) without {@code MultipleBagFetchException}.
+     * Allocations and batches load lazily within the transactional {@code getInvoice} call.
+     */
+    @EntityGraph(type = EntityGraphType.FETCH, attributePaths = {
+            "createdBy", "customer",
+            "items", "items.product", "items.variant"
+    })
+    @Query("SELECT i FROM SalesInvoice i WHERE i.id = :id")
+    Optional<SalesInvoice> findByIdForResponse(@Param("id") Long id);
+
     @Query("""
             SELECT COALESCE(SUM(i.totalAmount), 0)
             FROM SalesInvoice i
             WHERE i.invoiceDate BETWEEN :from AND :to
+              AND i.status = 'COMPLETED'
             """)
     BigDecimal sumTotalAmountBetween(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
-    /** Tổng lợi nhuận (sum profit từ items) trong khoảng thời gian */
+    /**
+     * Lợi nhuận (theo dòng): doanh thu dòng sau CK hóa đơn (tỷ lệ) − giá vốn dòng (không giảm theo CK KM),
+     * khớp {@code netRevenue − sumCost} khi tổng dòng = totalAmount (CRIT-005).
+     */
     @Query("""
-            SELECT COALESCE(SUM(item.quantity * (item.unitPrice - item.unitCostSnapshot)), 0)
+            SELECT COALESCE(SUM(
+                (item.quantity * item.unitPrice
+                    * COALESCE(
+                        (item.invoice.totalAmount - COALESCE(item.invoice.discountAmount, 0))
+                        / NULLIF(item.invoice.totalAmount, 0),
+                        0))
+                - (item.quantity * item.unitCostSnapshot)
+            ), 0)
             FROM SalesInvoiceItem item
             WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
             """)
     BigDecimal sumProfitBetween(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
-    /** Tổng chi phí vốn trong khoảng thời gian */
     @Query("""
             SELECT COALESCE(SUM(item.quantity * item.unitCostSnapshot), 0)
             FROM SalesInvoiceItem item
             WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
             """)
     BigDecimal sumCostBetween(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
-    /** Tổng tiền giảm từ khuyến mãi trong khoảng thời gian */
     @Query("""
             SELECT COALESCE(SUM(i.discountAmount), 0)
             FROM SalesInvoice i
             WHERE i.invoiceDate BETWEEN :from AND :to
+              AND i.status = 'COMPLETED'
             """)
     BigDecimal sumDiscountAmountBetween(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
-    /** Đếm số hóa đơn trong khoảng thời gian */
-    long countByInvoiceDateBetween(LocalDateTime from, LocalDateTime to);
+    long countByInvoiceDateBetweenAndStatus(LocalDateTime from, LocalDateTime to, SalesInvoice.Status status);
 
-    /**
-     * Tổng số lượng xuất kho (bán) của từng sản phẩm trong khoảng thời gian.
-     * Trả về mảng Object[]: [productId (Long), totalQty (Long)]
-     */
     @Query("""
             SELECT item.product.id, COALESCE(SUM(item.quantity), 0)
             FROM SalesInvoiceItem item
             WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
             GROUP BY item.product.id
             """)
     List<Object[]> sumSoldQtyByProductBetween(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
-    /**
-     * [Sprint 0] Tổng số lượng bán của từng VARIANT trong khoảng thời gian.
-     * Trả về Object[]: [variantId (Long), totalQty (Long)]
-     */
     @Query("""
             SELECT item.variant.id, COALESCE(SUM(item.quantity), 0)
             FROM SalesInvoiceItem item
             WHERE item.variant IS NOT NULL
               AND item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
             GROUP BY item.variant.id
             """)
     List<Object[]> sumSoldQtyByVariantBetween(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
-    /**
-     * [Fix OpeningStock] Tổng số lượng bán của từng VARIANT từ một mốc thời gian trở đi
-     * (không giới hạn trên = toàn bộ lịch sử từ fromDt đến nay).
-     * Dùng để tính ngược tồn đầu kỳ:
-     *   openingStock = currentStock - recvAfter(fromDt) + soldAfter(fromDt)
-     * Trả về Object[]: [variantId (Long), totalQty (Long)]
-     */
     @Query("""
             SELECT item.variant.id, COALESCE(SUM(item.quantity), 0)
             FROM SalesInvoiceItem item
             WHERE item.variant IS NOT NULL
               AND item.invoice.invoiceDate >= :from
+              AND item.invoice.status = 'COMPLETED'
             GROUP BY item.variant.id
             """)
-    List<Object[]> sumSoldQtyByVariantAfter(
-            @Param("from") LocalDateTime from);
+    List<Object[]> sumSoldQtyByVariantAfter(@Param("from") LocalDateTime from);
 
-    // ─── Revenue by Product ───────────────────────────────────────────────────
-
-    /**
-     * Doanh thu theo từng sản phẩm trong khoảng thời gian.
-     * Object[]: [productId, productCode, productName, categoryName, unit, totalQty, totalAmount]
-     * Dùng COALESCE để tránh NPE khi variant IS NULL (data cũ trước V22).
-     */
     @Query("""
             SELECT item.product.id,
                    item.product.code,
@@ -137,66 +165,75 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
                    item.product.category.name,
                    COALESCE(item.variant.sellUnit, 'cai'),
                    COALESCE(SUM(item.quantity), 0),
-                   COALESCE(SUM(item.quantity * item.unitPrice), 0)
+                   COALESCE(SUM(
+                       (item.quantity * item.unitPrice)
+                       * COALESCE(
+                           (item.invoice.totalAmount - COALESCE(item.invoice.discountAmount, 0))
+                           / NULLIF(item.invoice.totalAmount, 0),
+                           0)
+                   ), 0)
             FROM SalesInvoiceItem item
             WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
             GROUP BY item.product.id, item.product.code, item.product.name,
                      item.product.category.name, item.variant.sellUnit
-            ORDER BY COALESCE(SUM(item.quantity * item.unitPrice), 0) DESC
+            ORDER BY COALESCE(SUM(
+                       (item.quantity * item.unitPrice)
+                       * COALESCE(
+                           (item.invoice.totalAmount - COALESCE(item.invoice.discountAmount, 0))
+                           / NULLIF(item.invoice.totalAmount, 0),
+                           0)
+                   ), 0) DESC
             """)
     List<Object[]> revenueByProduct(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
-    // ─── Revenue by Category ─────────────────────────────────────────────────
-
-    /**
-     * Doanh thu theo từng danh mục.
-     * Object[]: [categoryId, categoryName, totalAmount]
-     */
     @Query("""
             SELECT item.product.category.id,
                    item.product.category.name,
-                   COALESCE(SUM(item.quantity * item.unitPrice), 0)
+                   COALESCE(SUM(
+                       (item.quantity * item.unitPrice)
+                       * COALESCE(
+                           (item.invoice.totalAmount - COALESCE(item.invoice.discountAmount, 0))
+                           / NULLIF(item.invoice.totalAmount, 0),
+                           0)
+                   ), 0)
             FROM SalesInvoiceItem item
             WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
             GROUP BY item.product.category.id, item.product.category.name
-            ORDER BY COALESCE(SUM(item.quantity * item.unitPrice), 0) DESC
+            ORDER BY COALESCE(SUM(
+                       (item.quantity * item.unitPrice)
+                       * COALESCE(
+                           (item.invoice.totalAmount - COALESCE(item.invoice.discountAmount, 0))
+                           / NULLIF(item.invoice.totalAmount, 0),
+                           0)
+                   ), 0) DESC
             """)
     List<Object[]> revenueByCategory(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
-    // ─── Daily revenue (group by date) ───────────────────────────────────────
-
     /**
-     * Tổng doanh thu từng ngày — PostgreSQL syntax.
-     * Object[]: [sale_date (java.sql.Date), total (BigDecimal)]
+     * Doanh thu ròng theo ngày (tổng total_amount − discount_amount), chỉ HĐ COMPLETED.
+     * JPQL portable (CRIT-005); thay native SUM(total_amount) gross.
      */
-    @Query(value = """
-            SELECT invoice_date::DATE             AS sale_date,
-                   COALESCE(SUM(total_amount), 0) AS total
-            FROM sales_invoices
-            WHERE invoice_date BETWEEN :from AND :to
-            GROUP BY invoice_date::DATE
-            ORDER BY invoice_date::DATE
-            """, nativeQuery = true)
+    @Query("""
+            SELECT CAST(i.invoiceDate AS date),
+                   COALESCE(SUM(i.totalAmount - COALESCE(i.discountAmount, 0)), 0)
+            FROM SalesInvoice i
+            WHERE i.invoiceDate BETWEEN :from AND :to
+              AND i.status = 'COMPLETED'
+            GROUP BY CAST(i.invoiceDate AS date)
+            ORDER BY CAST(i.invoiceDate AS date)
+            """)
     List<Object[]> dailyRevenue(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
-    // ─── Filter by Customer (Sprint 2) ───────────────────────────────────────
-
-    /** Lấy hóa đơn theo KH — sort theo ngày mới nhất */
     Page<SalesInvoice> findByCustomerIdOrderByInvoiceDateDesc(Long customerId, Pageable pageable);
 
-    // ��── Top Products (Sprint 2) ──────────────────────────────────────────────
-
-    /**
-     * Top variant bán chạy nhất theo doanh thu trong kỳ.
-     * Object[]: [variantId, variantCode, variantName, productId, productCode, productName,
-     *            categoryName, sellUnit, totalQty, totalRevenue, totalProfit]
-     */
     @Query("""
             SELECT sii.variant.id,
                    sii.variant.variantCode,
@@ -207,31 +244,66 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
                    sii.product.category.name,
                    sii.variant.sellUnit,
                    COALESCE(SUM(sii.quantity), 0),
-                   COALESCE(SUM(sii.quantity * sii.unitPrice), 0),
-                   COALESCE(SUM(sii.quantity * (sii.unitPrice - sii.unitCostSnapshot)), 0)
+                   COALESCE(SUM(
+                       (sii.quantity * sii.unitPrice)
+                       * COALESCE(
+                           (sii.invoice.totalAmount - COALESCE(sii.invoice.discountAmount, 0))
+                           / NULLIF(sii.invoice.totalAmount, 0),
+                           0)
+                   ), 0),
+                   COALESCE(SUM(
+                       (sii.quantity * sii.unitPrice
+                           * COALESCE(
+                               (sii.invoice.totalAmount - COALESCE(sii.invoice.discountAmount, 0))
+                               / NULLIF(sii.invoice.totalAmount, 0),
+                               0))
+                       - (sii.quantity * sii.unitCostSnapshot)
+                   ), 0)
             FROM SalesInvoiceItem sii
             WHERE sii.variant IS NOT NULL
               AND sii.invoice.invoiceDate BETWEEN :from AND :to
+              AND sii.invoice.status = 'COMPLETED'
             GROUP BY sii.variant.id, sii.variant.variantCode, sii.variant.variantName,
                      sii.product.id, sii.product.code, sii.product.name,
                      sii.product.category.name, sii.variant.sellUnit
-            ORDER BY COALESCE(SUM(sii.quantity), 0) DESC
+            ORDER BY COALESCE(SUM(
+                       (sii.quantity * sii.unitPrice)
+                       * COALESCE(
+                           (sii.invoice.totalAmount - COALESCE(sii.invoice.discountAmount, 0))
+                           / NULLIF(sii.invoice.totalAmount, 0),
+                           0)
+                   ), 0) DESC
             """)
     List<Object[]> topProducts(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to,
             Pageable pageable);
 
-    /**
-     * Variants có giao dịch gần nhất — dùng để tính slow products.
-     * Object[]: [variantId, lastSaleDate]
-     */
     @Query("""
             SELECT sii.variant.id,
                    MAX(sii.invoice.invoiceDate)
             FROM SalesInvoiceItem sii
             WHERE sii.variant IS NOT NULL
+              AND sii.invoice.status = 'COMPLETED'
             GROUP BY sii.variant.id
             """)
     List<Object[]> lastSaleDateByVariant();
+
+    long countByPromotionId(Long promotionId);
+
+    /**
+     * Promotion id in JSON only (e.g. legacy rows) — conservative reference check for void/archive policy.
+     */
+    @Query(value = """
+            SELECT EXISTS (
+                SELECT 1 FROM sales_invoices i
+                WHERE
+                    (i.promotion_snapshot_json IS NOT NULL
+                    AND (i.promotion_snapshot_json::jsonb->>'promotionId') = CAST(:id AS text))
+                 OR (i.gift_lines_snapshot_json IS NOT NULL
+                    AND EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(i.gift_lines_snapshot_json::jsonb, '[]'::jsonb)) g
+                    WHERE (g->>'promotionId') = CAST(:id AS text))
+            )
+            """, nativeQuery = true)
+    boolean existsReferenceToPromotionInInvoiceJsonSnapshots(@Param("id") long id);
 }

@@ -22,6 +22,10 @@ public class StockAdjustmentItem {
     @JoinColumn(name = "variant_id", nullable = false)
     private ProductVariant variant;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "source_batch_id")
+    private ProductBatch sourceBatch;
+
     /** Snapshot tồn kho hệ thống lúc tạo phiếu — bất biến */
     @Column(name = "system_qty", nullable = false)
     private Integer systemQty;

@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS store_payment_settings (
+    id BIGINT PRIMARY KEY,
+    shop_name VARCHAR(255),
+    qr_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    viet_qr_bank_code VARCHAR(50),
+    bank_name VARCHAR(255),
+    account_number VARCHAR(50),
+    account_name VARCHAR(255),
+    branch VARCHAR(255),
+    transfer_prefix VARCHAR(50),
+    qr_template VARCHAR(30),
+    momo_qr_image TEXT,
+    momo_account_name VARCHAR(255),
+    momo_phone VARCHAR(50),
+    zalopay_qr_image TEXT,
+    zalopay_account_name VARCHAR(255),
+    zalopay_phone VARCHAR(50),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);

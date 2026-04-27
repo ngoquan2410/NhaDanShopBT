@@ -20,6 +20,8 @@ import java.time.LocalDateTime;
  * @param remainingQty  Số lượng còn lại trong lô
  * @param costPrice     Giá vốn lô này
  * @param expired       true nếu đã hết hạn
+ * @param status        Slice 1 metadata: active | depleted | voided | blocked | archived.
+ *                      Phụ trợ; FEFO/projection/report KHÔNG đọc field này ở Slice 1.
  * @param createdAt     Thời điểm tạo lô
  */
 public record ProductBatchResponse(
@@ -38,5 +40,6 @@ public record ProductBatchResponse(
         int remainingQty,
         BigDecimal costPrice,
         boolean expired,
+        String status,
         LocalDateTime createdAt
 ) {}

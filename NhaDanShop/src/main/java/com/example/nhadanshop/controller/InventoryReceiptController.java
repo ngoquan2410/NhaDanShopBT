@@ -3,9 +3,12 @@ package com.example.nhadanshop.controller;
 import com.example.nhadanshop.dto.ExcelPreviewResponse;
 import com.example.nhadanshop.dto.InventoryReceiptRequest;
 import com.example.nhadanshop.dto.InventoryReceiptResponse;
+import com.example.nhadanshop.dto.InventoryReceiptVoidRequest;
 import com.example.nhadanshop.dto.ReceiptMetaUpdateRequest;
 import com.example.nhadanshop.service.ExcelReceiptImportService;
 import com.example.nhadanshop.service.ExcelTemplateService;
+import com.example.nhadanshop.service.IdempotencyScopes;
+import com.example.nhadanshop.service.IdempotencyService;
 import com.example.nhadanshop.service.InventoryReceiptService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +37,7 @@ public class InventoryReceiptController {
     private final InventoryReceiptService receiptService;
     private final ExcelReceiptImportService excelReceiptImportService;
     private final ExcelTemplateService excelTemplateService;
+    private final IdempotencyService idempotencyService;
 
     /** GET /api/receipts/template — Download Excel template import phiếu nhập kho */
     @GetMapping("/template")
@@ -70,8 +74,14 @@ public class InventoryReceiptController {
     /** POST /api/receipts - Tạo phiếu nhập từ JSON */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public InventoryReceiptResponse create(@Valid @RequestBody InventoryReceiptRequest req) {
-        return receiptService.createReceipt(req);
+    public InventoryReceiptResponse create(
+            @Valid @RequestBody InventoryReceiptRequest req,
+            @RequestHeader(value = IdempotencyScopes.HEADER_NAME, required = false) String idempotencyKey) {
+        return idempotencyService.execute(
+                IdempotencyScopes.RECEIPT_CREATE,
+                idempotencyKey,
+                InventoryReceiptResponse.class,
+                () -> receiptService.createReceipt(req));
     }
 
     /**
@@ -86,11 +96,32 @@ public class InventoryReceiptController {
         return receiptService.updateReceiptMeta(id, req);
     }
 
+    /**
+     * PATCH /api/receipts/{id}/void — Hủy phiếu nhập (void): giữ lịch sử, trừ tồn theo từng lô còn lại.
+     */
+    @PatchMapping("/{id}/void")
+    public InventoryReceiptResponse voidReceipt(
+            @PathVariable Long id,
+            @RequestBody(required = false) @Valid InventoryReceiptVoidRequest req,
+            @RequestHeader(value = IdempotencyScopes.HEADER_NAME, required = false) String idempotencyKey) {
+        InventoryReceiptVoidRequest body = req != null ? req : new InventoryReceiptVoidRequest(null, null);
+        return idempotencyService.execute(
+                IdempotencyScopes.receiptVoid(id),
+                idempotencyKey,
+                InventoryReceiptResponse.class,
+                () -> receiptService.voidReceipt(id, body));
+    }
+
     /** DELETE /api/receipts/{id} */
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable Long id) {
-        receiptService.deleteReceipt(id);
+    public void delete(
+            @PathVariable Long id,
+            @RequestHeader(value = IdempotencyScopes.HEADER_NAME, required = false) String idempotencyKey) {
+        idempotencyService.executeVoid(
+                IdempotencyScopes.receiptDelete(id),
+                idempotencyKey,
+                () -> receiptService.deleteReceipt(id));
     }
 
     /**
@@ -133,11 +164,23 @@ public class InventoryReceiptController {
             @RequestParam(value = "note",         required = false, defaultValue = "") String note,
             @RequestParam(value = "shippingFee",  required = false, defaultValue = "0") java.math.BigDecimal shippingFee,
             @RequestParam(value = "vatPercent",   required = false, defaultValue = "0") java.math.BigDecimal vatPercent,
-            @RequestParam(value = "receiptDate",  required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDateTime receiptDateTime
+            @RequestParam(value = "receiptDate",  required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDateTime receiptDateTime,
+            @RequestHeader(value = IdempotencyScopes.HEADER_NAME, required = false) String idempotencyKey
     ) throws IOException {
         // Chuyển LocalDate → LocalDateTime (đầu ngày), null → service tự dùng now()
         //LocalDateTime receiptDateTime = (receiptDate != null) ? receiptDate.atStartOfDay() : null;
-        return excelReceiptImportService.importReceiptFromExcel(
-                file, supplierName, supplierId, note, shippingFee, vatPercent, receiptDateTime != null ? receiptDateTime: null);
+        LocalDateTime rd = receiptDateTime != null ? receiptDateTime : null;
+        return idempotencyService.execute(
+                IdempotencyScopes.RECEIPT_IMPORT_EXCEL,
+                idempotencyKey,
+                ExcelReceiptImportService.ExcelReceiptResult.class,
+                () -> {
+                    try {
+                        return excelReceiptImportService.importReceiptFromExcel(
+                                file, supplierName, supplierId, note, shippingFee, vatPercent, rd);
+                    } catch (IOException e) {
+                        throw new IllegalStateException("Lỗi đọc file Excel", e);
+                    }
+                });
     }
 }

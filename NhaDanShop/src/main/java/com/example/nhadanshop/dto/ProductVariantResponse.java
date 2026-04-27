@@ -20,6 +20,8 @@ public record ProductVariantResponse(
         boolean lowStock,      // stockQty <= minStockQty
         Integer expiryDays,
         Boolean active,
+        /** false = not for POS/online sale; still usable in inventory flows */
+        Boolean isSellable,
         Boolean isDefault,
         String imageUrl,
         String conversionNote,

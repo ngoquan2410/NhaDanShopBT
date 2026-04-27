@@ -58,6 +58,27 @@ public class StockAdjustment {
     @OneToMany(mappedBy = "adjustment", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<StockAdjustmentItem> items = new ArrayList<>();
 
+    /** When this (original) was reversed: timestamp of the reversal. */
+    @Column(name = "reversed_at")
+    private LocalDateTime reversedAt;
+
+    /** When this (original) was reversed: who performed it (VARCHAR, optional in request or username). */
+    @Column(name = "reversed_by", length = 100)
+    private String reversedBy;
+
+    @Column(name = "reversal_reason", columnDefinition = "TEXT")
+    private String reversalReason;
+
+    /** On original: points to the new reversal document. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reversal_adjustment_id")
+    private StockAdjustment reversalAdjustment;
+
+    /** On reversal document: points to the original being reversed. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reverses_adjustment_id")
+    private StockAdjustment reversesOriginal;
+
     @PrePersist
     void prePersist() {
         if (adjDate  == null) adjDate  = LocalDateTime.now();

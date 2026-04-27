@@ -1,0 +1,7 @@
+project_id = "jdzdjoqxhfxyyiguoasl"
+
+[functions.casso-webhook]
+verify_jwt = false
+
+[functions.goong-proxy]
+verify_jwt = false

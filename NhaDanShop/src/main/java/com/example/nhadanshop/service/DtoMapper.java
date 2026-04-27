@@ -1,5 +1,7 @@
 package com.example.nhadanshop.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.nhadanshop.dto.*;
 import com.example.nhadanshop.entity.*;
 
@@ -10,6 +12,8 @@ import java.util.stream.Collectors;
 
 /** Utility class chuyển đổi Entity → Response DTO */
 public final class DtoMapper {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private DtoMapper() {}
 
@@ -55,6 +59,7 @@ public final class DtoMapper {
                 v.isLowStock(),
                 v.getExpiryDays(),
                 v.getActive(),
+                v.getIsSellable(),
                 v.getIsDefault(),
                 v.getImageUrl(),
                 v.getConversionNote(),
@@ -67,6 +72,12 @@ public final class DtoMapper {
     public static SalesInvoiceResponse toResponse(SalesInvoice inv) {
         BigDecimal discountAmount = inv.getDiscountAmount() != null ? inv.getDiscountAmount() : BigDecimal.ZERO;
         BigDecimal finalAmount    = inv.getTotalAmount().subtract(discountAmount);
+        ShippingAddressDto shippingAddress = readJson(inv.getShippingAddressJson(), new TypeReference<>() {});
+        List<GiftLineSnapshotDto> giftLines = readJsonList(inv.getGiftLinesSnapshotJson(), new TypeReference<>() {});
+        PromotionSnapshotDto promotionSnapshot = readJson(inv.getPromotionSnapshotJson(), new TypeReference<>() {});
+        VoucherSnapshotDto voucherSnapshot = readJson(inv.getVoucherSnapshotJson(), new TypeReference<>() {});
+        ShippingQuoteSnapshotDto shippingQuoteSnapshot = readJson(inv.getShippingQuoteSnapshotJson(), new TypeReference<>() {});
+        PricingBreakdownSnapshotDto pricingBreakdownSnapshot = readJson(inv.getPricingBreakdownSnapshotJson(), new TypeReference<>() {});
 
         // Lợi nhuận = 0 nếu hóa đơn bị hủy
         BigDecimal totalProfit = BigDecimal.ZERO;
@@ -83,6 +94,9 @@ public final class DtoMapper {
                 inv.getId(), inv.getInvoiceNo(), inv.getInvoiceDate(),
                 inv.getCustomerName(),
                 inv.getCustomer() != null ? inv.getCustomer().getId() : null,
+                inv.getCustomerPhone(),
+                shippingAddress,
+                inv.getPaymentMethod(),
                 inv.getNote(),
                 inv.getTotalAmount(), discountAmount, finalAmount,
                 inv.getPromotionName(), totalProfit,
@@ -91,7 +105,15 @@ public final class DtoMapper {
                 inv.getCreatedAt(), inv.getUpdatedAt(),
                 // cancel fields
                 inv.getStatus() != null ? inv.getStatus().name() : "COMPLETED",
-                inv.getCancelledAt(), inv.getCancelledBy(), inv.getCancelReason()
+                inv.getCancelledAt(), inv.getCancelledBy(), inv.getCancelReason(),
+                mapSourceType(inv.getSourceType()),
+                inv.getPendingOrderId() != null ? String.valueOf(inv.getPendingOrderId()) : null,
+                giftLines,
+                promotionSnapshot,
+                voucherSnapshot,
+                shippingQuoteSnapshot,
+                pricingBreakdownSnapshot,
+                inv.getVatPercent() != null ? inv.getVatPercent() : BigDecimal.ZERO
         );
     }
 
@@ -122,12 +144,32 @@ public final class DtoMapper {
                 item.getComboSourceId(),
                 null,  // comboSourceCode — enriched ở tầng FE hoặc query riêng
                 null,  // comboSourceName — enriched ở tầng FE hoặc query riêng
-                item.getComboUnitPrice()
+                item.getComboUnitPrice(),
+                toAllocationResponses(item)
         );
     }
 
+    private static List<SalesInvoiceItemAllocationResponse> toAllocationResponses(SalesInvoiceItem item) {
+        List<SalesInvoiceItemBatchAllocation> all = item.getBatchAllocations();
+        if (all == null || all.isEmpty()) {
+            return List.of();
+        }
+        return all.stream().map(DtoMapper::toAllocationResponse).collect(Collectors.toList());
+    }
+
+    private static SalesInvoiceItemAllocationResponse toAllocationResponse(SalesInvoiceItemBatchAllocation a) {
+        ProductBatch b = a.getBatch();
+        if (b == null) {
+            throw new IllegalStateException("Phân bổ lô hóa đơn thiếu batch.");
+        }
+        String code = b.getBatchCode();
+        int q = a.getDeductedQty() != null ? a.getDeductedQty() : 0;
+        return new SalesInvoiceItemAllocationResponse(b.getId(), code, code, q);
+    }
+
     // ── InventoryReceipt ──────────────────────────────────────────────────────
-    public static InventoryReceiptResponse toResponse(InventoryReceipt r) {
+    public static InventoryReceiptResponse toResponse(InventoryReceipt r, ReceiptDeleteEligibility eligibility) {
+        String st = r.getStatus() != null ? r.getStatus() : InventoryReceipt.STATUS_CONFIRMED;
         return new InventoryReceiptResponse(
                 r.getId(), r.getReceiptNo(), r.getReceiptDate(),
                 r.getSupplierName(),
@@ -137,7 +179,13 @@ public final class DtoMapper {
                 r.getTotalVat()     != null ? r.getTotalVat()     : BigDecimal.ZERO,
                 r.getCreatedBy() != null ? r.getCreatedBy().getUsername() : null,
                 r.getItems().stream().map(DtoMapper::toResponse).collect(Collectors.toList()),
-                r.getCreatedAt(), r.getUpdatedAt()
+                r.getCreatedAt(), r.getUpdatedAt(),
+                st,
+                eligibility.canDelete(),
+                eligibility.deleteBlockReason(),
+                r.getVoidedAt(),
+                r.getVoidedBy(),
+                r.getVoidReason()
         );
     }
 
@@ -178,5 +226,32 @@ public final class DtoMapper {
                 u.getRoles().stream().map(Role::getName).collect(Collectors.toSet()),
                 u.getCreatedAt(), u.getUpdatedAt()
         );
+    }
+
+    private static String mapSourceType(SalesInvoice.SourceType sourceType) {
+        if (sourceType == null) return null;
+        return switch (sourceType) {
+            case POS -> "pos";
+            case ONLINE_PENDING -> "online_pending";
+            case MANUAL -> "manual";
+        };
+    }
+
+    private static <T> T readJson(String value, TypeReference<T> typeReference) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return OBJECT_MAPPER.readValue(value, typeReference);
+        } catch (Exception e) {
+            throw new IllegalStateException("Không thể deserialize invoice snapshot", e);
+        }
+    }
+
+    private static <T> List<T> readJsonList(String value, TypeReference<List<T>> typeReference) {
+        if (value == null || value.isBlank()) return List.of();
+        try {
+            return OBJECT_MAPPER.readValue(value, typeReference);
+        } catch (Exception e) {
+            throw new IllegalStateException("Không thể deserialize invoice snapshot list", e);
+        }
     }
 }
