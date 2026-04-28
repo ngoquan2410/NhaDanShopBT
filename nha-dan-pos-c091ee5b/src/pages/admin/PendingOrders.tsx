@@ -401,8 +401,18 @@ function PendingOrderDetail({ order, onClose, onConfirm, onCancel }: {
               {order.lines.map((it) => (
                 <div key={it.id} className="p-3 flex items-center justify-between text-sm">
                   <div className="min-w-0">
-                    <p className="font-medium truncate">{it.productName}{it.variantName ? ` · ${it.variantName}` : ""}</p>
-                    <p className="text-xs text-muted-foreground">{it.qty} × {formatVND(it.unitPrice)}</p>
+                    <p className="font-medium truncate">
+                      {it.productName}{it.variantName ? ` · ${it.variantName}` : ""}
+                      {it.rewardLine ? (
+                        <span className="ml-1 text-[10px] font-normal text-primary">(Quà / giá gốc {formatVND(it.originalUnitPrice ?? it.unitPrice)})</span>
+                      ) : null}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {it.qty} × {formatVND(it.unitPrice)}
+                      {it.batchId != null && it.batchId !== "" ? (
+                        <span className="ml-1 font-mono">· lô #{it.batchId}</span>
+                      ) : null}
+                    </p>
                   </div>
                   <span className="font-medium shrink-0">{formatVND(it.lineSubtotal)}</span>
                 </div>
@@ -508,7 +518,12 @@ function PendingOrderDetail({ order, onClose, onConfirm, onCancel }: {
               {pb.voucherDiscount > 0 && <Row label="Giảm voucher" value={`−${formatVND(pb.voucherDiscount)}`} muted />}
               <Row label="Phí vận chuyển" value={formatVND(pb.shippingFee)} />
               {pb.shippingDiscount > 0 && <Row label="Giảm phí ship" value={`−${formatVND(pb.shippingDiscount)}`} muted />}
-              {pb.vat > 0 && <Row label="VAT" value={formatVND(pb.vat)} />}
+              {pb.vatPercent > 0 && (
+                <>
+                  <Row label={`VAT (${pb.vatPercent}%)`} value={formatVND(pb.vatAmount)} />
+                  <Row label="Cơ sở thuế (VAT)" value={formatVND(pb.vatBase)} muted />
+                </>
+              )}
               <div className="pt-2 mt-1 border-t flex items-center justify-between">
                 <span className="font-semibold">Tổng cộng</span>
                 <span className="font-bold text-base text-primary">{formatVND(pb.total)}</span>

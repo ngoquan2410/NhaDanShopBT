@@ -15,8 +15,17 @@ import { draftActions } from "@/lib/drafts";
 import { formatVND } from "@/lib/format";
 import { receiptImportRowSellableLabel, type ImportSeverity, type ReceiptImportOutcome, type ReceiptImportRow } from "@/lib/import-types";
 import { categoryActions, useStore } from "@/lib/store";
-import { products as seedProducts } from "@/lib/mock-data";
+import { products as seedProducts, type Product, type ProductVariant } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
+import { getAdminSession } from "@/services/auth/adminApi";
+import { products as productService } from "@/services";
+import {
+  createInventoryReceipt,
+  type InventoryReceiptCreateItem,
+  type InventoryReceiptItemResponse,
+} from "@/services/inventory/inventoryReceiptApi";
+import { fetchBatchesByReceiptId, type ProductBatchResponse } from "@/services/batches/batchReceiptApi";
+import type { BarcodeItem } from "@/components/shared/BarcodePrintDialog";
 
 interface ReceiptLineDraft {
   id: string;
@@ -167,9 +176,12 @@ export default function AdminGoodsReceiptCreate() {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [importOpen, setImportOpen] = useState(false);
   const [savedNumber, setSavedNumber] = useState<string | null>(null);
+  const [savedReceiptId, setSavedReceiptId] = useState<number | null>(null);
   const [draftNumber, setDraftNumber] = useState<string | null>(null);
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [barcodeOpen, setBarcodeOpen] = useState(false);
+  const [barcodeItems, setBarcodeItems] = useState<BarcodeItem[]>([]);
+  const [backendCatalog, setBackendCatalog] = useState<Product[]>([]);
   const [supplierDrawerOpen, setSupplierDrawerOpen] = useState(false);
   const [supplierSeedName, setSupplierSeedName] = useState("");
   const [importedFilename, setImportedFilename] = useState<string | null>(null);
@@ -348,6 +360,103 @@ export default function AdminGoodsReceiptCreate() {
     toast.success(`Đã lưu nháp ${saved.number}.`);
   };
 
+  useEffect(() => {
+    let cancel = false;
+    void (async () => {
+      if (!getAdminSession()?.accessToken) return;
+      try {
+        const pg = await productService.list({ pageSize: 500 });
+        if (!cancel) setBackendCatalog(pg.items);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, []);
+
+  const catalogProducts = useMemo(() => {
+    const map = new Map<string, Product>();
+    for (const p of backendCatalog) map.set(p.code.toUpperCase(), p);
+    for (const p of seedProducts) {
+      const k = p.code.toUpperCase();
+      if (!map.has(k)) map.set(k, p);
+    }
+    return Array.from(map.values());
+  }, [backendCatalog]);
+
+  function findCatalogVariant(line: ReceiptLineDraft): { product: Product; variant: ProductVariant } | null {
+    const p = catalogProducts.find((x) => x.code.toUpperCase() === line.productCode.trim().toUpperCase());
+    if (!p) return null;
+    if (!line.variantCode.trim()) {
+      const v = p.variants.find((x) => x.isDefault) ?? p.variants[0];
+      return v ? { product: p, variant: v } : null;
+    }
+    const v = p.variants.find((x) => x.code.toUpperCase() === line.variantCode.trim().toUpperCase());
+    return v ? { product: p, variant: v } : null;
+  }
+
+  function effectiveExpiryIso(line: ReceiptLineDraft): string | null {
+    if (line.expiryMode === "date" && line.expiryDate.trim()) return line.expiryDate.trim();
+    const preview = computePreviewDate(line);
+    return preview || null;
+  }
+
+  function lineRetailQty(line: ReceiptLineDraft): number {
+    return Math.max(0, line.quantity) * Math.max(1, line.piecesPerUnit);
+  }
+
+  function buildReceiptItems(): InventoryReceiptCreateItem[] | null {
+    const out: InventoryReceiptCreateItem[] = [];
+    for (const line of lines) {
+      const hit = findCatalogVariant(line);
+      if (!hit) {
+        toast.error(`Không map ${line.productCode} → sản phẩm backend để lưu phiếu. Hãy đồng bộ catalog (đăng nhập admin).`);
+        return null;
+      }
+      const oid = Number(hit.variant.id);
+      const pid = Number(hit.product.id);
+      if (!Number.isFinite(oid) || !Number.isFinite(pid)) {
+        toast.error("ID sản phẩm/variant không hợp lệ — cần catalog backend (id số).");
+        return null;
+      }
+      out.push({
+        productId: pid,
+        quantity: Math.max(1, line.quantity),
+        unitCost: Math.max(0, line.unitCost),
+        discountPercent: Math.max(0, Math.min(100, line.discountPercent)),
+        importUnit: line.importUnit.trim(),
+        piecesOverride: Math.max(1, line.piecesPerUnit),
+        variantId: oid,
+        expiryDateOverride: effectiveExpiryIso(line),
+      });
+    }
+    return out;
+  }
+
+  function matchBatchForLine(
+    line: ReceiptLineDraft,
+    receiptItem: InventoryReceiptItemResponse,
+    batches: ProductBatchResponse[],
+  ): ProductBatchResponse | null {
+    const exp = effectiveExpiryIso(line);
+    const pid = receiptItem.productId;
+    const rq = receiptItem.retailQtyAdded ?? lineRetailQty(line);
+    const candidates = batches.filter((b) => b.productId === pid);
+    const narrowed =
+      exp != null
+        ? candidates.filter((b) => (b.expiryDate ?? "").slice(0, 10) === exp.slice(0, 10))
+        : candidates;
+    const vMatch = narrowed.filter((b) => {
+      const codePrefix = `${(line.variantCode || line.productCode || "").toUpperCase()}`;
+      return codePrefix ? b.batchCode.toUpperCase().includes(codePrefix) : true;
+    });
+    const pool = vMatch.length ? vMatch : narrowed.length ? narrowed : candidates;
+    const byQty = pool.find((b) => b.importQty === rq);
+    return byQty ?? pool[0] ?? null;
+  }
+
   const handleSave = () => {
     if (!canSave) {
       if (futureDateError) toast.error("Ngày nhập không thể ở tương lai.");
@@ -355,10 +464,85 @@ export default function AdminGoodsReceiptCreate() {
       else toast.error("Còn lỗi blocking trong danh sách hàng.");
       return;
     }
-    const number = `PN-${receiptDate.replace(/-/g, "")}-${String(Math.floor(Math.random() * 900) + 100)}`;
-    setSavedNumber(number);
-    if (currentDraftId) { draftActions.remove(currentDraftId); setCurrentDraftId(null); setDraftNumber(null); }
-    toast.success(`Đã lưu phiếu nhập ${number}.`);
+
+    void (async () => {
+      setBarcodeItems([]);
+
+      if (getAdminSession()?.accessToken) {
+        const items = buildReceiptItems();
+        if (!items) return;
+        const supplierIdNum = supplier ? Number(supplier) : NaN;
+        if (!Number.isFinite(supplierIdNum)) {
+          toast.error("supplierId không hợp lệ — cần NCC có id số từ backend.");
+          return;
+        }
+        const now = new Date();
+        const t = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+        const receiptDateTime = `${receiptDate}T${t}`;
+
+        try {
+          const created = await createInventoryReceipt({
+            supplierId: supplierIdNum,
+            supplierName: suppliers.find((s) => s.id === supplier)?.name ?? null,
+            note: note.trim() || null,
+            shippingFee,
+            vatPercent: vat,
+            items,
+            comboItems: [],
+            receiptDate: receiptDateTime,
+          });
+          setSavedReceiptId(created.id);
+          setSavedNumber(created.receiptNo);
+          if (currentDraftId) {
+            draftActions.remove(currentDraftId);
+            setCurrentDraftId(null);
+            setDraftNumber(null);
+          }
+          toast.success(`Đã lưu phiếu nhập ${created.receiptNo} (backend).`);
+
+          try {
+            const batches = await fetchBatchesByReceiptId(created.id);
+            const nextLabels: BarcodeItem[] = [];
+            for (let i = 0; i < lines.length; i += 1) {
+              const line = lines[i];
+              const beItem = created.items[i];
+              if (!beItem) continue;
+              const batch = matchBatchForLine(line, beItem, batches);
+              if (!batch?.id) {
+                toast.warning(`Không map được lô backend cho dòng ${line.productCode} — bỏ qua tem lô.`);
+                continue;
+              }
+              nextLabels.push({
+                productName: line.productName,
+                variantName: line.variantName,
+                code: `BATCH:${batch.id}`,
+                price: line.sellPrice,
+                lot: batch.batchCode,
+                expiryDate: (batch.expiryDate ?? effectiveExpiryIso(line) ?? "").slice(0, 10),
+                defaultQty: lineRetailQty(line),
+              });
+            }
+            setBarcodeItems(nextLabels);
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Đã lưu phiếu nhưng không tải được danh sách lô để in tem.");
+          }
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Lưu phiếu nhập backend thất bại");
+        }
+        return;
+      }
+
+      const number = `PN-${receiptDate.replace(/-/g, "")}-${String(Math.floor(Math.random() * 900) + 100)}`;
+      setSavedReceiptId(null);
+      setSavedNumber(number);
+      setBarcodeItems([]);
+      if (currentDraftId) {
+        draftActions.remove(currentDraftId);
+        setCurrentDraftId(null);
+        setDraftNumber(null);
+      }
+      toast.success(`Đã lưu phiếu nhập ${number} (offline — in tem lô cần backend).`);
+    })();
   };
 
   const supplierName = suppliers.find((s) => s.id === supplier)?.name ?? "";
@@ -419,7 +603,8 @@ export default function AdminGoodsReceiptCreate() {
 
       {savedNumber && (
         <div className="flex items-center gap-2 rounded-lg border border-success/20 bg-success-soft p-2.5 text-xs text-success">
-          <Check className="h-3.5 w-3.5" /> Đã lưu phiếu nhập <strong>{savedNumber}</strong>.
+          <Check className="h-3.5 w-3.5" /> Đã lưu phiếu nhập <strong>{savedNumber}</strong>
+          {savedReceiptId != null && <span className="text-muted-foreground">· backend #{savedReceiptId}</span>}.
         </div>
       )}
 
@@ -762,7 +947,16 @@ export default function AdminGoodsReceiptCreate() {
               </div>
             ) : (
               <div className="space-y-1.5">
-                <button onClick={() => setBarcodeOpen(true)} className="flex w-full items-center justify-center gap-1.5 rounded-md bg-primary py-2 text-xs font-semibold text-primary-foreground hover:bg-primary-hover">
+                <button
+                  onClick={() => {
+                    if (!barcodeItems.length) {
+                      toast.error("Chưa có tem lô (BATCH:…). Hãy đăng nhập admin và lưu phiếu qua backend.");
+                      return;
+                    }
+                    setBarcodeOpen(true);
+                  }}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-md bg-primary py-2 text-xs font-semibold text-primary-foreground hover:bg-primary-hover"
+                >
                   <Printer className="h-3.5 w-3.5" /> In mã vạch
                 </button>
                 <button onClick={() => navigate("/admin/goods-receipts")} className="w-full rounded-md border py-1.5 text-xs font-medium hover:bg-muted">Về danh sách</button>
@@ -778,12 +972,7 @@ export default function AdminGoodsReceiptCreate() {
         open={barcodeOpen}
         onClose={() => setBarcodeOpen(false)}
         title={`In mã vạch — ${savedNumber ?? draftNumber ?? "phiếu nhập"}`}
-        items={lines.map((l) => ({
-          productName: l.productName, variantName: l.variantName,
-          code: l.variantCode || l.productCode, price: l.sellPrice,
-          lot: savedNumber ?? draftNumber ?? receiptDate,
-          defaultQty: l.quantity * l.piecesPerUnit,
-        }))}
+        items={barcodeItems}
       />
     </div>
   );

@@ -76,6 +76,10 @@ public class PendingOrder {
     @Column(name = "pricing_breakdown_snapshot_json", columnDefinition = "text")
     private String pricingBreakdownSnapshotJson;
 
+    /** Slice 6C: optional backend sales quote id (UUID). */
+    @Column(name = "quote_public_id", length = 36)
+    private String quotePublicId;
+
     /** Thời hạn xác nhận — mặc định 15 phút sau khi tạo */
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;

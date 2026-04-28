@@ -96,7 +96,7 @@ class BatchExpiryCorrectionIntegrationTest {
 
         SalesInvoiceRequest request = new SalesInvoiceRequest(
                 null, null, null, null,
-                List.of(new InvoiceItemRequest(variant.getProduct().getId(), 3, null, null, null)));
+                List.of(new InvoiceItemRequest(variant.getProduct().getId(), 3, null, null, null)), null);
         SalesInvoiceResponse created = invoiceService.createInvoice(request);
         invoiceService.cancelInvoice(created.id(), "test cancel", "tester");
 

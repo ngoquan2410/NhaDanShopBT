@@ -79,15 +79,36 @@ public final class DtoMapper {
         ShippingQuoteSnapshotDto shippingQuoteSnapshot = readJson(inv.getShippingQuoteSnapshotJson(), new TypeReference<>() {});
         PricingBreakdownSnapshotDto pricingBreakdownSnapshot = readJson(inv.getPricingBreakdownSnapshotJson(), new TypeReference<>() {});
 
-        // Lợi nhuận = 0 nếu hóa đơn bị hủy
+        BigDecimal itemRevenue = BigDecimal.ZERO;
+        BigDecimal itemCogs = BigDecimal.ZERO;
+        BigDecimal itemGrossProfit = BigDecimal.ZERO;
         BigDecimal totalProfit = BigDecimal.ZERO;
-        if (!inv.isCancelled()) {
-            BigDecimal grossProfit = inv.getItems().stream()
-                    .map(i -> i.getUnitPrice()
-                            .subtract(i.getUnitCostSnapshot())
-                            .multiply(BigDecimal.valueOf(i.getQuantity())))
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            totalProfit = grossProfit.subtract(discountAmount);
+        BigDecimal shipFee = BigDecimal.ZERO;
+        BigDecimal shipDiscSnap = BigDecimal.ZERO;
+        BigDecimal shipNet = BigDecimal.ZERO;
+        BigDecimal shippingActualCost = null;
+        BigDecimal shippingProfit = null;
+        String invoiceProfitBasis = "shipping_actual_cost_unknown";
+        if (inv.isCancelled()) {
+            invoiceProfitBasis = "cancelled";
+        } else {
+            List<SalesInvoiceItem> lines = inv.getItems() != null ? inv.getItems() : List.of();
+            for (SalesInvoiceItem i : lines) {
+                BigDecimal q = BigDecimal.valueOf(i.getQuantity());
+                itemRevenue = itemRevenue.add(nz(i.getUnitPrice()).multiply(q));
+                itemCogs = itemCogs.add(nz(i.getUnitCostSnapshot()).multiply(q));
+            }
+            itemGrossProfit = itemRevenue.subtract(itemCogs);
+            if (pricingBreakdownSnapshot != null) {
+                shipFee = nz(pricingBreakdownSnapshot.shippingFee());
+                shipDiscSnap = nz(pricingBreakdownSnapshot.shippingDiscount());
+            }
+            shipNet = shipFee.subtract(shipDiscSnap);
+            BigDecimal merchDisc = nz(inv.getDiscountAmount()).subtract(shipDiscSnap);
+            if (merchDisc.compareTo(BigDecimal.ZERO) < 0) {
+                merchDisc = BigDecimal.ZERO;
+            }
+            totalProfit = itemGrossProfit.subtract(merchDisc).add(shipNet);
         }
 
         return new SalesInvoiceResponse(
@@ -101,7 +122,7 @@ public final class DtoMapper {
                 inv.getTotalAmount(), discountAmount, finalAmount,
                 inv.getPromotionName(), totalProfit,
                 inv.getCreatedBy() != null ? inv.getCreatedBy().getUsername() : null,
-                inv.getItems().stream().map(DtoMapper::toResponse).collect(Collectors.toList()),
+                inv.getItems() == null ? List.of() : inv.getItems().stream().map(DtoMapper::toResponse).collect(Collectors.toList()),
                 inv.getCreatedAt(), inv.getUpdatedAt(),
                 // cancel fields
                 inv.getStatus() != null ? inv.getStatus().name() : "COMPLETED",
@@ -113,8 +134,21 @@ public final class DtoMapper {
                 voucherSnapshot,
                 shippingQuoteSnapshot,
                 pricingBreakdownSnapshot,
-                inv.getVatPercent() != null ? inv.getVatPercent() : BigDecimal.ZERO
+                inv.getVatPercent() != null ? inv.getVatPercent() : BigDecimal.ZERO,
+                itemRevenue,
+                itemCogs,
+                itemGrossProfit,
+                shipFee,
+                shipDiscSnap,
+                shipNet,
+                shippingActualCost,
+                shippingProfit,
+                invoiceProfitBasis
         );
+    }
+
+    private static BigDecimal nz(BigDecimal v) {
+        return v != null ? v : BigDecimal.ZERO;
     }
 
     // ── SalesInvoiceItem ──────────────────────────────────────────────────────
@@ -145,7 +179,8 @@ public final class DtoMapper {
                 null,  // comboSourceCode — enriched ở tầng FE hoặc query riêng
                 null,  // comboSourceName — enriched ở tầng FE hoặc query riêng
                 item.getComboUnitPrice(),
-                toAllocationResponses(item)
+                toAllocationResponses(item),
+                item.isRewardLine()
         );
     }
 

@@ -3,7 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { paymentEvents } from "@/services";
 import {
-  LayoutDashboard, FolderTree, Package, Layers, FileInput, Receipt,
+  LayoutDashboard, FolderTree, Package, Layers, Factory, FileInput, Receipt,
   ShoppingCart, Clock, Tags, Users, Truck, ClipboardCheck,
   BarChart3, TrendingUp, DollarSign, UserCog, Shield,
   ChevronLeft, ChevronRight, Menu, X, Store, Settings, MapPin,
@@ -40,6 +40,7 @@ const navGroups = [
     label: "Kho hàng",
     items: [
       { path: "/admin/goods-receipts", icon: FileInput, label: "Phiếu nhập" },
+      { path: "/admin/production", icon: Factory, label: "Sản xuất" },
       { path: "/admin/stock-adjustments", icon: ClipboardCheck, label: "Kiểm kho / Điều chỉnh" },
       { path: "/admin/inventory-report", icon: BarChart3, label: "Báo cáo tồn kho" },
     ]

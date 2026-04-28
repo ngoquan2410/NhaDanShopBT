@@ -64,6 +64,11 @@ public class ProductBatch {
     @JoinColumn(name = "receipt_id")
     private InventoryReceipt receipt;
 
+    /** Phiếu sản xuất tạo lô thành phẩm (nullable; chỉ khi là output batch Production). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "production_order_id")
+    private ProductionOrder productionOrder;
+
     /** Mã lô: BATCH-{receiptNo}-{productCode} hoặc INIT-{productCode} */
     @Column(name = "batch_code", nullable = false, unique = true, length = 80)
     private String batchCode;

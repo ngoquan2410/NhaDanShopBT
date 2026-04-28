@@ -7,12 +7,26 @@ import type {
   PendingOrder,
   PendingOrderListParams,
   PendingOrderStatus,
+  PricingBreakdownSnapshot,
 } from "@/services/types";
 import { readJson, writeJson } from "./storage";
 import { generateOrderCode, uid } from "@/services/utils/ids";
 import { addHoursIso, nowIso } from "@/services/utils/date";
 
 const KEY = "pending_orders:v1";
+
+const EMPTY_PRICING: PricingBreakdownSnapshot = {
+  subtotal: 0,
+  manualDiscount: 0,
+  promotionDiscount: 0,
+  voucherDiscount: 0,
+  shippingFee: 0,
+  shippingDiscount: 0,
+  vatBase: 0,
+  vatPercent: 0,
+  vatAmount: 0,
+  total: 0,
+};
 
 function load(): PendingOrder[] {
   return readJson<PendingOrder[]>(KEY, []);
@@ -70,11 +84,11 @@ export class LocalPendingOrderAdapter implements PendingOrderService {
       customerPhone: input.customerPhone,
       shippingAddress: input.shippingAddress,
       paymentMethod: input.paymentMethod,
-      lines: input.lines,
+      lines: input.lines ?? [],
       promotionSnapshot: input.promotionSnapshot ?? null,
       voucherSnapshot: input.voucherSnapshot ?? null,
       shippingQuoteSnapshot: input.shippingQuoteSnapshot ?? null,
-      pricingBreakdownSnapshot: input.pricingBreakdownSnapshot,
+      pricingBreakdownSnapshot: input.pricingBreakdownSnapshot ?? EMPTY_PRICING,
       note: input.note,
     };
     save([order, ...load()]);

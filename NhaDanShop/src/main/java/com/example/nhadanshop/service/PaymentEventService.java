@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.crypto.codec.Hex;
@@ -35,6 +36,7 @@ import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PaymentEventService {
@@ -102,11 +104,11 @@ public class PaymentEventService {
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy đơn hàng mã: " + orderCode));
 
         attachEventToOrder(event, order, linkedBy);
-        maybeMarkOrderPaidAuto(order, event.getAmount());
+        boolean autoConfirmed = maybeMarkOrderPaidAuto(order, event.getAmount());
 
         paymentEventRepository.save(event);
         PendingOrderResponse pendingOrder = pendingOrderService.getById(order.getId());
-        return new PaymentEventLinkResponse(toResponse(event), pendingOrder, false);
+        return new PaymentEventLinkResponse(toResponse(event), pendingOrder, autoConfirmed);
     }
 
     @Transactional
@@ -206,19 +208,26 @@ public class PaymentEventService {
     }
 
     private boolean maybeMarkOrderPaidAuto(PendingOrder order, BigDecimal amount) {
-        if (amount == null || order == null || order.getStatus() == PendingOrder.Status.CONFIRMED
-                || order.getStatus() == PendingOrder.Status.CANCELLED) {
+        if (amount == null || order == null || order.getStatus() == PendingOrder.Status.CANCELLED) {
+            return false;
+        }
+        if (order.getStatus() == PendingOrder.Status.CONFIRMED) {
+            PendingOrder fresh = pendingOrderRepository.findById(order.getId()).orElse(order);
+            return fresh.getInvoice() != null;
+        }
+        if (!"bank_transfer".equals(order.getPaymentMethod())) {
             return false;
         }
         if (amount.compareTo(order.getTotalAmount()) < 0) {
             return false;
         }
-        if (order.getStatus() != PendingOrder.Status.PAID_AUTO) {
-            order.setStatus(PendingOrder.Status.PAID_AUTO);
-            pendingOrderRepository.save(order);
+        try {
+            pendingOrderService.confirmOrder(order.getId(), null, "casso:webhook");
             return true;
+        } catch (Exception ex) {
+            log.warn("Casso auto-confirm failed for {}: {}", order.getOrderNo(), ex.toString());
+            return false;
         }
-        return false;
     }
 
     private void validateWebhookAuth(

@@ -10,5 +10,8 @@ public record PendingOrderItemResponse(
         String variantName,
         Integer qty,
         BigDecimal unitPrice,
-        BigDecimal lineSubtotal
+        BigDecimal lineSubtotal,
+        Long batchId,
+        boolean rewardLine,
+        BigDecimal originalUnitPrice
 ) {}

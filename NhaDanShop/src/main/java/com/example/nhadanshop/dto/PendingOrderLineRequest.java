@@ -15,5 +15,10 @@ public record PendingOrderLineRequest(
         @Size(max = 255) String variantName,
         @NotNull @Min(1) Integer qty,
         @NotNull BigDecimal unitPrice,
-        @NotNull BigDecimal lineSubtotal
+        @NotNull BigDecimal lineSubtotal,
+        /** Optional: exact batch trace at checkout (stock only). */
+        Long batchId,
+        /** True for reward/free tier lines from quote/catalog promotion snapshots. */
+        Boolean rewardLine,
+        BigDecimal originalUnitPrice
 ) {}

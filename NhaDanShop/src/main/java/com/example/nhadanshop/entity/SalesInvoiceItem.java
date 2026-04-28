@@ -70,6 +70,10 @@ public class SalesInvoiceItem {
     @Column(name = "combo_unit_price", precision = 18, scale = 2)
     private BigDecimal comboUnitPrice;
 
+    /** Zero-revenue reward/free line (Slice 6C); stock and COGS still apply. */
+    @Column(name = "reward_line", nullable = false)
+    private boolean rewardLine = false;
+
     @OneToMany(mappedBy = "invoiceItem", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<SalesInvoiceItemBatchAllocation> batchAllocations = new ArrayList<>();
 }

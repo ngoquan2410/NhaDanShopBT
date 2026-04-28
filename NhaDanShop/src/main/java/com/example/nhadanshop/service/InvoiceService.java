@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.nhadanshop.dto.InvoiceItemRequest;
 import com.example.nhadanshop.dto.PricingBreakdownSnapshotDto;
 import com.example.nhadanshop.dto.PromotionSnapshotDto;
+import com.example.nhadanshop.dto.SalesQuoteCapturedLineDto;
+import com.example.nhadanshop.dto.SalesQuotePayloadDto;
 import com.example.nhadanshop.dto.SalesInvoiceRequest;
 import com.example.nhadanshop.dto.SalesInvoiceResponse;
 import com.example.nhadanshop.entity.PendingOrder;
@@ -18,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +28,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.Locale;
 import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -57,9 +61,17 @@ public class InvoiceService {
     private final StockMutationService stockMutationService;
     private final Clock clock;
     private final ObjectMapper objectMapper;
+    private final SalesQuoteRepository salesQuoteRepository;
 
     @Transactional
     public SalesInvoiceResponse createInvoice(SalesInvoiceRequest req) {
+        boolean quoteMode = req.quotePublicId() != null && !req.quotePublicId().isBlank();
+        if (quoteMode) {
+            return createInvoiceFromQuoteRequest(req);
+        }
+        if (req.items() == null || req.items().isEmpty()) {
+            throw new IllegalArgumentException("Thieu dong ban hang (legacy invoice)");
+        }
         SalesInvoice invoice = new SalesInvoice();
         invoice.setInvoiceNo(numberGen.nextInvoiceNo());
         invoice.setNote(req.note());
@@ -124,17 +136,25 @@ public class InvoiceService {
             variant = variantRepo.findByIdForUpdate(variantId)
                     .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy variant ID: " + variantId));
 
-            // Kiểm tra tồn kho theo variant
-            if (variant.getStockQty() < itemReq.quantity()) {
-                throw new IllegalArgumentException(
-                        "San pham '" + product.getName() + "' [" + variant.getVariantCode() + "] " +
-                        "khong du hang. Ton kho: " + variant.getStockQty() +
-                        ", yeu cau: " + itemReq.quantity());
+            if (itemReq.batchId() == null) {
+                // Kiểm tra tồn kho theo variant (projection) — Slice 6B exact-batch path validates the batch row instead
+                if (variant.getStockQty() < itemReq.quantity()) {
+                    throw new IllegalArgumentException(
+                            "San pham '" + product.getName() + "' [" + variant.getVariantCode() + "] " +
+                            "khong du hang. Ton kho: " + variant.getStockQty() +
+                            ", yeu cau: " + itemReq.quantity());
+                }
             }
 
-            // FEFO deduct theo variant_id
-            ProductBatchService.DeductionResult deductionResult = batchService.deductStockFEFOWithTrace(
-                    product.getId(), variant.getId(), itemReq.quantity());
+            ProductBatchService.DeductionResult deductionResult;
+            if (itemReq.batchId() != null) {
+                deductionResult = batchService.deductExactBatchWithTrace(
+                        product.getId(), variant.getId(), itemReq.batchId(), itemReq.quantity());
+            } else {
+                // FEFO deduct theo variant_id
+                deductionResult = batchService.deductStockFEFOWithTrace(
+                        product.getId(), variant.getId(), itemReq.quantity());
+            }
             affectedProductIds.add(product.getId());
 
             BigDecimal lineDiscPct = itemReq.discountPercent() != null ? itemReq.discountPercent() : BigDecimal.ZERO;
@@ -151,8 +171,14 @@ public class InvoiceService {
             item.setOriginalUnitPrice(variant.getSellPrice());
             item.setLineDiscountPercent(lineDiscPct);
             item.setUnitPrice(actualUnitPrice);
-            item.setUnitCostSnapshot(deductionResult.averageCost().compareTo(BigDecimal.ZERO) > 0
-                    ? deductionResult.averageCost() : variant.getCostPrice());
+            BigDecimal costSnap;
+            if (itemReq.batchId() != null) {
+                costSnap = deductionResult.averageCost();
+            } else {
+                costSnap = deductionResult.averageCost().compareTo(BigDecimal.ZERO) > 0
+                        ? deductionResult.averageCost() : variant.getCostPrice();
+            }
+            item.setUnitCostSnapshot(costSnap);
             appendBatchAllocations(item, deductionResult.batchDeductions());
             // comboSourceId = null (bán lẻ thường)
 
@@ -162,11 +188,13 @@ public class InvoiceService {
 
         invoice.setTotalAmount(totalAmount);
         invoice.getItems().addAll(items);
+        if (req.paymentMethod() != null && !req.paymentMethod().isBlank()) {
+            invoice.setPaymentMethod(req.paymentMethod());
+        }
 
         BigDecimal discountAmount = BigDecimal.ZERO;
         if (promo != null) {
-            validatePromotionEligibility(promo, items);
-            discountAmount = computePromotionDiscount(promo, items, totalAmount);
+            discountAmount = CommercialPricingEngine.computePromotionDiscount(promo, items, totalAmount);
             invoice.setPromotionId(promo.getId());
             invoice.setPromotionName(promo.getName());
         }
@@ -185,6 +213,282 @@ public class InvoiceService {
         }
 
         return DtoMapper.toResponse(saved);
+    }
+
+    /**
+     * Quote mode: materialize invoice lines from persisted {@link SalesQuote} snapshot (no catalog price recompute).
+     */
+    @Transactional
+    public SalesInvoiceResponse createInvoiceFromQuoteRequest(SalesInvoiceRequest req) {
+        SalesQuote quote = salesQuoteRepository.findByPublicIdForUpdate(req.quotePublicId())
+                .orElseThrow(() -> new EntityNotFoundException("Khong tim thay quote: " + req.quotePublicId()));
+        if (quote.getConsumedPendingOrder() != null) {
+            throw new IllegalStateException("Quote da gan don hang cho — khong tao hoa don truc tiep");
+        }
+        if (quote.getConsumedInvoice() != null) {
+            throw new IllegalStateException("Quote da duoc su dung");
+        }
+        if (quote.isExpired(clock)) {
+            throw new IllegalStateException("Quote da het han");
+        }
+
+        SalesQuotePayloadDto payload;
+        try {
+            payload = objectMapper.readValue(quote.getPayloadJson(), SalesQuotePayloadDto.class);
+        } catch (Exception e) {
+            throw new IllegalStateException("Khong doc duoc quote payload", e);
+        }
+
+        SalesInvoice invoice = new SalesInvoice();
+        invoice.setInvoiceNo(numberGen.nextInvoiceNo());
+        invoice.setNote(req.note());
+        invoice.setInvoiceDate(LocalDateTime.now(clock));
+        invoice.setSourceType(mapQuoteSourceToInvoice(payload.source()));
+        if (req.paymentMethod() != null && !req.paymentMethod().isBlank()) {
+            invoice.setPaymentMethod(req.paymentMethod());
+        }
+        invoice.setPricingBreakdownSnapshotJson(writeJson(payload.pricingBreakdownSnapshot()));
+        invoice.setPromotionSnapshotJson(writeJson(payload.promotionSnapshot()));
+        invoice.setVoucherSnapshotJson(writeJson(payload.voucherSnapshot()));
+        invoice.setShippingQuoteSnapshotJson(writeJson(payload.shippingQuoteSnapshot()));
+
+        String currentUsername = SecurityContextHolder.getContext().getAuthentication().getName();
+        userRepo.findByUsername(currentUsername).ifPresent(invoice::setCreatedBy);
+
+        if (req.customerId() != null) {
+            customerRepository.findById(req.customerId()).ifPresent(customer -> {
+                ActiveEntityGuards.requireActiveCustomerForBinding(customer, req.customerId());
+                invoice.setCustomer(customer);
+                invoice.setCustomerName(customer.getName());
+            });
+        }
+        if (invoice.getCustomerName() == null && req.customerName() != null) {
+            invoice.setCustomerName(req.customerName());
+        }
+
+        PricingBreakdownSnapshotDto pricing = payload.pricingBreakdownSnapshot();
+        if (pricing == null) {
+            throw new IllegalStateException("Quote thieu pricingBreakdownSnapshot");
+        }
+        invoice.setVatPercent(nvl(pricing.vatPercent()));
+        invoice.setTotalAmount(
+                nvl(pricing.subtotal())
+                        .add(nvl(pricing.shippingFee()))
+                        .add(nvl(pricing.vatAmount()))
+        );
+        invoice.setDiscountAmount(
+                nvl(pricing.manualDiscount())
+                        .add(nvl(pricing.promotionDiscount()))
+                        .add(nvl(pricing.voucherDiscount()))
+                        .add(nvl(pricing.shippingDiscount()))
+        );
+
+        PromotionSnapshotDto promoSnap = payload.promotionSnapshot();
+        if (promoSnap != null) {
+            invoice.setPromotionId(parseNullableLong(promoSnap.promotionId()));
+            invoice.setPromotionName(promoSnap.name());
+        }
+
+        Set<Long> affectedProductIds = new java.util.HashSet<>();
+        for (SalesQuoteCapturedLineDto line : payload.lines()) {
+            appendCapturedQuoteLine(invoice, line, affectedProductIds);
+        }
+        for (SalesQuoteCapturedLineDto line : payload.rewardLines()) {
+            appendCapturedQuoteLine(invoice, line, affectedProductIds);
+        }
+
+        SalesInvoice saved = invoiceRepo.save(invoice);
+        quote.setConsumedAt(LocalDateTime.now(clock));
+        quote.setConsumedInvoice(saved);
+        salesQuoteRepository.save(quote);
+
+        appendInvoiceDeductionMovements(saved);
+        affectedProductIds.forEach(comboService::refreshCombosContaining);
+
+        if (saved.getCustomer() != null) {
+            customerService.addSpend(
+                    saved.getCustomer().getId(),
+                    saved.getTotalAmount().subtract(saved.getDiscountAmount())
+            );
+        }
+
+        return DtoMapper.toResponse(saved);
+    }
+
+    private void appendCapturedQuoteLine(SalesInvoice invoice, SalesQuoteCapturedLineDto cap, Set<Long> affectedProductIds) {
+        Product product = productRepo.findById(cap.productId())
+                .orElseThrow(() -> new EntityNotFoundException("Khong tim thay san pham ID: " + cap.productId()));
+        if (!product.getActive()) {
+            throw new IllegalArgumentException("San pham '" + product.getName() + "' da ngung kinh doanh");
+        }
+
+        ProductVariant resolved = variantService.resolveVariant(cap.variantId(), product.getId(), true);
+        ProductVariant variant = variantRepo.findByIdForUpdate(resolved.getId())
+                .orElseThrow(() -> new EntityNotFoundException("Khong tim thay variant ID: " + resolved.getId()));
+
+        if (!cap.rewardLine()) {
+            if (cap.batchId() == null && variant.getStockQty() < cap.quantity()) {
+                throw new IllegalArgumentException(
+                        "Khong du hang variant " + variant.getVariantCode()
+                                + ". Ton: " + variant.getStockQty() + ", can: " + cap.quantity());
+            }
+        } else if (variant.getStockQty() < cap.quantity()) {
+            throw new IllegalArgumentException(
+                    "Khong du hang reward variant " + variant.getVariantCode());
+        }
+
+        ProductBatchService.DeductionResult deductionResult;
+        if (cap.batchId() != null) {
+            deductionResult = batchService.deductExactBatchWithTrace(
+                    product.getId(), variant.getId(), cap.batchId(), cap.quantity());
+        } else {
+            deductionResult = batchService.deductStockFEFOWithTrace(
+                    product.getId(), variant.getId(), cap.quantity());
+        }
+        affectedProductIds.add(product.getId());
+
+        SalesInvoiceItem item = new SalesInvoiceItem();
+        item.setInvoice(invoice);
+        item.setProduct(product);
+        item.setVariant(variant);
+        item.setQuantity(cap.quantity());
+        BigDecimal orig = cap.originalUnitPrice() != null ? cap.originalUnitPrice() : variant.getSellPrice();
+        item.setOriginalUnitPrice(orig);
+        BigDecimal lineDisc = cap.discountPercent() != null ? cap.discountPercent() : BigDecimal.ZERO;
+        item.setLineDiscountPercent(lineDisc);
+        item.setRewardLine(cap.rewardLine());
+        if (cap.rewardLine()) {
+            item.setUnitPrice(BigDecimal.ZERO);
+        } else {
+            item.setUnitPrice(cap.unitPrice());
+        }
+        BigDecimal costSnap = deductionResult.averageCost().compareTo(BigDecimal.ZERO) > 0
+                ? deductionResult.averageCost()
+                : variant.getCostPrice();
+        item.setUnitCostSnapshot(costSnap);
+        appendBatchAllocations(item, deductionResult.batchDeductions());
+        invoice.getItems().add(item);
+    }
+
+    private String writeJson(Object value) {
+        if (value == null) return null;
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new IllegalStateException("Không serialize snapshot", e);
+        }
+    }
+
+    private void appendPendingOrderLine(
+            SalesInvoice invoice,
+            PendingOrderItem orderItem,
+            Set<Long> affectedProductIds) {
+        Product product = productRepo.findById(orderItem.getProduct().getId())
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "Khong tim thay san pham ID: " + orderItem.getProduct().getId()));
+
+        if (!product.getActive()) {
+            throw new IllegalArgumentException("San pham '" + product.getName() + "' da ngung kinh doanh");
+        }
+        if (product.isCombo()) {
+            throw new IllegalArgumentException(
+                    "San pham '" + product.getName() + "' la combo. Slice 2 chi ho tro xac nhan lai theo dong pending-order.");
+        }
+
+        Long variantId = orderItem.getVariant() != null ? orderItem.getVariant().getId() : null;
+        ProductVariant resolvedVariant = variantService.resolveVariant(variantId, product.getId(), true);
+        ProductVariant variant = variantRepo.findByIdForUpdate(resolvedVariant.getId())
+                .orElseThrow(() -> new EntityNotFoundException("Khong tim thay variant ID: " + resolvedVariant.getId()));
+
+        Long batchDbId = orderItem.getBatch() != null ? orderItem.getBatch().getId() : null;
+        boolean reward = orderItem.isRewardLine();
+        if (!reward && batchDbId == null && variant.getStockQty() < orderItem.getQuantity()) {
+            throw new IllegalArgumentException(
+                    "San pham '" + product.getName() + "' [" + variant.getVariantCode() + "] " +
+                            "khong du hang. Ton kho: " + variant.getStockQty() +
+                            ", yeu cau: " + orderItem.getQuantity());
+        }
+        if (reward && variant.getStockQty() < orderItem.getQuantity()) {
+            throw new IllegalArgumentException(
+                    "San pham '" + product.getName() + "' [reward] khong du hang. Ton kho: " + variant.getStockQty() +
+                            ", yeu cau: " + orderItem.getQuantity());
+        }
+
+        ProductBatchService.DeductionResult deductionResult;
+        if (batchDbId != null) {
+            deductionResult = batchService.deductExactBatchWithTrace(
+                    product.getId(), variant.getId(), batchDbId, orderItem.getQuantity());
+        } else {
+            deductionResult = batchService.deductStockFEFOWithTrace(
+                    product.getId(), variant.getId(), orderItem.getQuantity());
+        }
+        affectedProductIds.add(product.getId());
+
+        SalesInvoiceItem item = new SalesInvoiceItem();
+        item.setInvoice(invoice);
+        item.setProduct(product);
+        item.setVariant(variant);
+        item.setQuantity(orderItem.getQuantity());
+        BigDecimal lineUnit = nvl(orderItem.getUnitPrice());
+        BigDecimal orig = orderItem.getOriginalUnitPrice() != null
+                ? orderItem.getOriginalUnitPrice()
+                : (reward ? variant.getSellPrice() : lineUnit);
+        item.setOriginalUnitPrice(orig);
+        item.setLineDiscountPercent(BigDecimal.ZERO);
+        item.setRewardLine(reward);
+        item.setUnitPrice(reward ? BigDecimal.ZERO : lineUnit);
+        item.setUnitCostSnapshot(deductionResult.averageCost().compareTo(BigDecimal.ZERO) > 0
+                ? deductionResult.averageCost() : variant.getCostPrice());
+        appendBatchAllocations(item, deductionResult.batchDeductions());
+        invoice.getItems().add(item);
+    }
+
+    /**
+     * Finalizes quote consumption when confirming a {@link PendingOrder} that referenced the quote.
+     * Reserved quotes (pending order preview) skip quote expiry re-validation — the order snapshot is authoritative (Slice 6C).
+     */
+    private void finalizeQuoteLinkedToPendingOrder(String quotePublicId, SalesInvoice saved, long pendingOrderId) {
+        if (quotePublicId == null || quotePublicId.isBlank()) {
+            return;
+        }
+        SalesQuote q = salesQuoteRepository.findByPublicIdForUpdate(quotePublicId).orElse(null);
+        if (q == null) {
+            return;
+        }
+        if (q.getConsumedInvoice() != null) {
+            if (q.getConsumedInvoice().getId().equals(saved.getId())) {
+                return;
+            }
+            throw new IllegalStateException("Quote da gan hoa don khac");
+        }
+        PendingOrder reservedFor = q.getConsumedPendingOrder();
+        if (reservedFor != null) {
+            if (!reservedFor.getId().equals(pendingOrderId)) {
+                throw new IllegalStateException("Quote khong khop don hang dang xac nhan");
+            }
+        } else {
+            if (q.getConsumedAt() != null) {
+                throw new IllegalStateException("Quote trang thai tieu thu khong hop le");
+            }
+            if (q.isExpired(clock)) {
+                throw new IllegalStateException("Quote da het han");
+            }
+            q.setConsumedAt(LocalDateTime.now(clock));
+        }
+        q.setConsumedInvoice(saved);
+        salesQuoteRepository.save(q);
+    }
+
+    private static SalesInvoice.SourceType mapQuoteSourceToInvoice(String source) {
+        if (source == null || source.isBlank()) {
+            return SalesInvoice.SourceType.POS;
+        }
+        return switch (source.trim().toLowerCase(Locale.ROOT)) {
+            case "storefront" -> SalesInvoice.SourceType.ONLINE_PENDING;
+            case "admin" -> SalesInvoice.SourceType.MANUAL;
+            case "pos" -> SalesInvoice.SourceType.POS;
+            default -> SalesInvoice.SourceType.POS;
+        };
     }
 
     @Transactional
@@ -208,8 +512,13 @@ public class InvoiceService {
         invoice.setShippingQuoteSnapshotJson(order.getShippingQuoteSnapshotJson());
         invoice.setPricingBreakdownSnapshotJson(order.getPricingBreakdownSnapshotJson());
 
-        String currentUsername = SecurityContextHolder.getContext().getAuthentication().getName();
-        userRepo.findByUsername(currentUsername).ifPresent(invoice::setCreatedBy);
+        Authentication invoiceAuth = SecurityContextHolder.getContext().getAuthentication();
+        if (invoiceAuth != null
+                && invoiceAuth.isAuthenticated()
+                && invoiceAuth.getName() != null
+                && !"anonymousUser".equals(invoiceAuth.getName())) {
+            userRepo.findByUsername(invoiceAuth.getName()).ifPresent(invoice::setCreatedBy);
+        }
 
         Long customerId = parseNullableLong(order.getCustomerId());
         if (customerId != null) {
@@ -243,54 +552,17 @@ public class InvoiceService {
                         .add(nvl(pricing.shippingDiscount()))
         );
 
-        List<SalesInvoiceItem> items = new ArrayList<>();
         Set<Long> affectedProductIds = new java.util.HashSet<>();
         for (PendingOrderItem orderItem : order.getItems()) {
-            Product product = productRepo.findById(orderItem.getProduct().getId())
-                    .orElseThrow(() -> new EntityNotFoundException(
-                            "Khong tim thay san pham ID: " + orderItem.getProduct().getId()));
-
-            if (!product.getActive()) {
-                throw new IllegalArgumentException("San pham '" + product.getName() + "' da ngung kinh doanh");
-            }
-            if (product.isCombo()) {
-                throw new IllegalArgumentException(
-                        "San pham '" + product.getName() + "' la combo. Slice 2 chi ho tro xac nhan lai theo dong pending-order.");
-            }
-
-            Long variantId = orderItem.getVariant() != null ? orderItem.getVariant().getId() : null;
-            ProductVariant resolvedVariant = variantService.resolveVariant(variantId, product.getId(), true);
-            Long lockedVariantId = resolvedVariant.getId();
-            ProductVariant variant = variantRepo.findByIdForUpdate(lockedVariantId)
-                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy variant ID: " + lockedVariantId));
-
-            if (variant.getStockQty() < orderItem.getQuantity()) {
-                throw new IllegalArgumentException(
-                        "San pham '" + product.getName() + "' [" + variant.getVariantCode() + "] " +
-                                "khong du hang. Ton kho: " + variant.getStockQty() +
-                                ", yeu cau: " + orderItem.getQuantity());
-            }
-
-            ProductBatchService.DeductionResult deductionResult = batchService.deductStockFEFOWithTrace(
-                    product.getId(), variant.getId(), orderItem.getQuantity());
-            affectedProductIds.add(product.getId());
-
-            SalesInvoiceItem item = new SalesInvoiceItem();
-            item.setInvoice(invoice);
-            item.setProduct(product);
-            item.setVariant(variant);
-            item.setQuantity(orderItem.getQuantity());
-            item.setOriginalUnitPrice(nvl(orderItem.getUnitPrice()));
-            item.setLineDiscountPercent(BigDecimal.ZERO);
-            item.setUnitPrice(nvl(orderItem.getUnitPrice()));
-            item.setUnitCostSnapshot(deductionResult.averageCost().compareTo(BigDecimal.ZERO) > 0
-                    ? deductionResult.averageCost() : variant.getCostPrice());
-            appendBatchAllocations(item, deductionResult.batchDeductions());
-            items.add(item);
+            appendPendingOrderLine(invoice, orderItem, affectedProductIds);
         }
 
-        invoice.getItems().addAll(items);
         SalesInvoice saved = invoiceRepo.save(invoice);
+
+        if (order.getQuotePublicId() != null && !order.getQuotePublicId().isBlank()) {
+            finalizeQuoteLinkedToPendingOrder(order.getQuotePublicId(), saved, order.getId());
+        }
+
         appendInvoiceDeductionMovements(saved);
         affectedProductIds.forEach(comboService::refreshCombosContaining);
 
@@ -418,63 +690,6 @@ public class InvoiceService {
         }
 
         return totalComboRevenue;
-    }
-
-    private void validatePromotionEligibility(Promotion promo, List<SalesInvoiceItem> items) {
-        String appliesTo = promo.getAppliesTo();
-        if ("PRODUCT".equals(appliesTo)) {
-            Set<Long> eligibleIds = promo.getProducts().stream().map(Product::getId).collect(Collectors.toSet());
-            boolean hasEligible = items.stream().anyMatch(i -> eligibleIds.contains(i.getProduct().getId()));
-            if (!hasEligible) {
-                String names = promo.getProducts().stream().map(Product::getName).collect(Collectors.joining(", "));
-                throw new IllegalArgumentException("Chuong trinh KM '" + promo.getName()
-                        + "' chi ap dung cho san pham: " + names);
-            }
-        } else if ("CATEGORY".equals(appliesTo)) {
-            Set<Long> eligibleCatIds = promo.getCategories().stream().map(Category::getId).collect(Collectors.toSet());
-            boolean hasEligible = items.stream().anyMatch(i -> eligibleCatIds.contains(i.getProduct().getCategory().getId()));
-            if (!hasEligible) {
-                String names = promo.getCategories().stream().map(Category::getName).collect(Collectors.joining(", "));
-                throw new IllegalArgumentException("Chuong trinh KM '" + promo.getName()
-                        + "' chi ap dung cho danh muc: " + names);
-            }
-        }
-    }
-
-    private BigDecimal computePromotionDiscount(Promotion promo, List<SalesInvoiceItem> items, BigDecimal totalAmount) {
-        BigDecimal eligibleAmount = computeEligibleAmount(promo, items, totalAmount);
-        if (totalAmount.compareTo(promo.getMinOrderValue()) < 0) return BigDecimal.ZERO;
-        return switch (promo.getType()) {
-            case "PERCENT_DISCOUNT" -> {
-                BigDecimal pct = promo.getDiscountValue().divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP);
-                BigDecimal disc = eligibleAmount.multiply(pct).setScale(0, RoundingMode.HALF_UP);
-                if (promo.getMaxDiscount() != null && disc.compareTo(promo.getMaxDiscount()) > 0) disc = promo.getMaxDiscount();
-                yield disc;
-            }
-            case "FIXED_DISCOUNT" -> {
-                BigDecimal disc = promo.getDiscountValue();
-                yield disc.compareTo(eligibleAmount) > 0 ? eligibleAmount : disc;
-            }
-            default -> BigDecimal.ZERO;
-        };
-    }
-
-    private BigDecimal computeEligibleAmount(Promotion promo, List<SalesInvoiceItem> items, BigDecimal totalAmount) {
-        String appliesTo = promo.getAppliesTo();
-        if (appliesTo == null || "ALL".equals(appliesTo)) return totalAmount;
-        if ("PRODUCT".equals(appliesTo)) {
-            Set<Long> ids = promo.getProducts().stream().map(Product::getId).collect(Collectors.toSet());
-            return items.stream().filter(i -> ids.contains(i.getProduct().getId()))
-                    .map(i -> i.getUnitPrice().multiply(BigDecimal.valueOf(i.getQuantity())))
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-        }
-        if ("CATEGORY".equals(appliesTo)) {
-            Set<Long> ids = promo.getCategories().stream().map(Category::getId).collect(Collectors.toSet());
-            return items.stream().filter(i -> ids.contains(i.getProduct().getCategory().getId()))
-                    .map(i -> i.getUnitPrice().multiply(BigDecimal.valueOf(i.getQuantity())))
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-        }
-        return totalAmount;
     }
 
     private String buildPendingOrderInvoiceNote(PendingOrder order, String confirmedBy) {

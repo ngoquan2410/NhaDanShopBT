@@ -117,8 +117,11 @@ public class SecurityConfig {
                         .requestMatchers("/api/receipts/**").hasRole("ADMIN")
                         // Invoices
                         .requestMatchers(HttpMethod.GET, "/api/invoices/**").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/sales/quote").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/invoices/**").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/invoices/**").hasRole("ADMIN")
+                        // POS traceability scan (Slice 6B): authenticated same as invoice create/read surface
+                        .requestMatchers(HttpMethod.GET, "/api/pos/scan/**").authenticated()
                         // Pending orders
                         .requestMatchers(HttpMethod.POST, "/api/pending-orders").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/pending-orders/by-code/*").permitAll()
@@ -150,6 +153,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/stock-adjustments/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/stock-adjustments/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/stock-adjustments/**").hasRole("ADMIN")
+                        .requestMatchers("/api/production-recipes/**").hasRole("ADMIN")
+                        .requestMatchers("/api/production-orders/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 );
         return http.build();

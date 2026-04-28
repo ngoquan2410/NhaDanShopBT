@@ -11,6 +11,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Service
@@ -90,6 +91,37 @@ public class VoucherService {
         } else if (isCreate) {
             v.setActive(true);
         }
+        if (req.minSubtotal() != null) {
+            v.setMinSubtotal(req.minSubtotal());
+        } else if (isCreate) {
+            v.setMinSubtotal(BigDecimal.ZERO);
+        }
+        if (req.percent() != null) {
+            v.setPercent(req.percent());
+        } else if (isCreate) {
+            v.setPercent(BigDecimal.ZERO);
+        }
+        if (req.cap() != null) {
+            v.setCap(req.cap());
+        } else if (isCreate) {
+            v.setCap(BigDecimal.ZERO);
+        }
+        if (req.fixedAmount() != null) {
+            v.setFixedAmount(req.fixedAmount());
+        } else if (isCreate) {
+            v.setFixedAmount(BigDecimal.ZERO);
+        }
+        if (req.freeShipping() != null) {
+            v.setFreeShipping(req.freeShipping());
+        } else if (isCreate) {
+            v.setFreeShipping(false);
+        }
+        if (req.startAt() != null || isCreate) {
+            v.setStartAt(req.startAt());
+        }
+        if (req.endAt() != null || isCreate) {
+            v.setEndAt(req.endAt());
+        }
     }
 
     private VoucherResponse toResponse(Voucher v) {
@@ -98,8 +130,19 @@ public class VoucherService {
                 v.getCode(),
                 v.getRuleSummary(),
                 Boolean.TRUE.equals(v.getActive()),
+                nvl(v.getMinSubtotal()),
+                nvl(v.getPercent()),
+                nvl(v.getCap()),
+                nvl(v.getFixedAmount()),
+                Boolean.TRUE.equals(v.getFreeShipping()),
+                v.getStartAt(),
+                v.getEndAt(),
                 v.getCreatedAt(),
                 v.getUpdatedAt()
         );
+    }
+
+    private static BigDecimal nvl(BigDecimal b) {
+        return b == null ? BigDecimal.ZERO : b;
     }
 }

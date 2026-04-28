@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +28,7 @@ public class ProductBatchService {
     private final ProductRepository productRepo;
     private final SalesInvoiceItemBatchAllocationRepository allocationRepo;
     private final StockMutationService stockMutationService;
+    private final Clock businessClock;
 
     public record BatchDeduction(Long batchId, int deductedQty) {}
 
@@ -68,7 +70,7 @@ public class ProductBatchService {
      * Mặc định 30 ngày.
      */
     public List<ProductBatchResponse> getExpiringBatches(int daysAhead) {
-        LocalDate threshold = LocalDate.now().plusDays(daysAhead);
+        LocalDate threshold = LocalDate.now(businessClock).plusDays(daysAhead);
         return batchRepo.findExpiringBatches(threshold)
                 .stream().map(this::toResponse).toList();
     }
@@ -77,7 +79,7 @@ public class ProductBatchService {
      * Lô đã HẾT HẠN mà vẫn còn hàng tồn → cần xử lý / tiêu hủy.
      */
     public List<ProductBatchResponse> getExpiredBatchesWithStock() {
-        return batchRepo.findExpiredWithStock(LocalDate.now())
+        return batchRepo.findExpiredWithStock(LocalDate.now(businessClock))
                 .stream().map(this::toResponse).toList();
     }
 
@@ -135,8 +137,9 @@ public class ProductBatchService {
             // Log warning để dễ phát hiện code path cũ còn sót.
             log.warn("[Fix#4] deductStockFEFOAndComputeCost called with productId={} only — " +
                     "prefer overload with variantId for accuracy", productId);
-            // Slice 3: sale path uses unified sellable predicate (active batch, non-expired, product+variant active)
-            List<ProductBatch> batches = batchRepo.findSellableByProductIdForUpdateFefo(productId);
+            // Slice 3: sale path uses unified sellable predicate (active batch, non-expired, product+variant active + sellable)
+            LocalDate asOf = LocalDate.now(businessClock);
+            List<ProductBatch> batches = batchRepo.findSellableByProductIdForUpdateFefo(productId, asOf);
             DeductionResult result = deductFromBatches(batches, qtyNeeded, "productId=" + productId);
             batches.stream()
                     .map(ProductBatch::getVariant)
@@ -164,10 +167,67 @@ public class ProductBatchService {
         if (variantId == null) return deductStockFEFOWithTrace(productId, null, qtyNeeded);
         if (qtyNeeded <= 0) return new DeductionResult(BigDecimal.ZERO, List.of());
         // Slice 3: sale FEFO uses unified sellable predicate; cancel/restore paths are unchanged
-        List<ProductBatch> batches = batchRepo.findSellableByVariantIdForUpdateFefo(variantId);
+        LocalDate asOf = LocalDate.now(businessClock);
+        List<ProductBatch> batches = batchRepo.findSellableByVariantIdForUpdateFefo(variantId, asOf);
         DeductionResult result = deductFromBatches(batches, qtyNeeded, "variantId=" + variantId);
         stockMutationService.syncVariantStockWithBatches(variantId);
         return result;
+    }
+
+    @Transactional
+    public DeductionResult deductExactBatchWithTrace(Long productId, Long variantId, Long batchId, int qtyNeeded) {
+        if (qtyNeeded <= 0) {
+            return new DeductionResult(BigDecimal.ZERO, List.of());
+        }
+        if (batchId == null) {
+            throw new IllegalArgumentException("batchId is required for exact batch deduction");
+        }
+        ProductBatch batch = batchRepo.findByIdForUpdate(batchId)
+                .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy lô hàng ID: " + batchId));
+
+        var v = batch.getVariant();
+        if (v == null) {
+            throw new IllegalStateException("Lô hàng không gắn variant; không thể bán định danh theo lô.");
+        }
+        var p = v.getProduct();
+        if (p == null || p.getId() == null) {
+            throw new IllegalStateException("Lô hàng không gắn sản phẩm hợp lệ.");
+        }
+        if (!p.getId().equals(productId)) {
+            throw new IllegalArgumentException("batchId không thuộc productId yêu cầu.");
+        }
+        if (!v.getId().equals(variantId)) {
+            throw new IllegalArgumentException("batchId không thuộc variantId yêu cầu.");
+        }
+        if (!Boolean.TRUE.equals(p.getActive())) {
+            throw new IllegalStateException("Sản phẩm đã ngừng kinh doanh; không bán lô này.");
+        }
+        if (!Boolean.TRUE.equals(v.getActive())) {
+            throw new IllegalStateException("Variant đã ngừng kinh doanh; không bán lô này.");
+        }
+        if (!Boolean.TRUE.equals(v.getIsSellable())) {
+            throw new IllegalStateException("Variant không bán lẻ (isSellable=false); không bán lô này tại POS.");
+        }
+        if (!ProductBatch.STATUS_ACTIVE.equals(batch.getStatus())) {
+            throw new IllegalStateException("Lô không ở trạng thái active; không thể bán.");
+        }
+        LocalDate today = LocalDate.now(businessClock);
+        if (batch.getExpiryDate().isBefore(today)) {
+            throw new IllegalStateException("Lô đã hết hạn; không thể bán.");
+        }
+        if (batch.getRemainingQty() < qtyNeeded) {
+            throw new IllegalStateException("Không đủ tồn trong lô '" + batch.getBatchCode()
+                    + "': còn " + batch.getRemainingQty() + ", yêu cầu " + qtyNeeded + ".");
+        }
+
+        BigDecimal unitCost = batch.getCostPrice() == null ? BigDecimal.ZERO : batch.getCostPrice();
+        batch.setRemainingQty(batch.getRemainingQty() - qtyNeeded);
+        batchRepo.save(batch);
+        stockMutationService.syncVariantStockWithBatches(variantId);
+
+        BigDecimal averageCost = unitCost.multiply(BigDecimal.valueOf(qtyNeeded))
+                .divide(BigDecimal.valueOf(qtyNeeded), 2, RoundingMode.HALF_UP);
+        return new DeductionResult(averageCost, List.of(new BatchDeduction(batch.getId(), qtyNeeded)));
     }
 
     private DeductionResult deductFromBatches(List<ProductBatch> batches, int qtyNeeded, String ctx) {
@@ -175,7 +235,7 @@ public class ProductBatchService {
             // Sellable FEFO: no batch passes active + non-expired + product/variant active (+ status active)
             throw new IllegalStateException(
                 "Không thể bán: " + ctx + " — không có lô hàng đủ điều kiện bán (còn hạn, trạng thái active, "
-                        + "sản phẩm/variant còn bán). Kiểm tra hết hạn, khóa lô, hoặc tồn thực tế chưa đủ.");
+                        + "sản phẩm/variant còn bán và variant bán lẻ). Kiểm tra hết hạn, khóa lô, hoặc tồn thực tế chưa đủ.");
         }
         BigDecimal totalCost = BigDecimal.ZERO;
         int remaining = qtyNeeded;

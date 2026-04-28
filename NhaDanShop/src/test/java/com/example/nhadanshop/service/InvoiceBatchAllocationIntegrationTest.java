@@ -96,7 +96,7 @@ class InvoiceBatchAllocationIntegrationTest {
         int sellQty = 7;
         SalesInvoiceRequest req = new SalesInvoiceRequest(
                 null, null, null, null,
-                List.of(new InvoiceItemRequest(variant.getProduct().getId(), sellQty, null, null, null)));
+                List.of(new InvoiceItemRequest(variant.getProduct().getId(), sellQty, null, null, null)), null);
 
         SalesInvoiceResponse created = invoiceService.createInvoice(req);
         assertEquals(0, batchRepository.findById(batchEarly.getId()).orElseThrow().getRemainingQty());
@@ -136,7 +136,7 @@ class InvoiceBatchAllocationIntegrationTest {
 
         SalesInvoiceRequest req = new SalesInvoiceRequest(
                 null, null, null, null,
-                List.of(new InvoiceItemRequest(variant.getProduct().getId(), 3, null, null, null)));
+                List.of(new InvoiceItemRequest(variant.getProduct().getId(), 3, null, null, null)), null);
 
         SalesInvoiceResponse created = invoiceService.createInvoice(req);
         assertEquals(17, batchRepository.findById(batch.getId()).orElseThrow().getRemainingQty());

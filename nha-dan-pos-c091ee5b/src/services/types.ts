@@ -112,7 +112,7 @@ export interface ShippingAddress {
   note?: string;
 }
 
-export type ShippingQuoteSource = "zone_fallback" | "carrier_api";
+export type ShippingQuoteSource = "zone_fallback" | "carrier_api" | "client_snapshot";
 export type ShippingQuoteStatus = "incomplete" | "loading" | "quoted" | "unavailable";
 
 export interface ShippingQuote {
@@ -257,6 +257,8 @@ export interface CartLine {
   qty: number;
   unitPrice: Money;
   lineSubtotal: Money;
+  /** Exact batch for stock trace only (Slice 6B/6C). */
+  batchId?: ID;
 }
 
 export interface GiftLine {
@@ -386,6 +388,9 @@ export interface PendingOrderLine {
   qty: number;
   unitPrice: Money;
   lineSubtotal: Money;
+  batchId?: ID;
+  rewardLine?: boolean;
+  originalUnitPrice?: Money;
 }
 
 export interface PendingOrder {
@@ -417,13 +422,16 @@ export interface CreatePendingOrderInput {
   paymentMethod: PaymentMethod;
   /** Transitional compatibility field. Backend generates `paymentReference = code`. */
   paymentReference?: string;
-  lines: PendingOrderLine[];
+  /** Omitted when {@link quotePublicId} is set (backend quote snapshot). */
+  lines?: PendingOrderLine[];
   promotionSnapshot?: PromotionSnapshot | null;
   voucherSnapshot?: VoucherSnapshot | null;
   shippingQuoteSnapshot?: ShippingQuoteSnapshot | null;
-  pricingBreakdownSnapshot: PricingBreakdownSnapshot;
+  pricingBreakdownSnapshot?: PricingBreakdownSnapshot;
   note?: string;
   expiresAt?: ISODateString;
+  /** Slice 6C: backend UUID from POST /api/sales/quote */
+  quotePublicId?: string;
 }
 
 export interface PendingOrderListParams extends ListQuery {

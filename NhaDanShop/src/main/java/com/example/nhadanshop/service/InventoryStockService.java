@@ -4,10 +4,12 @@ import com.example.nhadanshop.dto.InventoryStockReport;
 import com.example.nhadanshop.dto.InventoryStockReportRow;
 import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.entity.ProductVariant;
+import com.example.nhadanshop.repository.InventoryMovementRepository;
 import com.example.nhadanshop.repository.InventoryReceiptRepository;
 import com.example.nhadanshop.repository.ProductBatchRepository;
 import com.example.nhadanshop.repository.ProductVariantRepository;
 import com.example.nhadanshop.repository.SalesInvoiceRepository;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
@@ -19,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -31,18 +34,22 @@ import java.util.Map;
 /**
  * Service thống kê tồn kho theo kỳ và xuất Excel.
  *
- * Công thức tồn kho (tất cả theo đơn vị BÁN LẺ):
+ * Công thức tồn kho (tất cả theo đơn vị BÁN LẺ), sau Slice 6 inclusive of production ledger:
  *
- *   [Default khi vào trang]: from = đầu tháng hiện tại, to = TODAY (NOW)
- *   [Admin chọn]: from → to do admin chọn (to ≤ NOW, to ≥ from)
+ *   Ngày “hôm nay” và kẹp {@code to} dùng {@link java.time.Clock} (bean {@code businessClock}) để đồng bộ với timestamp movement (Slice 6).
  *
- *   openingStock  = currentStock - recv(from→∞) + sold(from→∞)
- *   totalReceived = tổng nhập trong kỳ [from, to]
- *   totalSold     = tổng bán trong kỳ [from, to]
- *   closingStock  = openingStock + totalReceived - totalSold
+ *   ProdNet = Σ qty_delta trên {@code inventory_movements} với source_type thuộc
+ *   production_consume / production_output / production_void_restore / production_void_output
+ *
+ *   openingStock  = currentStock - recv(from→∞) + sold(from→∞) - prodNet(from→∞)
+ *   totalReceived = tổng nhập kho (receipt) trong kỳ [from, to] — chỉ nhập kho*, không gồm SX
+ *   totalSold     = tổng xuất bán (invoice) trong kỳ [from, to]
+ *   closingStock  = openingStock + totalReceived - totalSold + prodNet trong kỳ [from,to]
+ *
+ * *) Cột nhập/xuất vẫn là nhập/bán; chênh SX được cộng trừ qua prodNet trong công thức đóng.
  *
  * Giá trị tồn cuối kỳ:
- *   closingValue = sum(batch.remainingQty * batch.costPrice) cho các lô còn hàng
+ *   closingValue = closingStock * avgCostPrice(batches hiện tại)
  */
 
 @Slf4j
@@ -51,9 +58,12 @@ import java.util.Map;
 @Transactional(readOnly = true)
 public class InventoryStockService {
 
+    private final Clock businessClock;
+    private final EntityManager entityManager;
     private final InventoryReceiptRepository receiptRepository;
     private final SalesInvoiceRepository invoiceRepository;
     private final ProductBatchRepository batchRepository;
+    private final InventoryMovementRepository movementRepository;
     private final ProductVariantRepository variantRepository; // [Sprint 0]
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
@@ -66,12 +76,10 @@ public class InventoryStockService {
      *   - to ≥ from
      *   - Default khi load trang: from = đầu tháng, to = TODAY
      *
-     * openingStock = currentStock - recv(from→∞) + sold(from→∞)
-     *   → Dùng "After" query (không giới hạn trên) để tránh sai số
-     *     khi báo cáo kỳ hiện tại (now nằm trong [from, to])
+     * opening/closing reconcile với Slice 6 sản xuất qua ProdNet(xem javadoc class).
      */
     public InventoryStockReport getStockReport(LocalDate from, LocalDate to) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(businessClock);
 
         // ── Validation ──────────────────────────────────────────────
         if (to.isAfter(today)) {
@@ -85,6 +93,9 @@ public class InventoryStockService {
 
         LocalDateTime fromDt = from.atStartOfDay();
         LocalDateTime toDt   = to.atTime(LocalTime.MAX);
+
+        // Ensure ledger rows written in the same persistence transaction are visible to aggregate JPQL
+        entityManager.flush();
 
         // [Fix Issue 1] Dùng FETCH JOIN query để load product+category trong 1 lần
         List<ProductVariant> variants = variantRepository.findAllActiveWithProductAndCategory();
@@ -103,6 +114,11 @@ public class InventoryStockService {
         Map<Long, Integer> soldAfterFrom = buildVariantQtyMap(
                 invoiceRepository.sumSoldQtyByVariantAfter(fromDt));
 
+        Map<Long, Integer> prodNetAfterFrom = buildSignedIntQtyMap(
+                movementRepository.sumProductionQtyDeltaByVariantCreatedOnOrAfter(fromDt));
+        Map<Long, Integer> prodNetInPeriod = buildSignedIntQtyMap(
+                movementRepository.sumProductionQtyDeltaByVariantBetweenInclusive(fromDt, toDt));
+
         // [Fix closingValue] Dùng avg cost price theo variant từ batch hiện tại
         // closingValue = closingStock * avgCostPrice  ← phụ thuộc closingStock của kỳ
         // (không dùng SUM(remainingQty*costPrice) tĩnh vì không theo kỳ báo cáo)
@@ -117,11 +133,13 @@ public class InventoryStockService {
             // openingStock = currentStock - (tất cả nhập từ from→∞) + (tất cả bán từ from→∞)
             int recvAfter  = receivedAfterFrom.getOrDefault(vid, 0);
             int soldAfter  = soldAfterFrom.getOrDefault(vid, 0);
-            int openingStock = currentStock - recvAfter + soldAfter;
+            int prodAfter  = prodNetAfterFrom.getOrDefault(vid, 0);
+            int openingStock = currentStock - recvAfter + soldAfter - prodAfter;
 
             int totalReceived = receivedInPeriod.getOrDefault(vid, 0);
             int totalSold     = soldInPeriod.getOrDefault(vid, 0);
-            int closingStock  = openingStock + totalReceived - totalSold;
+            int prodPeriod    = prodNetInPeriod.getOrDefault(vid, 0);
+            int closingStock  = openingStock + totalReceived - totalSold + prodPeriod;
 
             requireNonNegativeStockReportFigures(vid, v.getVariantCode(), openingStock, closingStock);
 
@@ -168,7 +186,7 @@ public class InventoryStockService {
      */
     private Map<Long, BigDecimal> buildAvgCostPriceByVariantMap() {
         Map<Long, BigDecimal> map = new HashMap<>();
-        batchRepository.avgCostPriceByVariant().forEach(row -> {
+        batchRepository.avgCostPriceByVariant(LocalDate.now(businessClock)).forEach(row -> {
             Long vid = ((Number) row[0]).longValue();
             BigDecimal avg = row[1] != null ? new BigDecimal(row[1].toString()) : BigDecimal.ZERO;
             map.put(vid, avg);
@@ -316,6 +334,17 @@ public class InventoryStockService {
     // ─── Helper: build map từ query result ───────────────────────────────────
 
     private Map<Long, Integer> buildVariantQtyMap(List<Object[]> rows) {
+        Map<Long, Integer> map = new HashMap<>();
+        for (Object[] row : rows) {
+            Long vid = ((Number) row[0]).longValue();
+            int qty  = ((Number) row[1]).intValue();
+            map.merge(vid, qty, Integer::sum);
+        }
+        return map;
+    }
+
+    /** Signed integers (movement qty_delta aggregates). */
+    private Map<Long, Integer> buildSignedIntQtyMap(List<Object[]> rows) {
         Map<Long, Integer> map = new HashMap<>();
         for (Object[] row : rows) {
             Long vid = ((Number) row[0]).longValue();

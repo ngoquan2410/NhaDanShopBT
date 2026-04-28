@@ -18,10 +18,12 @@ import type { GoodsReceiptService } from "./goodsReceipts/GoodsReceiptService";
 import type { PromotionCrudService } from "./promotionsCrud/PromotionCrudService";
 import type { PaymentService } from "./payments/PaymentService";
 import type { CategoryService } from "./categories/CategoryService";
+import type { ProductionAdminService } from "./production/ProductionAdminService";
 
 import { BackendStoreSettingsAdapter } from "./adapters/backend/BackendStoreSettingsAdapter";
 import { BackendVietQrAdapter } from "./adapters/backend/BackendVietQrAdapter";
 import { BackendPaymentEventAdapter } from "./adapters/backend/BackendPaymentEventAdapter";
+import { BackendProductionAdminAdapter } from "./adapters/backend/BackendProductionAdminAdapter";
 import { LocalAddressAdapter } from "./adapters/local/LocalAddressAdapter";
 import { RemoteAddressAdapter } from "./adapters/remote/RemoteAddressAdapter";
 import { HybridAddressAdapter } from "./adapters/remote/HybridAddressAdapter";
@@ -64,6 +66,10 @@ export const goodsReceipts: GoodsReceiptService = new HybridGoodsReceiptAdapter(
 export const promotionsCrud: PromotionCrudService = new LocalPromotionCrudAdapter();
 export const payments: PaymentService = new LocalPaymentAdapter();
 export const categories: CategoryService = new HybridCategoryAdapter();
+export const production: ProductionAdminService = new BackendProductionAdminAdapter();
+
+export { postSalesQuote, postSalesQuoteAsPos } from "./sales/salesQuoteApi";
+export type { SalesQuoteApiResult, SalesQuoteRequestPayload } from "./sales/salesQuoteApi";
 
 // Re-export interface types for UI consumers that need to type service references.
 export type { StoreSettingsService } from "./storeSettings/StoreSettingsService";
@@ -100,3 +106,9 @@ export type {
   CategoryListParams,
   CreateCategoryInput,
 } from "./categories/CategoryService";
+export type {
+  ProductionAdminService,
+  ProductionRecipeDto,
+  ProductionOrderDto,
+  ProductionPreviewDto,
+} from "./production/ProductionAdminService";

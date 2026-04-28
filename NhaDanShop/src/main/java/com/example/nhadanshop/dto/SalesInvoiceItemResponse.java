@@ -26,5 +26,6 @@ public record SalesInvoiceItemResponse(
         String comboSourceName,
         BigDecimal comboUnitPrice,  // giá bán của combo tại thời điểm giao dịch
         /** FEFO batch allocations; empty when none or not loaded. */
-        List<SalesInvoiceItemAllocationResponse> allocations
+        List<SalesInvoiceItemAllocationResponse> allocations,
+        boolean rewardLine
 ) {}

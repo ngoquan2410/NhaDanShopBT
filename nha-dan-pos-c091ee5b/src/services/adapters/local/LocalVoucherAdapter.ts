@@ -1,6 +1,8 @@
 // Local voucher adapter — reads voucher definitions from the runtime store
-// (`src/lib/vouchers-store.ts`), which the Admin Vouchers page edits. When
-// vouchers move to a real backend, swap this implementation only.
+// (`src/lib/vouchers-store.ts`) for local demo only. The Admin page uses
+// `adminVouchersApi` + `/api/vouchers` as the source of truth.
+// Swap this adapter for a HTTP-backed implementation when storefront should
+// validate only against DB vouchers.
 
 import type {
   VoucherService,

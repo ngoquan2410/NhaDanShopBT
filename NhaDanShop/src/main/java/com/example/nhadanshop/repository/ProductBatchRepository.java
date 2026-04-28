@@ -103,10 +103,10 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             SELECT b FROM ProductBatch b
             WHERE b.product.id = :productId
               AND b.remainingQty > 0
-              AND b.expiryDate >= CURRENT_DATE
+              AND b.expiryDate >= :asOf
             ORDER BY b.expiryDate ASC
             """)
-    List<ProductBatch> findByProductIdForUpdateFEFO(@Param("productId") Long productId);
+    List<ProductBatch> findByProductIdForUpdateFEFO(@Param("productId") Long productId, @Param("asOf") LocalDate asOf);
 
     // ── Variant-based queries (Sprint 0) ──────────────────────────────────────
 
@@ -171,10 +171,10 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             SELECT b FROM ProductBatch b
             WHERE b.variant.id = :variantId
               AND b.remainingQty > 0
-              AND b.expiryDate >= CURRENT_DATE
+              AND b.expiryDate >= :asOf
             ORDER BY b.expiryDate ASC
             """)
-    List<ProductBatch> findByVariantIdForUpdateFEFO(@Param("variantId") Long variantId);
+    List<ProductBatch> findByVariantIdForUpdateFEFO(@Param("variantId") Long variantId, @Param("asOf") LocalDate asOf);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
@@ -190,6 +190,21 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             WHERE b.id IN :batchIds
             """)
     List<ProductBatch> findAllByIdInForUpdate(@Param("batchIds") List<Long> batchIds);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT b FROM ProductBatch b
+            WHERE b.id = :batchId
+            """)
+    Optional<ProductBatch> findByIdForUpdate(@Param("batchId") Long batchId);
+
+    @Query("""
+            SELECT b FROM ProductBatch b
+            JOIN FETCH b.variant v
+            JOIN FETCH v.product p
+            WHERE b.id = :batchId
+            """)
+    Optional<ProductBatch> findByIdWithVariantAndProduct(@Param("batchId") Long batchId);
 
     /** Lô của 1 phiếu nhập + 1 variant cụ thể (dùng khi cập nhật finalCost sau phân bổ ship) */
     @Query("""
@@ -217,7 +232,7 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
      * Giá vốn bình quân theo variant từ batch CÒN HÀNG VÀ CÒN HẠN:
      * [variantId, avgCostPrice = SUM(remainingQty*costPrice)/SUM(remainingQty)]
      * Dùng để tính closingValue = closingStock * avgCostPrice (phụ thuộc kỳ báo cáo).
-     * ⚠️ Chỉ tính batch còn bán được theo policy (expiryDate >= CURRENT_DATE).
+     * ⚠️ Chỉ tính batch còn bán được theo policy (expiryDate >= :asOf).
      */
     @Query("""
             SELECT b.variant.id,
@@ -225,10 +240,10 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             FROM ProductBatch b
             WHERE b.variant IS NOT NULL
               AND b.remainingQty > 0
-              AND b.expiryDate >= CURRENT_DATE
+              AND b.expiryDate >= :asOf
             GROUP BY b.variant.id
             """)
-    List<Object[]> avgCostPriceByVariant();
+    List<Object[]> avgCostPriceByVariant(@Param("asOf") LocalDate asOf);
 
     // ══ Slice 2: explicit predicates for future use only — do not wire callers here ═════════════
 
@@ -279,11 +294,12 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             WHERE b.variant.id = :variantId
               AND b.remainingQty > 0
               AND b.status = 'active'
-              AND b.expiryDate >= CURRENT_DATE
+              AND b.expiryDate >= :asOf
               AND b.variant.active = true
+              AND b.variant.isSellable = true
               AND b.variant.product.active = true
             """)
-    int sumSellableRemainingQtyByVariantId(@Param("variantId") Long variantId);
+    int sumSellableRemainingQtyByVariantId(@Param("variantId") Long variantId, @Param("asOf") LocalDate asOf);
 
     /**
      * Slice 4A: per-variant sellable sums for projection (read-only). One row per variant that has
@@ -296,12 +312,14 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             WHERE b.variant.id IN :variantIds
               AND b.remainingQty > 0
               AND b.status = 'active'
-              AND b.expiryDate >= CURRENT_DATE
+              AND b.expiryDate >= :asOf
               AND b.variant.active = true
+              AND b.variant.isSellable = true
               AND b.variant.product.active = true
             GROUP BY b.variant.id
             """)
-    List<Object[]> sumSellableRemainingQtyByVariantIds(@Param("variantIds") List<Long> variantIds);
+    List<Object[]> sumSellableRemainingQtyByVariantIds(
+            @Param("variantIds") List<Long> variantIds, @Param("asOf") LocalDate asOf);
 
     /**
      * FEFO with pessimistic write lock: unified sellable predicate. Same ordering as
@@ -314,12 +332,13 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             WHERE b.variant.id = :variantId
               AND b.remainingQty > 0
               AND b.status = 'active'
-              AND b.expiryDate >= CURRENT_DATE
+              AND b.expiryDate >= :asOf
               AND b.variant.active = true
+              AND b.variant.isSellable = true
               AND b.variant.product.active = true
             ORDER BY b.expiryDate ASC, b.id ASC
             """)
-    List<ProductBatch> findSellableByVariantIdForUpdateFefo(@Param("variantId") Long variantId);
+    List<ProductBatch> findSellableByVariantIdForUpdateFefo(@Param("variantId") Long variantId, @Param("asOf") LocalDate asOf);
 
     /**
      * Product-scoped FEFO lock query with sellable predicate; mirrors {@link #findByProductIdForUpdateFEFO}
@@ -332,10 +351,40 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             WHERE b.product.id = :productId
               AND b.remainingQty > 0
               AND b.status = 'active'
-              AND b.expiryDate >= CURRENT_DATE
+              AND b.expiryDate >= :asOf
+              AND b.variant.active = true
+              AND b.variant.isSellable = true
+              AND b.variant.product.active = true
+            ORDER BY b.expiryDate ASC, b.id ASC
+            """)
+    List<ProductBatch> findSellableByProductIdForUpdateFefo(@Param("productId") Long productId, @Param("asOf") LocalDate asOf);
+
+    /**
+     * Production raw input FEFO: active batch, remaining &gt; 0, not expired,
+     * product and variant active. Does not require variant.isSellable.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT b FROM ProductBatch b
+            WHERE b.variant.id = :variantId
+              AND b.remainingQty > 0
+              AND b.status = 'active'
+              AND b.expiryDate >= :asOf
               AND b.variant.active = true
               AND b.variant.product.active = true
             ORDER BY b.expiryDate ASC, b.id ASC
             """)
-    List<ProductBatch> findSellableByProductIdForUpdateFefo(@Param("productId") Long productId);
+    List<ProductBatch> findProductionInputBatchesForUpdate(@Param("variantId") Long variantId, @Param("asOf") LocalDate asOf);
+
+    @Query("""
+            SELECT b FROM ProductBatch b
+            WHERE b.variant.id = :variantId
+              AND b.remainingQty > 0
+              AND b.status = 'active'
+              AND b.expiryDate >= :asOf
+              AND b.variant.active = true
+              AND b.variant.product.active = true
+            ORDER BY b.expiryDate ASC, b.id ASC
+            """)
+    List<ProductBatch> findProductionInputBatchesForPreview(@Param("variantId") Long variantId, @Param("asOf") LocalDate asOf);
 }

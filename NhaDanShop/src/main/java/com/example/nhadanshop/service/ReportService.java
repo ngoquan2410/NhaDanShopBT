@@ -3,6 +3,8 @@ package com.example.nhadanshop.service;
 import com.example.nhadanshop.dto.ProfitReportResponse;
 import com.example.nhadanshop.entity.SalesInvoice;
 import com.example.nhadanshop.repository.SalesInvoiceRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
@@ -28,6 +30,7 @@ public class ReportService {
 
     private final SalesInvoiceRepository invoiceRepo;
     private final Clock businessClock;
+    private final ObjectMapper objectMapper;
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     /** Thống kê lợi nhuận theo khoảng thời gian tùy chỉnh */
@@ -40,15 +43,19 @@ public class ReportService {
         BigDecimal totalDiscount = invoiceRepo.sumDiscountAmountBetween(fromDt, toDt);
         long totalInvoices       = invoiceRepo.countByInvoiceDateBetweenAndStatus(fromDt, toDt, SalesInvoice.Status.COMPLETED);
 
-        // Doanh thu thực = tổng hóa đơn - tổng chiết khấu KM
-        BigDecimal netRevenue = nullSafe(totalRevenue).subtract(nullSafe(totalDiscount));
+        BigDecimal totalVat = sumVatFromPricingSnapshots(invoiceRepo.findPricingSnapshotJsonBetween(fromDt, toDt));
+        BigDecimal grossAfterDiscount = nullSafe(totalRevenue).subtract(nullSafe(totalDiscount));
+        BigDecimal netRevenue = grossAfterDiscount.subtract(nullSafe(totalVat));
         BigDecimal netProfit  = netRevenue.subtract(nullSafe(totalCost));
+        BigDecimal marginPct = ProfitReportResponse.marginPct(netRevenue, netProfit);
 
         return new ProfitReportResponse(from, to,
                 netRevenue,
                 nullSafe(totalCost),
                 netProfit,
-                totalInvoices);
+                totalInvoices,
+                marginPct,
+                totalVat);
     }
 
     /** Thống kê tuần hiện tại (Thứ 2 – Chủ nhật) */
@@ -120,14 +127,14 @@ public class ReportService {
             // Title
             Row titleRow = sheet.createRow(0);
             Cell tc = titleRow.createCell(0); tc.setCellValue("BÁO CÁO LỢI NHUẬN - NHÃ ĐAN SHOP"); tc.setCellStyle(titleStyle);
-            sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 7));
+            sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 8));
             Row subRow = sheet.createRow(1);
             subRow.createCell(0).setCellValue("Từ " + from.format(DATE_FMT) + " đến " + to.format(DATE_FMT));
-            sheet.addMergedRegion(new CellRangeAddress(1, 1, 0, 7));
+            sheet.addMergedRegion(new CellRangeAddress(1, 1, 0, 8));
 
             // Header
-            String[] headers = {"Kỳ báo cáo","Từ ngày","Đến ngày","Doanh thu (₫)","Giá vốn (₫)","Lợi nhuận (₫)","Tỉ lệ lãi %","Số HĐ"};
-            int[] colWidths = {4500,4000,4000,5500,5500,5500,3500,3000};
+            String[] headers = {"Kỳ báo cáo","Từ ngày","Đến ngày","Doanh thu (₫) sau CK, trừ VAT","VAT (₫)","Giá vốn (₫)","Lợi nhuận (₫)","Tỉ lệ lãi %","Số HĐ"};
+            int[] colWidths = {4500,4000,4000,5500,4500,5500,5500,3500,3000};
             Row hRow = sheet.createRow(3);
             for (int i = 0; i < headers.length; i++) {
                 Cell c = hRow.createCell(i); c.setCellValue(headers[i]); c.setCellStyle(headerStyle);
@@ -136,7 +143,7 @@ public class ReportService {
 
             // Data
             int rowNum = 4;
-            BigDecimal sumRev = BigDecimal.ZERO, sumCost = BigDecimal.ZERO, sumProfit = BigDecimal.ZERO;
+            BigDecimal sumRev = BigDecimal.ZERO, sumVat = BigDecimal.ZERO, sumCost = BigDecimal.ZERO, sumProfit = BigDecimal.ZERO;
             long sumInv = 0;
             DateTimeFormatter mfmt = DateTimeFormatter.ofPattern("MM/yyyy");
             for (ProfitReportResponse r : rows) {
@@ -145,11 +152,14 @@ public class ReportService {
                 row.createCell(1).setCellValue(r.fromDate().format(DATE_FMT));
                 row.createCell(2).setCellValue(r.toDate().format(DATE_FMT));
                 Cell rc = row.createCell(3); rc.setCellValue(r.totalRevenue().doubleValue()); rc.setCellStyle(numStyle);
-                Cell cc = row.createCell(4); cc.setCellValue(r.totalCost().doubleValue()); cc.setCellStyle(numStyle);
-                Cell pc = row.createCell(5); pc.setCellValue(r.totalProfit().doubleValue()); pc.setCellStyle(numStyle);
-                row.createCell(6).setCellValue(r.profitMarginPct() != null ? r.profitMarginPct().doubleValue() : 0);
-                row.createCell(7).setCellValue(r.totalInvoices() != null ? r.totalInvoices() : 0);
-                sumRev = sumRev.add(r.totalRevenue()); sumCost = sumCost.add(r.totalCost()); sumProfit = sumProfit.add(r.totalProfit());
+                Cell vc = row.createCell(4); vc.setCellValue(nullSafe(r.totalVatAmount()).doubleValue()); vc.setCellStyle(numStyle);
+                Cell cc = row.createCell(5); cc.setCellValue(r.totalCost().doubleValue()); cc.setCellStyle(numStyle);
+                Cell pc = row.createCell(6); pc.setCellValue(r.totalProfit().doubleValue()); pc.setCellStyle(numStyle);
+                row.createCell(7).setCellValue(r.profitMarginPct() != null ? r.profitMarginPct().doubleValue() : 0);
+                row.createCell(8).setCellValue(r.totalInvoices() != null ? r.totalInvoices() : 0);
+                sumRev = sumRev.add(r.totalRevenue());
+                sumVat = sumVat.add(nullSafe(r.totalVatAmount()));
+                sumCost = sumCost.add(r.totalCost()); sumProfit = sumProfit.add(r.totalProfit());
                 if (r.totalInvoices() != null) sumInv += r.totalInvoices();
             }
 
@@ -157,9 +167,10 @@ public class ReportService {
             Row totRow = sheet.createRow(rowNum);
             Cell tl = totRow.createCell(0); tl.setCellValue("TỔNG CỘNG"); tl.setCellStyle(boldStyle);
             Cell tr2 = totRow.createCell(3); tr2.setCellValue(sumRev.doubleValue()); tr2.setCellStyle(numBoldStyle);
-            Cell tc2 = totRow.createCell(4); tc2.setCellValue(sumCost.doubleValue()); tc2.setCellStyle(numBoldStyle);
-            Cell tp  = totRow.createCell(5); tp.setCellValue(sumProfit.doubleValue()); tp.setCellStyle(numBoldStyle);
-            totRow.createCell(7).setCellValue(sumInv);
+            Cell tv2 = totRow.createCell(4); tv2.setCellValue(sumVat.doubleValue()); tv2.setCellStyle(numBoldStyle);
+            Cell tc2 = totRow.createCell(5); tc2.setCellValue(sumCost.doubleValue()); tc2.setCellStyle(numBoldStyle);
+            Cell tp  = totRow.createCell(6); tp.setCellValue(sumProfit.doubleValue()); tp.setCellStyle(numBoldStyle);
+            totRow.createCell(8).setCellValue(sumInv);
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             wb.write(out);
@@ -168,4 +179,34 @@ public class ReportService {
     }
 
     private BigDecimal nullSafe(BigDecimal v) { return v != null ? v : BigDecimal.ZERO; }
+
+    private BigDecimal sumVatFromPricingSnapshots(List<String> jsonRows) {
+        BigDecimal s = BigDecimal.ZERO;
+        if (jsonRows == null) {
+            return s;
+        }
+        for (String json : jsonRows) {
+            s = s.add(extractVatAmount(json));
+        }
+        return s;
+    }
+
+    private BigDecimal extractVatAmount(String json) {
+        if (json == null || json.isBlank()) {
+            return BigDecimal.ZERO;
+        }
+        try {
+            JsonNode n = objectMapper.readTree(json);
+            if (n != null && n.has("vatAmount") && !n.get("vatAmount").isNull()) {
+                JsonNode v = n.get("vatAmount");
+                if (v.isNumber()) {
+                    return v.decimalValue();
+                }
+                return new BigDecimal(v.asText());
+            }
+        } catch (Exception ignored) {
+            /* ignore malformed snapshot */
+        }
+        return BigDecimal.ZERO;
+    }
 }

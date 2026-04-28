@@ -15,12 +15,17 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -41,37 +46,48 @@ class ProductBatchServiceSlice3FefoTest {
     private SalesInvoiceItemBatchAllocationRepository allocationRepo;
     @Mock
     private StockMutationService stockMutationService;
+    @Mock
+    private Clock businessClock;
 
     @InjectMocks
     private ProductBatchService productBatchService;
 
     @Test
     void deductStockFEFOWithTraceByVariant_callsFindSellableByVariantIdForUpdateFefo() {
+        when(businessClock.instant()).thenReturn(Instant.parse("2026-04-14T00:00:00Z"));
+        when(businessClock.getZone()).thenReturn(ZoneId.of("Asia/Ho_Chi_Minh"));
+
         long variantId = 9L;
-        when(batchRepo.findSellableByVariantIdForUpdateFefo(variantId)).thenReturn(
+        when(batchRepo.findSellableByVariantIdForUpdateFefo(eq(variantId), any(LocalDate.class))).thenReturn(
                 List.of(sellableBatch(9L, 5, BigDecimal.TEN, variantId))
         );
         var result = productBatchService.deductStockFEFOWithTraceByVariant(1L, variantId, 2);
         assertEquals(1, result.batchDeductions().size());
         assertEquals(2, result.batchDeductions().get(0).deductedQty());
-        verify(batchRepo).findSellableByVariantIdForUpdateFefo(variantId);
-        verify(batchRepo, never()).findByVariantIdForUpdateFEFO(ArgumentMatchers.anyLong());
+        verify(batchRepo).findSellableByVariantIdForUpdateFefo(eq(variantId), any(LocalDate.class));
+        verify(batchRepo, never()).findByVariantIdForUpdateFEFO(ArgumentMatchers.anyLong(), any(LocalDate.class));
         verify(stockMutationService).syncVariantStockWithBatches(variantId);
     }
 
     @Test
     void deductStockFEFOWithTraceByVariant_throwsWhenNoSellableBatches() {
+        when(businessClock.instant()).thenReturn(Instant.parse("2026-04-14T00:00:00Z"));
+        when(businessClock.getZone()).thenReturn(ZoneId.of("Asia/Ho_Chi_Minh"));
+
         long variantId = 10L;
-        when(batchRepo.findSellableByVariantIdForUpdateFefo(variantId)).thenReturn(List.of());
+        when(batchRepo.findSellableByVariantIdForUpdateFefo(eq(variantId), any(LocalDate.class))).thenReturn(List.of());
         IllegalStateException ex = assertThrows(
                 IllegalStateException.class,
                 () -> productBatchService.deductStockFEFOWithTraceByVariant(1L, variantId, 1));
         assertTrue(ex.getMessage().contains("đủ điều kiện bán"));
-        verify(batchRepo, never()).findByVariantIdForUpdateFEFO(ArgumentMatchers.anyLong());
+        verify(batchRepo, never()).findByVariantIdForUpdateFEFO(ArgumentMatchers.anyLong(), any(LocalDate.class));
     }
 
     @Test
     void deductStockFEFOWithTrace_productOnly_callsFindSellableByProductIdForUpdateFefo() {
+        when(businessClock.instant()).thenReturn(Instant.parse("2026-04-14T00:00:00Z"));
+        when(businessClock.getZone()).thenReturn(ZoneId.of("Asia/Ho_Chi_Minh"));
+
         long productId = 3L;
         ProductVariant v = new ProductVariant();
         v.setId(11L);
@@ -79,10 +95,10 @@ class ProductBatchServiceSlice3FefoTest {
         v.setActive(true);
         ProductBatch b = sellableBatch(1L, 3, BigDecimal.ONE, 11L);
         b.setVariant(v);
-        when(batchRepo.findSellableByProductIdForUpdateFefo(productId)).thenReturn(List.of(b));
+        when(batchRepo.findSellableByProductIdForUpdateFefo(eq(productId), any(LocalDate.class))).thenReturn(List.of(b));
         productBatchService.deductStockFEFOWithTrace(productId, null, 1);
-        verify(batchRepo).findSellableByProductIdForUpdateFefo(productId);
-        verify(batchRepo, never()).findByProductIdForUpdateFEFO(ArgumentMatchers.anyLong());
+        verify(batchRepo).findSellableByProductIdForUpdateFefo(eq(productId), any(LocalDate.class));
+        verify(batchRepo, never()).findByProductIdForUpdateFEFO(ArgumentMatchers.anyLong(), any(LocalDate.class));
         verify(stockMutationService, atLeastOnce()).syncVariantStockWithBatches(11L);
     }
 

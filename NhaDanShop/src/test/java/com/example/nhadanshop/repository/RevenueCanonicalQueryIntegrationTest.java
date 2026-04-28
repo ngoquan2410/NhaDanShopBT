@@ -119,24 +119,24 @@ class RevenueCanonicalQueryIntegrationTest {
 
         List<Object[]> byProduct = salesInvoiceRepository.revenueByProduct(from, to);
         assertEquals(1, byProduct.size());
-        BigDecimal productNet = (BigDecimal) byProduct.get(0)[6];
-        assertEquals(0, productNet.compareTo(new BigDecimal("90")));
+        BigDecimal productGrossItemRevenue = (BigDecimal) byProduct.get(0)[6];
+        assertEquals(0, productGrossItemRevenue.compareTo(new BigDecimal("100")));
 
         List<Object[]> byCat = salesInvoiceRepository.revenueByCategory(from, to);
         assertEquals(1, byCat.size());
-        BigDecimal catNet = (BigDecimal) byCat.get(0)[2];
-        assertEquals(0, catNet.compareTo(new BigDecimal("90")));
+        BigDecimal catItemRevenue = (BigDecimal) byCat.get(0)[2];
+        assertEquals(0, catItemRevenue.compareTo(new BigDecimal("100")));
 
         List<Object[]> top = salesInvoiceRepository.topProducts(from, to, PageRequest.of(0, 10));
         assertEquals(1, top.size());
         BigDecimal topRev = (BigDecimal) top.get(0)[9];
         BigDecimal topProfit = (BigDecimal) top.get(0)[10];
-        assertEquals(0, topRev.compareTo(new BigDecimal("90")));
-        // 100 * 0.9 - 40 = 50 (net line revenue − COGS)
-        assertEquals(0, topProfit.compareTo(new BigDecimal("50")));
+        assertEquals(0, topRev.compareTo(new BigDecimal("100")));
+        // Slice 6C: product rollups use line revenue (qty×unitPrice); profit = item gross − COGS (no invoice discount smear)
+        assertEquals(0, topProfit.compareTo(new BigDecimal("60")));
 
         BigDecimal sumProfit = salesInvoiceRepository.sumProfitBetween(from, to);
-        assertEquals(0, sumProfit.compareTo(new BigDecimal("50")));
+        assertEquals(0, sumProfit.compareTo(new BigDecimal("60")));
 
         BigDecimal sumCost = salesInvoiceRepository.sumCostBetween(from, to);
         assertEquals(0, sumCost.compareTo(new BigDecimal("40")));

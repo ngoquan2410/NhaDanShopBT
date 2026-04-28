@@ -50,4 +50,16 @@ public class PendingOrderItem {
 
     @Column(name = "line_subtotal", nullable = false, precision = 18, scale = 2)
     private BigDecimal lineSubtotal;
+
+    /** POS/trace snapshot optional batch at checkout snapshot time (pricing-independent). */
+    @JoinColumn(name = "batch_id")
+    @ManyToOne(fetch = FetchType.LAZY)
+    private ProductBatch batch;
+
+    @Column(name = "reward_line", nullable = false)
+    private boolean rewardLine;
+
+    /** Catalog/original unit snapshot — populated when revenue ({@link #unitPrice}) is zero (gift/free tier lines). */
+    @Column(name = "original_unit_price", precision = 18, scale = 2)
+    private BigDecimal originalUnitPrice;
 }

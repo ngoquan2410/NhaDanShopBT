@@ -13,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -26,6 +28,7 @@ public class InventoryProjectionService {
 
     private final ProductVariantRepository variantRepository;
     private final ProductBatchRepository batchRepository;
+    private final Clock businessClock;
 
     public List<InventoryProjectionResponse> listProjections() {
         List<ProductVariant> variants = variantRepository.findAllActiveWithProductAndCategory();
@@ -72,7 +75,7 @@ public class InventoryProjectionService {
             return Map.of();
         }
         Map<Long, Integer> out = new HashMap<>();
-        for (Object[] row : batchRepository.sumSellableRemainingQtyByVariantIds(singleVariantIds)) {
+        for (Object[] row : batchRepository.sumSellableRemainingQtyByVariantIds(singleVariantIds, LocalDate.now(businessClock))) {
             Long vid = (Long) row[0];
             int sum = ((Number) row[1]).intValue();
             out.put(vid, sum);

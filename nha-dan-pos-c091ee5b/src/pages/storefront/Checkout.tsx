@@ -19,16 +19,14 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { invoices, pendingOrders, promotions, shipping, vouchers } from "@/services";
+import { pendingOrders, promotions, shipping, postSalesQuote } from "@/services";
+import type { SalesQuoteApiResult } from "@/services";
 import type {
   CartContext,
   EvaluatedPromotion,
   PaymentMethod,
-  PendingOrderLine,
-  PromotionSnapshot,
   ShippingAddress,
   ShippingQuote,
-  VoucherSnapshot,
 } from "@/services/types";
 import { useCart, cartActions } from "@/lib/cart";
 import { AddressSelect, type AddressSelectValue } from "@/components/shared/AddressSelect";
@@ -36,7 +34,7 @@ import { AddressAutocomplete, type GoongResolvedAddress, type FallbackReason, cl
 import { currentCustomerActions, useCurrentCustomer } from "@/lib/current-customer";
 
 const paymentMethods = [
-  { id: "cash", label: "Tiền mặt khi nhận", icon: Banknote, desc: "COD — hóa đơn lập ngay khi xác nhận" },
+  { id: "cash", label: "Tiền mặt khi nhận (COD)", icon: Banknote, desc: "Tạo đơn chờ — không lập hóa đơn cục bộ; admin xác nhận & xuất hóa đơn backend" },
   { id: "bank_transfer", label: "Chuyển khoản ngân hàng", icon: CreditCard, desc: "Tạo đơn chờ — admin xác nhận sau khi nhận tiền" },
   { id: "momo", label: "Ví MoMo", icon: Smartphone, desc: "Quét QR — admin xác nhận thanh toán" },
   { id: "zalopay", label: "ZaloPay", icon: Smartphone, desc: "Quét QR — admin xác nhận thanh toán" },
@@ -93,11 +91,10 @@ export default function CheckoutPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customer, defaultAddress]);
 
-  // Voucher state — input + the validated snapshot once a code is applied.
+  // Voucher: code sent to backend quote — commercial amounts come from beQuote only.
   const [voucherInput, setVoucherInput] = useState("");
-  const [voucherSnap, setVoucherSnap] = useState<VoucherSnapshot | null>(null);
+  const [appliedVoucherCode, setAppliedVoucherCode] = useState<string | null>(null);
   const [voucherError, setVoucherError] = useState<string | null>(null);
-  const [voucherChecking, setVoucherChecking] = useState(false);
 
   const subtotal = useMemo(
     () => cartItems.reduce((s, i) => s + i.lineSubtotal, 0),
@@ -108,6 +105,9 @@ export default function CheckoutPage() {
   const [quoting, setQuoting] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
   const [retryCooldown, setRetryCooldown] = useState(0);
+  const [beQuote, setBeQuote] = useState<SalesQuoteApiResult | null>(null);
+  const [beQuoteLoading, setBeQuoteLoading] = useState(false);
+  const [beQuoteErr, setBeQuoteErr] = useState<string | null>(null);
 
   // Stable draft order code so admin GHN logs can be traced to this checkout
   // attempt even before the order is actually persisted.
@@ -191,7 +191,7 @@ export default function CheckoutPage() {
       subtotal,
       shippingAddress: shippingAddress ?? undefined,
       shippingQuote: quote,
-      voucherCode: voucherSnap?.code,
+      voucherCode: appliedVoucherCode ?? undefined,
     };
     void promotions.pickBest(ctx).then((p) => {
       if (!cancel) setBestPromo(p);
@@ -199,41 +199,96 @@ export default function CheckoutPage() {
     return () => {
       cancel = true;
     };
-  }, [cartItems, subtotal, shippingAddress, quote, voucherSnap]);
+  }, [cartItems, subtotal, shippingAddress, quote, appliedVoucherCode]);
 
-  // Re-validate any applied voucher when the subtotal changes (e.g. cart edits
-  // could push the order under a min-spend threshold).
   useEffect(() => {
-    if (!voucherSnap) return;
+    if (import.meta.env.MODE === "test") {
+      setBeQuote(null);
+      setBeQuoteLoading(false);
+      return;
+    }
     let cancel = false;
-    void vouchers
-      .validate(voucherSnap.code, { lines: cartItems, subtotal })
-      .then((res) => {
-        if (cancel) return;
-        if (!res.valid) {
-          setVoucherSnap(null);
-          setVoucherError(res.reasonIfInvalid ?? "Mã không còn áp dụng được");
-        } else if (res.snapshot && res.snapshot.discountAmount !== voucherSnap.discountAmount) {
-          setVoucherSnap(res.snapshot);
+    if (!cartItems.length || quote.status !== "quoted" || !shippingAddress) {
+      setBeQuote(null);
+      setBeQuoteErr(null);
+      setBeQuoteLoading(false);
+      return;
+    }
+    setBeQuoteLoading(true);
+    setBeQuoteErr(null);
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const lines = cartItems.map((it) => ({
+            productId: Number(it.productId),
+            variantId: Number(it.variantId),
+            quantity: it.qty,
+            discountPercent: 0,
+            batchId: it.batchId != null ? Number(it.batchId) : undefined,
+            rewardLine: false,
+          }));
+          if (lines.some((l) => Number.isNaN(l.productId) || Number.isNaN(l.variantId))) {
+            if (!cancel) {
+              setBeQuote(null);
+              setBeQuoteLoading(false);
+            }
+            return;
+          }
+          const promotionId =
+            bestPromo?.promotionId != null && !Number.isNaN(Number(bestPromo.promotionId))
+              ? Number(bestPromo.promotionId)
+              : undefined;
+          const res = await postSalesQuote({
+            source: "storefront",
+            lines,
+            promotionId,
+            voucherCode: appliedVoucherCode || undefined,
+            shippingAddress,
+            manualDiscount: 0,
+            vatPercent: 0,
+          });
+          if (!cancel) {
+            setBeQuote(res);
+            setBeQuoteErr(null);
+            setBeQuoteLoading(false);
+          }
+        } catch (e) {
+          if (!cancel) {
+            setBeQuote(null);
+            setBeQuoteErr(e instanceof Error ? e.message : "Không lấy được báo giá máy chủ");
+            setBeQuoteLoading(false);
+          }
         }
-      });
+      })();
+    }, 500);
     return () => {
       cancel = true;
+      window.clearTimeout(handle);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subtotal, cartItems]);
+  }, [
+    appliedVoucherCode,
+    cartItems,
+    quote.status,
+    shippingAddress,
+    bestPromo,
+  ]);
 
-  const promoDiscount = bestPromo?.discountAmount ?? 0;
-  const voucherDiscount = Math.min(voucherSnap?.discountAmount ?? 0, Math.max(0, subtotal - promoDiscount));
-  const promoShippingDiscount = Math.min(bestPromo?.shippingDiscountAmount ?? 0, baseShippingFee);
-  const voucherShippingDiscount = Math.min(
-    voucherSnap?.shippingDiscountAmount ?? 0,
-    Math.max(0, baseShippingFee - promoShippingDiscount),
-  );
-  const shippingDiscount = promoShippingDiscount + voucherShippingDiscount;
-  const shippingFee = Math.max(0, baseShippingFee - shippingDiscount);
-  const total = Math.max(0, subtotal - promoDiscount - voucherDiscount + shippingFee);
-  const isOnline = payment !== "cash";
+  const promoDiscountPreview = bestPromo?.discountAmount ?? 0;
+  const promoShippingDiscountPreview = Math.min(bestPromo?.shippingDiscountAmount ?? 0, baseShippingFee);
+  const shippingFeePreview = Math.max(0, baseShippingFee - promoShippingDiscountPreview);
+  const totalPreview = Math.max(0, subtotal - promoDiscountPreview + shippingFeePreview);
+
+  const serverOk = !!beQuote && !beQuoteErr;
+  const pb = serverOk ? beQuote.pricingBreakdownSnapshot : null;
+  const vs = serverOk ? beQuote.voucherSnapshot : null;
+
+  const rowSubtotal = pb ? pb.subtotal : subtotal;
+  const rowPromoDisc = pb ? pb.promotionDiscount : promoDiscountPreview;
+  const rowVoucherDisc = pb ? pb.voucherDiscount : 0;
+  const rowShipFee = pb ? pb.shippingFee : shippingFeePreview;
+  const rowShipDisc = pb ? pb.shippingDiscount : promoShippingDiscountPreview;
+  const rowShipPayable = Math.max(0, rowShipFee - rowShipDisc);
+  const displayTotal = pb ? pb.total : totalPreview;
 
   const phoneOk = /^[\d+]{9,12}$/.test(phone.replace(/\s/g, ""));
   // Block submit if GHN couldn't map the ward — the address is ambiguous and
@@ -245,37 +300,26 @@ export default function CheckoutPage() {
     phoneOk &&
     quote.status === "quoted" &&
     !addressUnmapped &&
-    !submitting;
+    !submitting &&
+    !!beQuote &&
+    !beQuoteLoading &&
+    !beQuoteErr &&
+    (!appliedVoucherCode || (vs != null && vs.code.toLowerCase() === appliedVoucherCode.toLowerCase()));
 
-  const applyVoucher = async () => {
+  const applyVoucher = () => {
     const code = voucherInput.trim();
     if (!code) {
       setVoucherError("Vui lòng nhập mã giảm giá");
       return;
     }
-    setVoucherChecking(true);
     setVoucherError(null);
-    try {
-      const res = await vouchers.validate(code, { lines: cartItems, subtotal });
-      if (res.valid && res.snapshot) {
-        setVoucherSnap(res.snapshot);
-        setVoucherInput("");
-        const snap = res.snapshot;
-        const msg = snap.shippingDiscountAmount
-          ? `Áp dụng ${snap.code} — miễn phí giao hàng`
-          : `Áp dụng ${snap.code} — giảm ${formatVND(snap.discountAmount)}`;
-        toast.success(msg);
-      } else {
-        setVoucherSnap(null);
-        setVoucherError(res.reasonIfInvalid ?? "Mã không hợp lệ");
-      }
-    } finally {
-      setVoucherChecking(false);
-    }
+    setAppliedVoucherCode(code);
+    setVoucherInput("");
+    toast.success(`Đã gửi mã ${code} — đang lấy báo giá máy chủ…`);
   };
 
   const removeVoucher = () => {
-    setVoucherSnap(null);
+    setAppliedVoucherCode(null);
     setVoucherError(null);
   };
 
@@ -284,101 +328,39 @@ export default function CheckoutPage() {
       toast.error("Vui lòng nhập đầy đủ họ tên và SĐT hợp lệ");
       return;
     }
+    if (beQuoteErr && appliedVoucherCode) {
+      toast.error(beQuoteErr);
+      return;
+    }
     if (quote.status !== "quoted" || !shippingAddress) {
       toast.error("Vui lòng nhập đầy đủ địa chỉ để tính phí giao hàng");
       return;
     }
+    if (!beQuote || beQuoteErr) {
+      toast.error("Chưa có báo giá máy chủ hợp lệ — không thể tạo đơn");
+      return;
+    }
     setSubmitting(true);
     try {
-      const lines: PendingOrderLine[] = cartItems.map((it) => ({
-        id: it.id,
-        productId: it.productId,
-        variantId: it.variantId,
-        productName: it.productName,
-        variantName: it.variantName,
-        qty: it.qty,
-        unitPrice: it.unitPrice,
-        lineSubtotal: it.lineSubtotal,
-      }));
-
-      const promotionSnapshot: PromotionSnapshot | null = bestPromo
-        ? {
-            promotionId: bestPromo.promotionId,
-            name: bestPromo.name,
-            type: bestPromo.type,
-            ruleSummary: bestPromo.ruleSummary,
-            discountAmount: bestPromo.discountAmount,
-            shippingDiscountAmount: shippingDiscount,
-            affectedLines: bestPromo.affectedLines,
-            giftLines: bestPromo.giftLines,
-          }
-        : null;
-
-      const pricingBreakdownSnapshot = {
-        subtotal,
-        manualDiscount: 0,
-        promotionDiscount: promoDiscount,
-        voucherDiscount,
-        shippingFee: baseShippingFee,
-        shippingDiscount,
-        vatBase: Math.max(0, subtotal - promoDiscount - voucherDiscount),
-        vatPercent: 0,
-        vatAmount: 0,
-        total,
-      };
-
-      const shippingQuoteSnapshot = {
-        source: quote.source ?? ("zone_fallback" as const),
-        zoneCode: quote.zoneCode,
-        fee: baseShippingFee,
-        etaDays: quote.etaDays,
-      };
-
-      // Persist the storefront customer profile + default address so /account
-      // and the next checkout pre-fill from real data.
       void currentCustomerActions.save({
         name: name.trim(),
         phone: phone.trim(),
       });
       currentCustomerActions.saveDefaultAddress(shippingAddress);
 
-      if (isOnline) {
-        const order = await pendingOrders.create({
-          customerName: name.trim(),
-          customerPhone: phone.trim(),
-          shippingAddress,
-          paymentMethod: payment as PaymentMethod,
-          lines,
-          promotionSnapshot,
-          voucherSnapshot: voucherSnap,
-          shippingQuoteSnapshot,
-          pricingBreakdownSnapshot,
-          note: note.trim() || undefined,
-        });
-        cartActions.clear();
-        toast.success("Đã tạo đơn — chuyển sang trang chờ thanh toán");
-        navigate(`/pending-payment/${order.id}`);
-      } else {
-        // Cash / COD — go through the new InvoiceService so promotion + voucher
-        // are snapshotted the same way pendingOrders does.
-        const inv = await invoices.create({
-          customerName: name.trim(),
-          customerPhone: phone.trim(),
-          shippingAddress,
-          paymentType: "cash",
-          createdBy: "online",
-          lines,
-          giftLines: bestPromo?.giftLines ?? [],
-          promotionSnapshot,
-          voucherSnapshot: voucherSnap,
-          shippingQuoteSnapshot,
-          pricingBreakdownSnapshot,
-          note: note.trim() || undefined,
-        });
-        cartActions.clear();
-        toast.success(`Đã tạo hóa đơn ${inv.number}`);
-        navigate("/account");
-      }
+      const order = await pendingOrders.create({
+        customerName: name.trim(),
+        customerPhone: phone.trim(),
+        shippingAddress,
+        paymentMethod: payment as PaymentMethod,
+        quotePublicId: beQuote.quoteId,
+        shippingQuoteSnapshot: beQuote.shippingQuoteSnapshot ?? undefined,
+        pricingBreakdownSnapshot: beQuote.pricingBreakdownSnapshot,
+        note: note.trim() || undefined,
+      });
+      cartActions.clear();
+      toast.success("Đã tạo đơn — chuyển sang trang chờ thanh toán");
+      navigate(`/pending-payment/${order.id}`);
     } finally {
       setSubmitting(false);
     }
@@ -545,14 +527,12 @@ export default function CheckoutPage() {
                   );
                 })}
               </div>
-              {isOnline && (
-                <div className="mt-4 p-3 bg-info-soft rounded-xl text-xs text-info flex items-start gap-2">
-                  <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>
-                    Đơn hàng sẽ chuyển sang trạng thái <b>chờ xác nhận</b>. Hóa đơn chỉ được tạo sau khi admin xác nhận thanh toán thành công.
-                  </span>
-                </div>
-              )}
+              <div className="mt-4 p-3 bg-info-soft rounded-xl text-xs text-info flex items-start gap-2">
+                <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span>
+                  Mọi phương thức tạo <b>đơn chờ</b> trước; hóa đơn backend chỉ khi admin xác nhận (COD gửi <code>cod</code> lên máy chủ).
+                </span>
+              </div>
             </section>
           </div>
 
@@ -588,13 +568,18 @@ export default function CheckoutPage() {
                   <Tag className="h-3.5 w-3.5 text-primary" />
                   <p className="text-xs font-semibold">Mã giảm giá</p>
                 </div>
-                {voucherSnap ? (
+                {appliedVoucherCode ? (
                   <div className="flex items-center justify-between gap-2 rounded-xl bg-success-soft/40 border border-success/30 px-3 py-2">
                     <div className="min-w-0">
-                      <p className="text-xs font-bold text-success font-mono">{voucherSnap.code}</p>
-                      <p className="text-[11px] text-muted-foreground truncate">{voucherSnap.ruleSummary}</p>
+                      <p className="text-xs font-bold text-success font-mono">{appliedVoucherCode}</p>
+                      {vs?.ruleSummary ? (
+                        <p className="text-[11px] text-muted-foreground truncate">{vs.ruleSummary}</p>
+                      ) : null}
+                      {beQuoteLoading ? <p className="text-[11px] text-muted-foreground">Đang xác nhận với máy chủ…</p> : null}
+                      {beQuoteErr ? <p className="text-[11px] text-danger mt-0.5">{beQuoteErr}</p> : null}
                     </div>
                     <button
+                      type="button"
                       onClick={removeVoucher}
                       className="p-1 -m-1 text-muted-foreground hover:text-danger shrink-0"
                       aria-label="Bỏ mã"
@@ -613,11 +598,12 @@ export default function CheckoutPage() {
                         className="flex-1 h-10 px-3.5 text-sm border rounded-full bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
                       />
                       <button
+                        type="button"
                         onClick={applyVoucher}
-                        disabled={voucherChecking}
+                        disabled={beQuoteLoading}
                         className="px-4 h-10 rounded-full bg-foreground text-background text-xs font-semibold hover:bg-primary transition-colors disabled:opacity-50"
                       >
-                        {voucherChecking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Áp dụng"}
+                        Áp dụng
                       </button>
                     </div>
                     {voucherError && <p className="mt-1.5 text-[11px] text-danger">{voucherError}</p>}
@@ -626,17 +612,17 @@ export default function CheckoutPage() {
               </div>
 
               <div className="border-t mt-4 pt-4 space-y-2 text-sm">
-                <Row label="Tạm tính" value={formatVND(subtotal)} />
-                {bestPromo && promoDiscount > 0 && (
+                <Row label="Tạm tính" value={formatVND(rowSubtotal)} />
+                {bestPromo && rowPromoDisc > 0 && (
                   <Row
                     label={`Khuyến mãi: ${bestPromo.name}`}
-                    value={<span className="text-success">−{formatVND(promoDiscount)}</span>}
+                    value={<span className="text-success">−{formatVND(rowPromoDisc)}</span>}
                   />
                 )}
-                {voucherSnap && voucherDiscount > 0 && (
+                {vs && rowVoucherDisc > 0 && (
                   <Row
-                    label={`Voucher: ${voucherSnap.code}`}
-                    value={<span className="text-success">−{formatVND(voucherDiscount)}</span>}
+                    label={`Voucher: ${vs.code}`}
+                    value={<span className="text-success">−{formatVND(rowVoucherDisc)}</span>}
                   />
                 )}
                 <Row
@@ -645,19 +631,45 @@ export default function CheckoutPage() {
                     quoting ? <span className="text-muted-foreground inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />Đang tính…</span> :
                     quote.status === "incomplete" ? <span className="text-muted-foreground">—</span> :
                     quote.status === "unavailable" ? <span className="text-danger">Không khả dụng</span> :
-                    quote.status === "quoted" && shippingFee === 0 ? <span className="text-success">Miễn phí</span> :
-                    quote.status === "quoted" ? formatVND(shippingFee) : "—"
+                    quote.status === "quoted" && rowShipPayable === 0 ? <span className="text-success">Miễn phí</span> :
+                    quote.status === "quoted" ? formatVND(rowShipPayable) : "—"
                   }
                 />
-                {shippingDiscount > 0 && (
+                {rowShipDisc > 0 && (
                   <Row
                     label="Giảm phí giao hàng"
-                    value={<span className="text-success">−{formatVND(shippingDiscount)}</span>}
+                    value={<span className="text-success">−{formatVND(rowShipDisc)}</span>}
                   />
                 )}
-                {bestPromo && bestPromo.giftLines.length > 0 && (
+                {serverOk && pb && pb.vatAmount > 0 && (
+                  <Row label="VAT (máy chủ)" value={formatVND(pb.vatAmount)} />
+                )}
+                {(beQuoteLoading || beQuoteErr) && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {beQuoteLoading ? "Đang lấy báo giá máy chủ…" : null}
+                    {beQuoteErr ? (
+                      <span className="text-amber-700">
+                        Báo giá máy chủ thất bại: {beQuoteErr}. Vui lòng sửa địa chỉ / thử lại — không thể tạo đơn khi thiếu báo giá backend.
+                      </span>
+                    ) : null}
+                  </p>
+                )}
+                {serverOk && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Giá theo báo giá máy chủ (gồm voucher / KM / phí ship backend).
+                  </p>
+                )}
+                {beQuote?.rewardLines && beQuote.rewardLines.length > 0 && (
                   <div className="rounded-lg bg-success-soft/40 px-3 py-2 text-xs text-success space-y-0.5">
-                    <p className="font-semibold">🎁 Quà tặng kèm</p>
+                    <p className="font-semibold">Quà tặng kèm (máy chủ)</p>
+                    {beQuote.rewardLines.map((r, i) => (
+                      <p key={i}>• {r.productName} ×{r.quantity}</p>
+                    ))}
+                  </div>
+                )}
+                {!serverOk && bestPromo && bestPromo.giftLines.length > 0 && (
+                  <div className="rounded-lg bg-success-soft/40 px-3 py-2 text-xs text-success space-y-0.5">
+                    <p className="font-semibold">🎁 Quà tặng kèm (xem trước)</p>
                     {bestPromo.giftLines.map((g, i) => (
                       <p key={i}>• {g.productName} ×{g.qty}</p>
                     ))}
@@ -665,7 +677,7 @@ export default function CheckoutPage() {
                 )}
                 <div className="border-t pt-3 flex justify-between items-baseline">
                   <span className="font-bold">Tổng cộng</span>
-                  <span className="font-bold text-foreground text-xl">{formatVND(total)}</span>
+                  <span className="font-bold text-foreground text-xl">{formatVND(displayTotal)}</span>
                 </div>
               </div>
               <button
@@ -677,7 +689,7 @@ export default function CheckoutPage() {
                 )}
               >
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
-                {isOnline ? "Tạo đơn chờ thanh toán" : "Đặt hàng (COD)"}
+                Tạo đơn chờ thanh toán
               </button>
               <div className="mt-4 pt-4 border-t flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
                 <ShieldCheck className="h-3.5 w-3.5 text-success" />

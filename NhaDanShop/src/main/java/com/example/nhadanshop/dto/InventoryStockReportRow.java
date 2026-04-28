@@ -6,13 +6,13 @@ import java.time.LocalDate;
 /**
  * Một dòng báo cáo tồn kho cho 1 variant trong kỳ.
  *
- * Công thức:
- *   closingStock = openingStock + totalReceived - totalSold
+ * Công thức (logic trong {@link com.example.nhadanshop.service.InventoryStockService}):
+ *   prodNet = tổng signed qty_delta của movement sản xuất (Slice 6) trong kỳ hoặc sau {@code from}
+ *   closingStock = openingStock + totalReceived - totalSold + prodNet kỳ
  *
- *   openingStock  = stockQty hiện tại trước kỳ (tính ngược từ hiện tại)
- *   totalReceived = tổng nhập trong kỳ
- *   totalSold     = tổng xuất (bán) trong kỳ
- *   closingStock  = tồn cuối kỳ
+ *   openingStock  = tính ngược từ stock hiện tại, nhập sau from, bán sau from, và prodNet sau from
+ *   totalReceived = tổng nhập kho (phiếu nhập) trong kỳ
+ *   totalSold     = tổng bán (invoice) trong kỳ
  *
  *   [Sprint 0] Thêm variantId/variantCode/variantName để báo cáo theo variant.
  *   Backward compat: variantId = null → dòng báo cáo theo product (legacy).

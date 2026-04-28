@@ -35,5 +35,19 @@ public record SalesInvoiceResponse(
         VoucherSnapshotDto voucherSnapshot,
         ShippingQuoteSnapshotDto shippingQuoteSnapshot,
         PricingBreakdownSnapshotDto pricingBreakdownSnapshot,
-        BigDecimal vatPercent
+        BigDecimal vatPercent,
+        /** Slice 6C: item-level only (qty × unitPrice); excludes shipping and invoice-wide discount smear. */
+        BigDecimal itemRevenue,
+        BigDecimal itemCogs,
+        BigDecimal itemGrossProfit,
+        BigDecimal shippingFee,
+        BigDecimal shippingDiscount,
+        BigDecimal shippingNetRevenue,
+        /** Carrier settlement deferred — null when unknown. */
+        BigDecimal shippingActualCost,
+        BigDecimal shippingProfit,
+        /**
+         * Human-readable basis for {@link #totalProfit} (e.g. carrier cost unknown for shipping).
+         */
+        String invoiceProfitBasis
 ) {}

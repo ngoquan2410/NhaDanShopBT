@@ -19,5 +19,7 @@ public record PendingOrderRequest(
         @Valid VoucherSnapshotDto voucherSnapshot,
         @Valid ShippingQuoteSnapshotDto shippingQuoteSnapshot,
         @Valid PricingBreakdownSnapshotDto pricingBreakdownSnapshot,
-        LocalDateTime expiresAt
+        LocalDateTime expiresAt,
+        /** Slice 6C: when set, snapshots come from persisted backend quote (UUID). */
+        String quotePublicId
 ) {}

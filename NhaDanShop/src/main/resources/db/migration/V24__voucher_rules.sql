@@ -1,0 +1,15 @@
+-- Voucher commercial rules for backend quote (Slice 6C). Existing rows keep zero discounts until edited.
+ALTER TABLE vouchers
+    ADD COLUMN IF NOT EXISTS min_subtotal NUMERIC(18, 2) NOT NULL DEFAULT 0;
+ALTER TABLE vouchers
+    ADD COLUMN IF NOT EXISTS percent NUMERIC(18, 4) NOT NULL DEFAULT 0;
+ALTER TABLE vouchers
+    ADD COLUMN IF NOT EXISTS cap NUMERIC(18, 2) NOT NULL DEFAULT 0;
+ALTER TABLE vouchers
+    ADD COLUMN IF NOT EXISTS fixed_amount NUMERIC(18, 2) NOT NULL DEFAULT 0;
+ALTER TABLE vouchers
+    ADD COLUMN IF NOT EXISTS free_shipping BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE vouchers
+    ADD COLUMN IF NOT EXISTS start_at TIMESTAMPTZ NULL;
+ALTER TABLE vouchers
+    ADD COLUMN IF NOT EXISTS end_at TIMESTAMPTZ NULL;

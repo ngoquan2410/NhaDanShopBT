@@ -20,6 +20,12 @@ export interface POSCartLine {
   unitPrice: number;
   quantity: number;
   stock: number;
+  /** Slice 6B — physical batch traceability from POS scan {@code BATCH:{id}} */
+  batchId?: string;
+  batchCode?: string;
+  /** ISO yyyy-mm-dd when known (batch scan / label metadata) */
+  batchExpiryDate?: string;
+  remainingQty?: number;
   /** if true, this line is a free reward/gift produced by a promotion */
   reward?: boolean;
   rewardSource?: string; // e.g. promotion name

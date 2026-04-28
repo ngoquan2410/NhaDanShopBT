@@ -23,5 +23,17 @@ public record InvoiceItemRequest(
          * mỗi item đều được gán combo_source_id = comboId.
          * productId/variantId bị bỏ qua khi comboId != null.
          */
-        Long comboId
-) {}
+        Long comboId,
+        /** Slice 6B: optional exact batch for POS physical traceability; null keeps FEFO fallback. */
+        Long batchId
+) {
+    public InvoiceItemRequest(
+            Long productId,
+            Integer quantity,
+            BigDecimal discountPercent,
+            Long variantId,
+            Long comboId
+    ) {
+        this(productId, quantity, discountPercent, variantId, comboId, null);
+    }
+}

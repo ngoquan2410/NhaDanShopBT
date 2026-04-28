@@ -6,29 +6,47 @@ import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.entity.ProductVariant;
 import com.example.nhadanshop.repository.ProductBatchRepository;
 import com.example.nhadanshop.repository.ProductVariantRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class InventoryProjectionServiceSlice4aTest {
 
     @Mock
     private ProductVariantRepository variantRepository;
     @Mock
     private ProductBatchRepository batchRepository;
+    @Mock
+    private Clock businessClock;
 
     @InjectMocks
     private InventoryProjectionService inventoryProjectionService;
+
+    @BeforeEach
+    void clock() {
+        when(businessClock.instant()).thenReturn(Instant.parse("2026-04-14T00:00:00Z"));
+        when(businessClock.getZone()).thenReturn(ZoneId.of("Asia/Ho_Chi_Minh"));
+    }
 
     @Test
     void getProjection_single_sellableFromAggregate() {
@@ -50,7 +68,7 @@ class InventoryProjectionServiceSlice4aTest {
 
         when(variantRepository.findById(10L)).thenReturn(java.util.Optional.of(v));
         when(batchRepository.findActiveBatchesByVariantId(10L)).thenReturn(List.of());
-        when(batchRepository.sumSellableRemainingQtyByVariantIds(List.of(10L)))
+        when(batchRepository.sumSellableRemainingQtyByVariantIds(eq(List.of(10L)), any(LocalDate.class)))
                 .thenReturn(List.<Object[]>of(new Object[]{10L, 5}));
 
         InventoryProjectionResponse r = inventoryProjectionService.getProjection(10L);

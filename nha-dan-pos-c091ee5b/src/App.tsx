@@ -47,6 +47,7 @@ import AdminStoreSettings from "@/pages/admin/StoreSettings";
 import AdminShippingSettings from "@/pages/admin/ShippingSettings";
 import AdminGhnQuoteLogs from "@/pages/admin/GhnQuoteLogs";
 import AdminGoongTest from "@/pages/admin/GoongTestPage";
+import AdminProduction from "@/pages/admin/Production";
 
 import PlaceholderPage from "@/pages/PlaceholderPage";
 import NotFound from "@/pages/NotFound";
@@ -107,6 +108,7 @@ const App = () => (
               <Route path="stock-adjustments" element={<AdminStockAdjustments />} />
               <Route path="stock-adjustments/create" element={<AdminStockAdjustmentCreate />} />
               <Route path="inventory-report" element={<AdminInventoryReport />} />
+              <Route path="production" element={<AdminProduction />} />
               <Route path="revenue" element={<AdminRevenueReport />} />
               <Route path="profit" element={<AdminProfitReport />} />
               <Route path="customers" element={<AdminCustomers />} />

@@ -10,6 +10,8 @@ export interface BarcodeItem {
   code: string;
   price?: number;
   lot?: string;
+  /** Human-readable expiry (HSD) when known */
+  expiryDate?: string;
   defaultQty?: number;
 }
 
@@ -178,6 +180,11 @@ function LabelPreview({ item, forPrint }: { item: BarcodeItem; forPrint?: boolea
       </div>
       {item.price != null && (
         <div style={{ fontWeight: 700, marginTop: 2, color: "#000" }}>{formatVND(item.price)}</div>
+      )}
+      {item.expiryDate && (
+        <div style={{ color: "#000", marginTop: 1, fontSize: forPrint ? "7pt" : "9px", fontWeight: 500 }}>
+          HSD: {item.expiryDate}
+        </div>
       )}
       {item.lot && (
         <div style={{ color: "#000", marginTop: 1, fontSize: forPrint ? "7pt" : "9px", fontWeight: 500 }}>Lô: {item.lot}</div>

@@ -105,6 +105,10 @@ function backendToOrder(raw: BackendPendingOrder): PendingOrder {
           qty: Number(line.qty),
           unitPrice: Number(line.unitPrice),
           lineSubtotal: Number(line.lineSubtotal),
+          batchId: line.batchId != null ? String(line.batchId) : undefined,
+          rewardLine: Boolean(line.rewardLine),
+          originalUnitPrice:
+            line.originalUnitPrice != null ? Number(line.originalUnitPrice) : undefined,
         }))
       : [],
     giftLinesSnapshot: Array.isArray(raw.giftLinesSnapshot)
@@ -147,6 +151,10 @@ export class CloudPendingOrderAdapter implements PendingOrderService {
     if (opts?.allow404 && res.status === 404) return null;
     if (!res.ok) throw new Error(await parseError(res));
     return (await res.json()) as T;
+  }
+
+  private mapPaymentToApi(m: PaymentMethod): string {
+    return m === "cash" ? "cod" : m;
   }
 
   private buildApiPricingBreakdown(p: PricingBreakdownSnapshot) {
@@ -225,20 +233,27 @@ export class CloudPendingOrderAdapter implements PendingOrderService {
   async create(input: CreatePendingOrderInput): Promise<PendingOrder> {
     if (isTestEnv) return this.local.create(input);
 
-    const body = {
+    const body: Record<string, unknown> = {
       customerId: input.customerId,
       customerName: input.customerName,
       customerPhone: input.customerPhone,
       shippingAddress: input.shippingAddress,
-      paymentMethod: input.paymentMethod,
-      lines: input.lines,
+      paymentMethod: this.mapPaymentToApi(input.paymentMethod),
       promotionSnapshot: input.promotionSnapshot ?? null,
       voucherSnapshot: input.voucherSnapshot ?? null,
       shippingQuoteSnapshot: input.shippingQuoteSnapshot ?? null,
-      pricingBreakdownSnapshot: this.buildApiPricingBreakdown(input.pricingBreakdownSnapshot),
       note: input.note,
       expiresAt: input.expiresAt,
     };
+    if (input.quotePublicId) {
+      body.quotePublicId = input.quotePublicId;
+    }
+    if (input.lines !== undefined) {
+      body.lines = input.lines;
+    }
+    if (input.pricingBreakdownSnapshot) {
+      body.pricingBreakdownSnapshot = this.buildApiPricingBreakdown(input.pricingBreakdownSnapshot);
+    }
 
     const order = await this.requestJson<BackendPendingOrder>(API_BASE, {
       method: "POST",

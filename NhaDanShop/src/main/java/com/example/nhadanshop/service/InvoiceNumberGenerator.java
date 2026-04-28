@@ -1,6 +1,7 @@
 package com.example.nhadanshop.service;
 
 import com.example.nhadanshop.repository.InventoryReceiptRepository;
+import com.example.nhadanshop.repository.ProductionOrderRepository;
 import com.example.nhadanshop.repository.SalesInvoiceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -23,11 +24,14 @@ public class InvoiceNumberGenerator {
 
     private final InventoryReceiptRepository receiptRepository;
     private final SalesInvoiceRepository invoiceRepository;
+    private final ProductionOrderRepository productionOrderRepository;
 
     private final AtomicInteger invoiceSeq = new AtomicInteger(0);
     private final AtomicInteger receiptSeq = new AtomicInteger(0);
+    private final AtomicInteger productionSeq = new AtomicInteger(0);
     private volatile String invoiceLastDate = "";
     private volatile String receiptLastDate = "";
+    private volatile String productionLastDate = "";
 
     public synchronized String nextInvoiceNo() {
         String today = LocalDate.now().format(DATE_FMT);
@@ -51,5 +55,16 @@ public class InvoiceNumberGenerator {
             receiptSeq.set(maxSeq);
         }
         return "RCP-" + today + "-" + String.format("%05d", receiptSeq.incrementAndGet());
+    }
+
+    public synchronized String nextProductionOrderNo() {
+        String today = LocalDate.now().format(DATE_FMT);
+        if (!today.equals(productionLastDate)) {
+            productionLastDate = today;
+            String prefix = "PROD-" + today + "-";
+            int maxSeq = productionOrderRepository.findMaxSeqForPrefix(prefix, prefix + "%");
+            productionSeq.set(maxSeq);
+        }
+        return "PROD-" + today + "-" + String.format("%05d", productionSeq.incrementAndGet());
     }
 }
