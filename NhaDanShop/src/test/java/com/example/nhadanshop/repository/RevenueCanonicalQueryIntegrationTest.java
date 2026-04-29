@@ -132,7 +132,7 @@ class RevenueCanonicalQueryIntegrationTest {
         BigDecimal topRev = (BigDecimal) top.get(0)[9];
         BigDecimal topProfit = (BigDecimal) top.get(0)[10];
         assertEquals(0, topRev.compareTo(new BigDecimal("100")));
-        // Slice 6C: product rollups use line revenue (qty×unitPrice); profit = item gross − COGS (no invoice discount smear)
+        // Slice 7: product/category/top use COALESCE(lineNetRevenue, qty×unitPrice); profit = net − COGS
         assertEquals(0, topProfit.compareTo(new BigDecimal("60")));
 
         BigDecimal sumProfit = salesInvoiceRepository.sumProfitBetween(from, to);

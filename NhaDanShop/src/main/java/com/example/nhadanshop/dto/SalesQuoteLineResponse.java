@@ -1,5 +1,7 @@
 package com.example.nhadanshop.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.math.BigDecimal;
 
 public record SalesQuoteLineResponse(
@@ -13,5 +15,7 @@ public record SalesQuoteLineResponse(
         BigDecimal discountPercent,
         Long batchId,
         boolean rewardLine,
-        BigDecimal originalUnitPrice
+        BigDecimal originalUnitPrice,
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        CommercialLineSnapshotDto commercialSnapshot
 ) {}

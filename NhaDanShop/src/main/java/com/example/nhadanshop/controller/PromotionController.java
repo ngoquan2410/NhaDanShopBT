@@ -2,6 +2,9 @@ package com.example.nhadanshop.controller;
 
 import com.example.nhadanshop.dto.PromotionRequest;
 import com.example.nhadanshop.dto.PromotionResponse;
+import com.example.nhadanshop.dto.PromotionEvaluationRequest;
+import com.example.nhadanshop.dto.PromotionEvaluationResponse;
+import com.example.nhadanshop.service.PromotionEvaluationService;
 import com.example.nhadanshop.service.PromotionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +22,7 @@ import java.util.List;
 public class PromotionController {
 
     private final PromotionService promotionService;
+    private final PromotionEvaluationService promotionEvaluationService;
 
     /** GET /api/promotions?page=&size= — Danh sách tất cả khuyến mãi (có phân trang) */
     @GetMapping
@@ -30,6 +34,18 @@ public class PromotionController {
     @GetMapping("/active")
     public List<PromotionResponse> listActive() {
         return promotionService.listActive();
+    }
+
+    /** POST /api/promotions/evaluate — Stateless cart promotion preview */
+    @PostMapping("/evaluate")
+    public List<PromotionEvaluationResponse> evaluate(@Valid @RequestBody PromotionEvaluationRequest req) {
+        return promotionEvaluationService.evaluate(req);
+    }
+
+    /** POST /api/promotions/pick-best — Stateless best promotion preview */
+    @PostMapping("/pick-best")
+    public PromotionEvaluationResponse pickBest(@Valid @RequestBody PromotionEvaluationRequest req) {
+        return promotionEvaluationService.pickBest(req);
     }
 
     /** GET /api/promotions/{id} */

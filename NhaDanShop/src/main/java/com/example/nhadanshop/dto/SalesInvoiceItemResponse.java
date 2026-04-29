@@ -1,5 +1,7 @@
 package com.example.nhadanshop.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -27,5 +29,8 @@ public record SalesInvoiceItemResponse(
         BigDecimal comboUnitPrice,  // giá bán của combo tại thời điểm giao dịch
         /** FEFO batch allocations; empty when none or not loaded. */
         List<SalesInvoiceItemAllocationResponse> allocations,
-        boolean rewardLine
+        boolean rewardLine,
+        /** Persisted quote/commercial allocation; null for legacy / non-allocated lines. */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        CommercialLineSnapshotDto commercialSnapshot
 ) {}

@@ -364,12 +364,15 @@ export interface PricingBreakdownSnapshot {
   voucherDiscount: Money;
   shippingFee: Money;
   shippingDiscount: Money;
+  itemNetRevenue?: Money;
+  shippingNetRevenue?: Money;
   vatBase: Money;
   vatPercent: number;
   vatAmount: Money;
   /** Transitional compatibility field for older UI reads. Prefer `vatAmount`. */
   vat?: Money;
   total: Money;
+  commercialAllocationVersion?: number;
 }
 
 export interface ShippingQuoteSnapshot {

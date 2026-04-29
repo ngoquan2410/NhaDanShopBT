@@ -3,12 +3,10 @@ package com.example.nhadanshop.dto;
 import java.math.BigDecimal;
 
 /**
- * Sản phẩm/variant bán chạy nhất trong kỳ — Sprint 2 S2-2.
+ * Sản phẩm/variant trong kỳ — ranked by persisted merchandise net revenue.
  *
- * totalQty    = tổng số lượng bán trong kỳ
- * totalRevenue = tổng doanh thu (qty × unitPrice sau chiết khấu)
- * totalProfit  = tổng lợi nhuận gộp (revenue - cost)
- * rank         = thứ hạng (1 = bán chạy nhất)
+ * {@code totalRevenue} Σ {@code COALESCE(lineNetRevenue, qty×unitPrice)} — allocated net when persisted.
+ * {@code totalProfit} Σ (net revenue − line COGS).
  */
 public record TopProductDto(
         int rank,

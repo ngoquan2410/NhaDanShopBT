@@ -1,12 +1,12 @@
 -- Slice 6C: backend sales quotes for unified commercial invoice contract
 
 CREATE TABLE sales_quotes (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     public_id VARCHAR(36) NOT NULL,
     expires_at TIMESTAMP NOT NULL,
     consumed_at TIMESTAMP NULL,
     consumed_invoice_id BIGINT NULL,
-    payload_json CLOB NOT NULL,
+    payload_json TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_sales_quotes_public_id UNIQUE (public_id),
     CONSTRAINT fk_sales_quotes_consumed_invoice FOREIGN KEY (consumed_invoice_id)

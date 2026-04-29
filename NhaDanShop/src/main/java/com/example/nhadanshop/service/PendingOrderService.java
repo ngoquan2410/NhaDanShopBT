@@ -282,6 +282,7 @@ public class PendingOrderService {
             item.setLineSubtotal(nvl(cap.lineSubtotal()));
             item.setRewardLine(reward);
             item.setOriginalUnitPrice(cap.originalUnitPrice());
+            applyCommercialSnapshotToPendingItem(item, cap.commercialSnapshot());
             if (cap.batchId() != null) {
                 ProductBatch batch = productBatchRepository.findById(cap.batchId())
                         .orElseThrow(() -> new EntityNotFoundException("batchId không hợp lệ"));
@@ -442,7 +443,8 @@ public class PendingOrderService {
                         i.getLineSubtotal(),
                         i.getBatch() != null ? i.getBatch().getId() : null,
                         i.isRewardLine(),
-                        i.getOriginalUnitPrice()
+                        i.getOriginalUnitPrice(),
+                        DtoMapper.commercialSnapshotFromPendingOrderItem(i)
                 )).toList();
 
         return new PendingOrderResponse(
@@ -551,5 +553,22 @@ public class PendingOrderService {
                 .filter(v -> v != null && !v.isBlank())
                 .reduce((left, right) -> left + " · " + right)
                 .orElse(null);
+    }
+
+    private static void applyCommercialSnapshotToPendingItem(PendingOrderItem item, CommercialLineSnapshotDto snap) {
+        if (snap == null) {
+            return;
+        }
+        item.setLineGrossAmount(snap.lineGrossAmount());
+        item.setLineOwnDiscountAmount(snap.lineOwnDiscountAmount());
+        item.setLineNetBeforeInvoiceDiscount(snap.lineNetBeforeInvoiceDiscount());
+        item.setAllocatedManualDiscount(snap.allocatedManualDiscount());
+        item.setAllocatedPromotionDiscount(snap.allocatedPromotionDiscount());
+        item.setAllocatedVoucherDiscount(snap.allocatedVoucherDiscount());
+        item.setAllocatedMerchandiseDiscount(snap.allocatedMerchandiseDiscount());
+        item.setLineNetRevenue(snap.lineNetRevenue());
+        item.setLineVatBase(snap.lineVatBase());
+        item.setLineVatAmount(snap.lineVatAmount());
+        item.setCommercialAllocationVersion(snap.commercialAllocationVersion());
     }
 }

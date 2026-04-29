@@ -7,7 +7,7 @@ import java.time.LocalDate;
 public record ProfitReportResponse(
         LocalDate fromDate,
         LocalDate toDate,
-        /** Net revenue excluding VAT (after invoice-level discounts). Slice 6C: not gross {@code total_amount}. */
+        /** Merchandise allocated net revenue Σ line (ex VAT, ex shipping); allocated discounts already in line net. */
         BigDecimal totalRevenue,
         BigDecimal totalCost,
         BigDecimal totalProfit,

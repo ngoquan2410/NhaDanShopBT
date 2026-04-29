@@ -38,15 +38,14 @@ public class ReportService {
         LocalDateTime fromDt = from.atStartOfDay();
         LocalDateTime toDt = to.atTime(LocalTime.MAX);
 
-        BigDecimal totalRevenue  = invoiceRepo.sumTotalAmountBetween(fromDt, toDt);
+        BigDecimal merchandiseNetRevenue = invoiceRepo.sumLineNetRevenueBetween(fromDt, toDt);
         BigDecimal totalCost     = invoiceRepo.sumCostBetween(fromDt, toDt);
-        BigDecimal totalDiscount = invoiceRepo.sumDiscountAmountBetween(fromDt, toDt);
         long totalInvoices       = invoiceRepo.countByInvoiceDateBetweenAndStatus(fromDt, toDt, SalesInvoice.Status.COMPLETED);
 
         BigDecimal totalVat = sumVatFromPricingSnapshots(invoiceRepo.findPricingSnapshotJsonBetween(fromDt, toDt));
-        BigDecimal grossAfterDiscount = nullSafe(totalRevenue).subtract(nullSafe(totalDiscount));
-        BigDecimal netRevenue = grossAfterDiscount.subtract(nullSafe(totalVat));
-        BigDecimal netProfit  = netRevenue.subtract(nullSafe(totalCost));
+        BigDecimal lineNetProfitSum = invoiceRepo.sumProfitBetween(fromDt, toDt);
+        BigDecimal netRevenue = merchandiseNetRevenue;
+        BigDecimal netProfit  = lineNetProfitSum;
         BigDecimal marginPct = ProfitReportResponse.marginPct(netRevenue, netProfit);
 
         return new ProfitReportResponse(from, to,

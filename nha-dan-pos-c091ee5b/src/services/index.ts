@@ -24,6 +24,8 @@ import { BackendStoreSettingsAdapter } from "./adapters/backend/BackendStoreSett
 import { BackendVietQrAdapter } from "./adapters/backend/BackendVietQrAdapter";
 import { BackendPaymentEventAdapter } from "./adapters/backend/BackendPaymentEventAdapter";
 import { BackendProductionAdminAdapter } from "./adapters/backend/BackendProductionAdminAdapter";
+import { BackendPromotionEvaluationAdapter } from "./adapters/backend/BackendPromotionEvaluationAdapter";
+import { BackendPromotionCrudAdapter } from "./adapters/backend/BackendPromotionCrudAdapter";
 import { LocalAddressAdapter } from "./adapters/local/LocalAddressAdapter";
 import { RemoteAddressAdapter } from "./adapters/remote/RemoteAddressAdapter";
 import { HybridAddressAdapter } from "./adapters/remote/HybridAddressAdapter";
@@ -31,7 +33,6 @@ import { LocalShippingAdapter } from "./adapters/local/LocalShippingAdapter";
 import { GhnShippingAdapter } from "./adapters/remote/GhnShippingAdapter";
 import { HybridShippingAdapter } from "./adapters/remote/HybridShippingAdapter";
 import { CloudPendingOrderAdapter } from "./adapters/cloud/CloudPendingOrderAdapter";
-import { LocalPromotionAdapter } from "./adapters/local/LocalPromotionAdapter";
 import { LocalCustomerAdapter } from "./adapters/local/LocalCustomerAdapter";
 import { LocalVoucherAdapter } from "./adapters/local/LocalVoucherAdapter";
 import { LocalInvoiceAdapter } from "./adapters/local/LocalInvoiceAdapter";
@@ -41,7 +42,6 @@ import { LocalInventoryAdapter } from "./adapters/local/LocalInventoryAdapter";
 import { HybridInventoryAdapter } from "./adapters/HybridInventoryAdapter";
 import { LocalGoodsReceiptAdapter } from "./adapters/local/LocalGoodsReceiptAdapter";
 import { HybridGoodsReceiptAdapter } from "./adapters/HybridGoodsReceiptAdapter";
-import { LocalPromotionCrudAdapter } from "./adapters/local/LocalPromotionCrudAdapter";
 import { LocalPaymentAdapter } from "./adapters/local/LocalPaymentAdapter";
 
 export const storeSettings: StoreSettingsService = new BackendStoreSettingsAdapter();
@@ -55,7 +55,7 @@ export const shipping: ShippingService = new HybridShippingAdapter(
   new LocalShippingAdapter(),
 );
 export const pendingOrders: PendingOrderService = new CloudPendingOrderAdapter();
-export const promotions: PromotionEvaluationService = new LocalPromotionAdapter();
+export const promotions: PromotionEvaluationService = new BackendPromotionEvaluationAdapter();
 export const customers: CustomerService = new LocalCustomerAdapter();
 export const vouchers: VoucherService = new LocalVoucherAdapter();
 export const invoices: InvoiceService = new LocalInvoiceAdapter();
@@ -63,7 +63,7 @@ export const paymentEvents: PaymentEventService = new BackendPaymentEventAdapter
 export const products: ProductService = new HybridProductAdapter();
 export const inventory: InventoryService = new HybridInventoryAdapter();
 export const goodsReceipts: GoodsReceiptService = new HybridGoodsReceiptAdapter();
-export const promotionsCrud: PromotionCrudService = new LocalPromotionCrudAdapter();
+export const promotionsCrud: PromotionCrudService = new BackendPromotionCrudAdapter();
 export const payments: PaymentService = new LocalPaymentAdapter();
 export const categories: CategoryService = new HybridCategoryAdapter();
 export const production: ProductionAdminService = new BackendProductionAdminAdapter();

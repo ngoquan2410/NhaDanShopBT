@@ -24,10 +24,13 @@ const minimalQuotePayload = {
     voucherDiscount: 0,
     shippingFee: 15000,
     shippingDiscount: 0,
+    itemNetRevenue: 100000,
+    shippingNetRevenue: 15000,
     vatBase: 100000,
     vatPercent: 8,
     vatAmount: 8000,
     total: 123000,
+    commercialAllocationVersion: 1,
   },
   shippingQuoteSnapshot: null,
 };
@@ -46,6 +49,9 @@ describe("postSalesQuoteAsPos", () => {
     expect(r.quoteId).toBe("550e8400-e29b-41d4-a716-446655440000");
     expect(r.pricingBreakdownSnapshot.total).toBe(123000);
     expect(r.pricingBreakdownSnapshot.vatAmount).toBe(8000);
+    expect(r.pricingBreakdownSnapshot.itemNetRevenue).toBe(100000);
+    expect(r.pricingBreakdownSnapshot.shippingNetRevenue).toBe(15000);
+    expect(r.pricingBreakdownSnapshot.commercialAllocationVersion).toBe(1);
     expect(r.voucherSnapshot?.code).toBe("PCT10");
     expect(r.voucherSnapshot?.discountAmount).toBe(5000);
     expect(adminApi.adminFetchJson).toHaveBeenCalledWith(
@@ -64,5 +70,8 @@ describe("pricingFromQuoteApi", () => {
     const pb = pricingFromQuoteApi(raw);
     expect(pb.shippingFee).toBe(15000);
     expect(pb.vatPercent).toBe(8);
+    expect(pb.itemNetRevenue).toBe(100000);
+    expect(pb.shippingNetRevenue).toBe(15000);
+    expect(pb.commercialAllocationVersion).toBe(1);
   });
 });

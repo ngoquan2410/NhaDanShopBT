@@ -67,7 +67,8 @@ public class SalesQuoteService {
         }
 
         BigDecimal merchandiseSubtotal = BigDecimal.ZERO;
-        List<SalesQuoteCapturedLineDto> capturedBillable = new ArrayList<>();
+        List<SalesQuoteCapturedLineDto> capturedBillableBare = new ArrayList<>();
+        List<CommercialPricingEngine.BillableAllocationRow> billableRows = new ArrayList<>();
         List<SalesQuoteCapturedLineDto> capturedRewards = new ArrayList<>();
         List<CommercialPricingEngine.PromoPricingLine> promoLines = new ArrayList<>();
 
@@ -111,11 +112,16 @@ public class SalesQuoteService {
             BigDecimal sell = variant.getSellPrice();
             BigDecimal snappedUnit = sell.multiply(factor).setScale(0, RoundingMode.HALF_UP);
             BigDecimal lineSubtotal = snappedUnit.multiply(BigDecimal.valueOf(line.quantity()));
+            Long categoryId = product.getCategory() != null ? product.getCategory().getId() : null;
+            BigDecimal lineGrossCatalog =
+                    sell.multiply(BigDecimal.valueOf(line.quantity())).setScale(0, RoundingMode.HALF_UP);
 
             merchandiseSubtotal = merchandiseSubtotal.add(lineSubtotal);
-            capturedBillable.add(new SalesQuoteCapturedLineDto(
+            capturedBillableBare.add(new SalesQuoteCapturedLineDto(
                     product.getId(), variant.getId(), line.quantity(),
-                    snappedUnit, lineSubtotal, lineDisc, line.batchId(), false, sell));
+                    snappedUnit, lineSubtotal, lineDisc, line.batchId(), false, sell, null));
+            billableRows.add(new CommercialPricingEngine.BillableAllocationRow(
+                    product.getId(), categoryId, lineGrossCatalog, lineSubtotal));
             promoLines.add(new CommercialPricingEngine.PromoPricingLine(product, lineSubtotal));
         }
 
@@ -173,18 +179,43 @@ public class SalesQuoteService {
             rawShippingDiscountFromVoucher = rawDisc.shippingDiscount();
         }
 
+        BigDecimal rawShippingDiscountFromPromotion = computePromotionShippingDiscount(promo, req.lines(), merchandiseSubtotal, shipFee);
+        BigDecimal actualPromoShippingDiscount = rawShippingDiscountFromPromotion.min(shipFee).max(BigDecimal.ZERO);
+        BigDecimal remainingShippingForVoucher = shipFee.subtract(actualPromoShippingDiscount).max(BigDecimal.ZERO);
+        BigDecimal actualVoucherShippingDiscount = rawShippingDiscountFromVoucher.min(remainingShippingForVoucher).max(BigDecimal.ZERO);
+
         BigDecimal vatPct = req.vatPercent() != null ? req.vatPercent() : BigDecimal.ZERO;
 
-        PricingBreakdownSnapshotDto breakdown = CommercialPricingEngine.computePricing(
-                merchandiseSubtotal,
-                manual,
-                promo,
-                promoLines,
-                rawVoucherDiscount,
-                shipFee,
-                rawShippingDiscountFromVoucher,
-                vatPct
-        );
+        CommercialPricingEngine.QuoteCommercialResult quoteCommercial =
+                CommercialPricingEngine.computeMerchandiseQuoteAllocation(
+                        merchandiseSubtotal,
+                        manual,
+                        promo,
+                        promoLines,
+                        billableRows,
+                        rawVoucherDiscount,
+                        shipFee,
+                        actualPromoShippingDiscount,
+                        actualVoucherShippingDiscount,
+                        vatPct
+                );
+        PricingBreakdownSnapshotDto breakdown = quoteCommercial.breakdown();
+        List<SalesQuoteCapturedLineDto> capturedBillable = new ArrayList<>(capturedBillableBare.size());
+        for (int i = 0; i < capturedBillableBare.size(); i++) {
+            SalesQuoteCapturedLineDto c = capturedBillableBare.get(i);
+            capturedBillable.add(new SalesQuoteCapturedLineDto(
+                    c.productId(),
+                    c.variantId(),
+                    c.quantity(),
+                    c.unitPrice(),
+                    c.lineSubtotal(),
+                    c.discountPercent(),
+                    c.batchId(),
+                    c.rewardLine(),
+                    c.originalUnitPrice(),
+                    quoteCommercial.billableLineSnapshots().get(i)
+            ));
+        }
 
         if (!voucherCode.isEmpty()) {
             if (breakdown.voucherDiscount().compareTo(BigDecimal.ZERO) <= 0
@@ -200,7 +231,7 @@ public class SalesQuoteService {
                 promo.getType(),
                 null,
                 breakdown.promotionDiscount(),
-                BigDecimal.ZERO,
+                actualPromoShippingDiscount,
                 null,
                 giftSnapshots
         );
@@ -209,7 +240,7 @@ public class SalesQuoteService {
                 voucherRow.getCode(),
                 voucherRow.getRuleSummary(),
                 breakdown.voucherDiscount(),
-                breakdown.shippingDiscount());
+                actualVoucherShippingDiscount);
 
         SalesQuotePayloadDto payload = SalesQuotePayloadDto.from(
                 req.source(),
@@ -257,13 +288,34 @@ public class SalesQuoteService {
 
     private void assertQuoteSupportedPromotionType(Promotion promo) {
         String t = promo.getType();
-        if ("FREE_SHIPPING".equals(t)) {
-            throw new IllegalArgumentException(
-                    "Khuyen mai FREE_SHIPPING chua ho tro trong bao gia — dung voucher free_shipping");
-        }
-        if (!Set.of("PERCENT_DISCOUNT", "FIXED_DISCOUNT", "BUY_X_GET_Y", "QUANTITY_GIFT").contains(t)) {
+        if (!Set.of("PERCENT_DISCOUNT", "FIXED_DISCOUNT", "BUY_X_GET_Y", "QUANTITY_GIFT", "FREE_SHIPPING").contains(t)) {
             throw new IllegalArgumentException("Loai khuyen mai khong ho tro trong bao gia: " + t);
         }
+    }
+
+    private BigDecimal computePromotionShippingDiscount(
+            Promotion promo,
+            List<SalesQuoteLineRequest> reqLines,
+            BigDecimal merchandiseSubtotal,
+            BigDecimal shippingFee
+    ) {
+        if (promo == null || !"FREE_SHIPPING".equals(promo.getType())) {
+            return BigDecimal.ZERO;
+        }
+        if (shippingFee == null || shippingFee.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal minOrder = promo.getMinOrderValue() != null ? promo.getMinOrderValue() : BigDecimal.ZERO;
+        if (merchandiseSubtotal.compareTo(minOrder) < 0) {
+            return BigDecimal.ZERO;
+        }
+        if (eligiblePromoUnits(promo, reqLines) <= 0) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal cap = promo.getMaxDiscount() != null && promo.getMaxDiscount().compareTo(BigDecimal.ZERO) > 0
+                ? promo.getMaxDiscount()
+                : shippingFee;
+        return shippingFee.min(cap).max(BigDecimal.ZERO);
     }
 
     private List<SalesQuoteCapturedLineDto> buildPromotionRewardLines(
@@ -382,6 +434,20 @@ public class SalesQuoteService {
                             + "] — can " + rewardQty + ", co " + giftVariant.getStockQty());
         }
         BigDecimal sell = giftVariant.getSellPrice();
+        BigDecimal lineGross = sell.multiply(BigDecimal.valueOf(rewardQty)).setScale(0, RoundingMode.HALF_UP);
+        CommercialLineSnapshotDto rewardCommercialSnapshot = new CommercialLineSnapshotDto(
+                lineGross,
+                lineGross,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                CommercialPricingEngine.COMMERCIAL_SNAPSHOT_VERSION
+        );
         return new SalesQuoteCapturedLineDto(
                 giftProduct.getId(),
                 giftVariant.getId(),
@@ -391,7 +457,8 @@ public class SalesQuoteService {
                 BigDecimal.ZERO,
                 null,
                 true,
-                sell
+                sell,
+                rewardCommercialSnapshot
         );
     }
 
@@ -434,7 +501,8 @@ public class SalesQuoteService {
                 c.discountPercent(),
                 c.batchId(),
                 c.rewardLine(),
-                c.originalUnitPrice()
+                c.originalUnitPrice(),
+                c.commercialSnapshot()
         );
     }
 }

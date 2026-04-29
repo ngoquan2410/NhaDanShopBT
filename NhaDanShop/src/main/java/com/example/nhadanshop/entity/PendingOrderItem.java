@@ -62,4 +62,37 @@ public class PendingOrderItem {
     /** Catalog/original unit snapshot — populated when revenue ({@link #unitPrice}) is zero (gift/free tier lines). */
     @Column(name = "original_unit_price", precision = 18, scale = 2)
     private BigDecimal originalUnitPrice;
+
+    @Column(name = "line_gross_amount", precision = 18, scale = 2)
+    private BigDecimal lineGrossAmount;
+
+    @Column(name = "line_own_discount_amount", precision = 18, scale = 2)
+    private BigDecimal lineOwnDiscountAmount;
+
+    @Column(name = "line_net_before_invoice_discount", precision = 18, scale = 2)
+    private BigDecimal lineNetBeforeInvoiceDiscount;
+
+    @Column(name = "allocated_manual_discount", precision = 18, scale = 2)
+    private BigDecimal allocatedManualDiscount;
+
+    @Column(name = "allocated_promotion_discount", precision = 18, scale = 2)
+    private BigDecimal allocatedPromotionDiscount;
+
+    @Column(name = "allocated_voucher_discount", precision = 18, scale = 2)
+    private BigDecimal allocatedVoucherDiscount;
+
+    @Column(name = "allocated_merchandise_discount", precision = 18, scale = 2)
+    private BigDecimal allocatedMerchandiseDiscount;
+
+    @Column(name = "line_net_revenue", precision = 18, scale = 2)
+    private BigDecimal lineNetRevenue;
+
+    @Column(name = "line_vat_base", precision = 18, scale = 2)
+    private BigDecimal lineVatBase;
+
+    @Column(name = "line_vat_amount", precision = 18, scale = 2)
+    private BigDecimal lineVatAmount;
+
+    @Column(name = "commercial_allocation_version")
+    private Integer commercialAllocationVersion;
 }

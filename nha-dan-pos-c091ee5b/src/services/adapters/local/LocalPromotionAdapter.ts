@@ -1,3 +1,5 @@
+// Demo/test/offline fallback only. Real storefront/POS promotion preview uses
+// backend-owned evaluation; checkout/invoice truth still requires SalesQuote.
 // Adapter that wraps the existing rule engine in src/lib/promotions.ts and
 // exposes it through the canonical PromotionEvaluationService contract.
 //

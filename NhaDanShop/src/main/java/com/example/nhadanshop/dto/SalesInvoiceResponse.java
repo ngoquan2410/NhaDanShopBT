@@ -36,7 +36,7 @@ public record SalesInvoiceResponse(
         ShippingQuoteSnapshotDto shippingQuoteSnapshot,
         PricingBreakdownSnapshotDto pricingBreakdownSnapshot,
         BigDecimal vatPercent,
-        /** Slice 6C: item-level only (qty × unitPrice); excludes shipping and invoice-wide discount smear. */
+        /** Σ line merchandise revenue: allocated net when persisted, else qty×{@code unitPrice}. */
         BigDecimal itemRevenue,
         BigDecimal itemCogs,
         BigDecimal itemGrossProfit,

@@ -93,22 +93,41 @@ public final class DtoMapper {
             invoiceProfitBasis = "cancelled";
         } else {
             List<SalesInvoiceItem> lines = inv.getItems() != null ? inv.getItems() : List.of();
+            boolean commercialLines = lines.stream()
+                    .anyMatch(i -> i.getCommercialAllocationVersion() != null);
             for (SalesInvoiceItem i : lines) {
                 BigDecimal q = BigDecimal.valueOf(i.getQuantity());
-                itemRevenue = itemRevenue.add(nz(i.getUnitPrice()).multiply(q));
-                itemCogs = itemCogs.add(nz(i.getUnitCostSnapshot()).multiply(q));
+                BigDecimal lineCogs = nz(i.getUnitCostSnapshot()).multiply(q);
+                BigDecimal lineNetRev;
+                if (i.getCommercialAllocationVersion() != null) {
+                    lineNetRev = i.getLineNetRevenue() != null
+                            ? i.getLineNetRevenue()
+                            : nz(i.getUnitPrice()).multiply(q);
+                } else if (i.getLineNetRevenue() != null) {
+                    lineNetRev = i.getLineNetRevenue();
+                } else {
+                    lineNetRev = nz(i.getUnitPrice()).multiply(q);
+                }
+                itemRevenue = itemRevenue.add(lineNetRev);
+                itemCogs = itemCogs.add(lineCogs);
+                itemGrossProfit = itemGrossProfit.add(lineNetRev.subtract(lineCogs));
             }
-            itemGrossProfit = itemRevenue.subtract(itemCogs);
             if (pricingBreakdownSnapshot != null) {
                 shipFee = nz(pricingBreakdownSnapshot.shippingFee());
                 shipDiscSnap = nz(pricingBreakdownSnapshot.shippingDiscount());
             }
             shipNet = shipFee.subtract(shipDiscSnap);
-            BigDecimal merchDisc = nz(inv.getDiscountAmount()).subtract(shipDiscSnap);
-            if (merchDisc.compareTo(BigDecimal.ZERO) < 0) {
-                merchDisc = BigDecimal.ZERO;
+            if (commercialLines) {
+                totalProfit = itemGrossProfit.add(shipNet);
+                invoiceProfitBasis = "commercial_line_allocation";
+            } else {
+                BigDecimal merchDisc = nz(inv.getDiscountAmount()).subtract(shipDiscSnap);
+                if (merchDisc.compareTo(BigDecimal.ZERO) < 0) {
+                    merchDisc = BigDecimal.ZERO;
+                }
+                totalProfit = itemGrossProfit.subtract(merchDisc).add(shipNet);
+                invoiceProfitBasis = "invoice_discount_smear_legacy";
             }
-            totalProfit = itemGrossProfit.subtract(merchDisc).add(shipNet);
         }
 
         return new SalesInvoiceResponse(
@@ -153,10 +172,20 @@ public final class DtoMapper {
 
     // ── SalesInvoiceItem ──────────────────────────────────────────────────────
     public static SalesInvoiceItemResponse toResponse(SalesInvoiceItem item) {
-        BigDecimal lineTotal = item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity()));
-        BigDecimal profit    = item.getUnitPrice()
-                .subtract(item.getUnitCostSnapshot())
-                .multiply(BigDecimal.valueOf(item.getQuantity()));
+        BigDecimal q = BigDecimal.valueOf(item.getQuantity());
+        BigDecimal lineCogs = nz(item.getUnitCostSnapshot()).multiply(q);
+        BigDecimal lineNetMerchRev;
+        if (item.getCommercialAllocationVersion() != null) {
+            lineNetMerchRev = item.getLineNetRevenue() != null
+                    ? item.getLineNetRevenue()
+                    : nz(item.getUnitPrice()).multiply(q);
+        } else if (item.getLineNetRevenue() != null) {
+            lineNetMerchRev = item.getLineNetRevenue();
+        } else {
+            lineNetMerchRev = nz(item.getUnitPrice()).multiply(q);
+        }
+        BigDecimal profit = lineNetMerchRev.subtract(lineCogs);
+        BigDecimal lineTotal = nz(item.getUnitPrice()).multiply(q);
         BigDecimal origPrice = item.getOriginalUnitPrice() != null ? item.getOriginalUnitPrice() : item.getUnitPrice();
         BigDecimal lineDsc   = item.getLineDiscountPercent() != null ? item.getLineDiscountPercent() : BigDecimal.ZERO;
         ProductVariant v = item.getVariant();
@@ -180,7 +209,47 @@ public final class DtoMapper {
                 null,  // comboSourceName — enriched ở tầng FE hoặc query riêng
                 item.getComboUnitPrice(),
                 toAllocationResponses(item),
-                item.isRewardLine()
+                item.isRewardLine(),
+                commercialSnapshotFromInvoiceItem(item)
+        );
+    }
+
+    private static CommercialLineSnapshotDto commercialSnapshotFromInvoiceItem(SalesInvoiceItem item) {
+        if (item.getCommercialAllocationVersion() == null) {
+            return null;
+        }
+        return new CommercialLineSnapshotDto(
+                item.getLineGrossAmount(),
+                item.getLineOwnDiscountAmount(),
+                item.getLineNetBeforeInvoiceDiscount(),
+                item.getAllocatedManualDiscount(),
+                item.getAllocatedPromotionDiscount(),
+                item.getAllocatedVoucherDiscount(),
+                item.getAllocatedMerchandiseDiscount(),
+                item.getLineNetRevenue(),
+                item.getLineVatBase(),
+                item.getLineVatAmount(),
+                item.getCommercialAllocationVersion()
+        );
+    }
+
+    /** Pending order line persisted commercial snapshot → API DTO. */
+    static CommercialLineSnapshotDto commercialSnapshotFromPendingOrderItem(PendingOrderItem item) {
+        if (item.getCommercialAllocationVersion() == null) {
+            return null;
+        }
+        return new CommercialLineSnapshotDto(
+                item.getLineGrossAmount(),
+                item.getLineOwnDiscountAmount(),
+                item.getLineNetBeforeInvoiceDiscount(),
+                item.getAllocatedManualDiscount(),
+                item.getAllocatedPromotionDiscount(),
+                item.getAllocatedVoucherDiscount(),
+                item.getAllocatedMerchandiseDiscount(),
+                item.getLineNetRevenue(),
+                item.getLineVatBase(),
+                item.getLineVatAmount(),
+                item.getCommercialAllocationVersion()
         );
     }
 

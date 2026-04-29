@@ -1,5 +1,6 @@
 package com.example.nhadanshop.service;
 
+import com.example.nhadanshop.dto.CommercialLineSnapshotDto;
 import com.example.nhadanshop.dto.PricingBreakdownSnapshotDto;
 import com.example.nhadanshop.entity.Category;
 import com.example.nhadanshop.entity.Product;
@@ -8,17 +9,20 @@ import com.example.nhadanshop.entity.SalesInvoiceItem;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Shared commercial math for quotes, quote-mode invoices, and pending-order snapshots (Slice 6C).
- * VAT v1: {@code vatBase = merchandise subtotal}, {@code vatAmount = floor(subtotal * vatPercent / 100)} (no discount reduces VAT base).
+ * Shared commercial math for quotes, quote-mode invoices, and pending-order snapshots.
  */
 public final class CommercialPricingEngine {
 
     private CommercialPricingEngine() {}
+
+    /** Version stored on quote/invoice snapshots with per-line allocation; bump when allocation rules change. */
+    public static final int COMMERCIAL_SNAPSHOT_VERSION = 1;
 
     public record PromoPricingLine(Product product, BigDecimal lineAmount) {}
 
@@ -69,8 +73,184 @@ public final class CommercialPricingEngine {
                 S,
                 vatPct,
                 vatAmount,
-                total
+                total,
+                null,
+                null,
+                null
         );
+    }
+
+    /**
+     * KiotViet-like merchandise allocation + VAT on merchandise net (+ deterministic line VAT split).
+     * Use for new quotes; legacy {@link #computePricing} remains for compatibility tests.
+     */
+    public static QuoteCommercialResult computeMerchandiseQuoteAllocation(
+            BigDecimal merchandiseSubtotal,
+            BigDecimal manualRaw,
+            Promotion promoOrNull,
+            List<PromoPricingLine> promoLines,
+            List<BillableAllocationRow> billableRows,
+            BigDecimal voucherDiscountRaw,
+            BigDecimal shippingFeeRaw,
+            BigDecimal shippingDiscountPromoRaw,
+            BigDecimal shippingDiscountVoucherRaw,
+            BigDecimal vatPercentRaw
+    ) {
+        if (billableRows.isEmpty()) {
+            throw new IllegalArgumentException("Quote must have billable lines");
+        }
+        if (promoLines.size() != billableRows.size()) {
+            throw new IllegalArgumentException("Promotion lines must match billable rows");
+        }
+
+        BigDecimal S = nz(merchandiseSubtotal);
+        BigDecimal md = nz(manualRaw).min(S);
+
+        BigDecimal pd = BigDecimal.ZERO;
+        if (promoOrNull != null && !promoLines.isEmpty() && !"FREE_SHIPPING".equals(promoOrNull.getType())) {
+            pd = merchandisePromotionDiscount(promoOrNull, promoLines, S);
+        }
+
+        BigDecimal vd = nz(voucherDiscountRaw).max(BigDecimal.ZERO);
+        BigDecimal afterMp = S.subtract(md).subtract(pd);
+        if (vd.compareTo(afterMp) > 0) {
+            vd = afterMp.max(BigDecimal.ZERO);
+        }
+
+        List<BigDecimal> bases = new ArrayList<>();
+        for (BillableAllocationRow row : billableRows) {
+            bases.add(nz(row.lineNetBeforeInvoiceDiscount()));
+        }
+
+        List<Boolean> allMask = billableRows.stream().map(r -> Boolean.TRUE).toList();
+        List<Boolean> promoMask = billableRows.stream()
+                .map(r -> promoRowEligibleForAllocation(promoOrNull, r))
+                .toList();
+
+        List<BigDecimal> am = CommercialDiscountAllocationService.allocate(md, bases, allMask);
+        List<BigDecimal> ap = CommercialDiscountAllocationService.allocate(pd, bases, promoMask);
+        List<BigDecimal> av = CommercialDiscountAllocationService.allocate(vd, bases, allMask);
+
+        BigDecimal itemNet = BigDecimal.ZERO;
+        List<BigDecimal> netRevenues = new ArrayList<>();
+        for (int i = 0; i < billableRows.size(); i++) {
+            BigDecimal base = nz(bases.get(i));
+            BigDecimal man = nz(am.get(i));
+            BigDecimal pr = nz(ap.get(i));
+            BigDecimal vo = nz(av.get(i));
+            BigDecimal allo = man.add(pr).add(vo);
+            BigDecimal netRev = base.subtract(allo);
+            if (netRev.compareTo(BigDecimal.ZERO) < 0) {
+                netRev = BigDecimal.ZERO;
+            }
+            netRevenues.add(netRev);
+            itemNet = itemNet.add(netRev);
+        }
+
+        BigDecimal sf = nz(shippingFeeRaw).max(BigDecimal.ZERO);
+        BigDecimal sdp = nz(shippingDiscountPromoRaw).max(BigDecimal.ZERO);
+        BigDecimal sdv = nz(shippingDiscountVoucherRaw).max(BigDecimal.ZERO);
+        BigDecimal sdf = sdp.add(sdv);
+        if (sdf.compareTo(sf) > 0) {
+            sdf = sf;
+        }
+        BigDecimal shippingNet = sf.subtract(sdf);
+
+        BigDecimal vatPct = nz(vatPercentRaw).max(BigDecimal.ZERO);
+        if (vatPct.compareTo(new BigDecimal("100")) > 0) {
+            vatPct = new BigDecimal("100");
+        }
+        BigDecimal vatAmount = itemNet.multiply(vatPct)
+                .divide(BigDecimal.valueOf(100), 0, RoundingMode.FLOOR);
+
+        List<Boolean> vatEligible = new ArrayList<>();
+        List<BigDecimal> vatWeights = new ArrayList<>();
+        for (BigDecimal nr : netRevenues) {
+            vatWeights.add(nr);
+            vatEligible.add(nr.compareTo(BigDecimal.ZERO) > 0);
+        }
+        List<BigDecimal> vatPerLine = CommercialDiscountAllocationService.allocate(vatAmount, vatWeights, vatEligible);
+
+        List<CommercialLineSnapshotDto> lineSnapshots = new ArrayList<>();
+        for (int i = 0; i < billableRows.size(); i++) {
+            BillableAllocationRow row = billableRows.get(i);
+            BigDecimal gross = nz(row.lineGrossAmount());
+            BigDecimal netBefore = nz(bases.get(i));
+            BigDecimal own = gross.subtract(netBefore);
+            if (own.compareTo(BigDecimal.ZERO) < 0) {
+                own = BigDecimal.ZERO;
+            }
+            BigDecimal man = nz(am.get(i));
+            BigDecimal pr = nz(ap.get(i));
+            BigDecimal vo = nz(av.get(i));
+            BigDecimal allo = man.add(pr).add(vo);
+            BigDecimal nr = netRevenues.get(i);
+            BigDecimal lvat = i < vatPerLine.size() ? nz(vatPerLine.get(i)) : BigDecimal.ZERO;
+            lineSnapshots.add(new CommercialLineSnapshotDto(
+                    gross,
+                    own,
+                    netBefore,
+                    man,
+                    pr,
+                    vo,
+                    allo,
+                    nr,
+                    nr,
+                    lvat,
+                    COMMERCIAL_SNAPSHOT_VERSION
+            ));
+        }
+
+        BigDecimal total = itemNet.add(shippingNet).add(vatAmount);
+        PricingBreakdownSnapshotDto breakdown = new PricingBreakdownSnapshotDto(
+                S,
+                md,
+                pd,
+                vd,
+                sf,
+                sdf,
+                itemNet,
+                vatPct,
+                vatAmount,
+                total,
+                itemNet,
+                shippingNet,
+                COMMERCIAL_SNAPSHOT_VERSION
+        );
+        return new QuoteCommercialResult(breakdown, lineSnapshots);
+    }
+
+    /** Per billable quote line for allocation weights and line gross/original snapshots. */
+    public record BillableAllocationRow(
+            Long productId,
+            Long categoryId,
+            BigDecimal lineGrossAmount,
+            BigDecimal lineNetBeforeInvoiceDiscount
+    ) {}
+
+    public record QuoteCommercialResult(
+            PricingBreakdownSnapshotDto breakdown,
+            List<CommercialLineSnapshotDto> billableLineSnapshots
+    ) {}
+
+    private static boolean promoRowEligibleForAllocation(Promotion promo, BillableAllocationRow row) {
+        if (promo == null) {
+            return true;
+        }
+        String appliesTo = promo.getAppliesTo();
+        if (appliesTo == null || "ALL".equals(appliesTo)) {
+            return true;
+        }
+        if ("PRODUCT".equals(appliesTo)) {
+            return promo.getProducts().stream().anyMatch(p -> p.getId().equals(row.productId()));
+        }
+        if ("CATEGORY".equals(appliesTo)) {
+            if (row.categoryId() == null) {
+                return false;
+            }
+            return promo.getCategories().stream().anyMatch(c -> c.getId().equals(row.categoryId()));
+        }
+        return true;
     }
 
     /** Legacy invoice items path — matches invoice-layer promotion math. */
@@ -79,7 +259,16 @@ public final class CommercialPricingEngine {
         return computePromotionDiscountInternalFromInvoiceItems(promo, items, merchandiseTotal);
     }
 
-    private static BigDecimal computePromotionDiscountInternal(
+    /** Exposes merchandise promotion discount from {@link PromoPricingLine} list (quote path). */
+    public static BigDecimal merchandisePromotionDiscount(
+            Promotion promo,
+            List<PromoPricingLine> lines,
+            BigDecimal merchandiseTotal
+    ) {
+        return computePromotionDiscountInternal(promo, lines, merchandiseTotal);
+    }
+
+    static BigDecimal computePromotionDiscountInternal(
             Promotion promo,
             List<PromoPricingLine> lines,
             BigDecimal merchandiseTotal

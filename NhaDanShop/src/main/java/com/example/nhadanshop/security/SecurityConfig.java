@@ -89,6 +89,8 @@ public class SecurityConfig {
                         // Store public
                         .requestMatchers(HttpMethod.GET, "/api/products/**", "/api/categories/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/vouchers/active").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/promotions/active").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/promotions/evaluate", "/api/promotions/pick-best").permitAll()
                         .requestMatchers(
                                 HttpMethod.GET,
                                 "/api/addresses/provinces",
@@ -133,6 +135,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/pending-orders/*/cancel").hasRole("ADMIN")
                         .requestMatchers("/api/payment-events/**").hasRole("ADMIN")
                         // Products & categories CRUD
+                        .requestMatchers(HttpMethod.POST, "/api/promotions").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/promotions/*").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/promotions/*/toggle").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/promotions/*").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/categories/**", "/api/products/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/categories/**", "/api/products/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/categories/**", "/api/products/**").hasRole("ADMIN")

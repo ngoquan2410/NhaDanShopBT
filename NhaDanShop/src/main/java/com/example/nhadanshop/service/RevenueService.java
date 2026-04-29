@@ -101,12 +101,17 @@ public class RevenueService {
             String categoryName = r[3] != null ? (String) r[3] : "Không phân loại";
             String unit         = r[4] != null ? (String) r[4] : "";
             Long totalQty       = r[5] != null ? ((Number) r[5]).longValue() : 0L;
-            BigDecimal totalAmt = r[6] != null ? (BigDecimal) r[6] : BigDecimal.ZERO;
+            BigDecimal netMerch = r[6] != null ? (BigDecimal) r[6] : BigDecimal.ZERO;
+            BigDecimal allocTot = r[7] != null ? (BigDecimal) r[7] : BigDecimal.ZERO;
+            BigDecimal merchCost = r[8] != null ? (BigDecimal) r[8] : BigDecimal.ZERO;
+            BigDecimal merchProfit = r[9] != null ? (BigDecimal) r[9] : BigDecimal.ZERO;
 
             List<RevenueRowDto> rows = List.of(
-                    new RevenueRowDto(from.format(DAY_FMT) + " → " + to.format(DAY_FMT), totalAmt));
+                    new RevenueRowDto(from.format(DAY_FMT) + " → " + to.format(DAY_FMT), netMerch));
 
-            result.add(new RevenueByProductDto(productId, code, name, categoryName, unit, rows, totalAmt, totalQty));
+            result.add(new RevenueByProductDto(
+                    productId, code, name, categoryName, unit, rows, netMerch, totalQty,
+                    netMerch, allocTot, merchCost, merchProfit));
         }
         // Sort DESC vì JPQL không hỗ trợ ORDER BY aggregate
         result.sort((a, b) -> b.totalAmount().compareTo(a.totalAmount()));
@@ -127,12 +132,14 @@ public class RevenueService {
         for (Object[] r : raw) {
             Long catId     = (Long) r[0];
             String catName = (String) r[1];
-            BigDecimal amt = r[2] != null ? (BigDecimal) r[2] : BigDecimal.ZERO;
+            BigDecimal netMerch = r[2] != null ? (BigDecimal) r[2] : BigDecimal.ZERO;
+            BigDecimal merchCost = r[3] != null ? (BigDecimal) r[3] : BigDecimal.ZERO;
+            BigDecimal merchProfit = r[4] != null ? (BigDecimal) r[4] : BigDecimal.ZERO;
 
             List<RevenueRowDto> rows = List.of(
-                    new RevenueRowDto(from.format(DAY_FMT) + " → " + to.format(DAY_FMT), amt));
+                    new RevenueRowDto(from.format(DAY_FMT) + " → " + to.format(DAY_FMT), netMerch));
 
-            result.add(new RevenueByCategoryDto(catId, catName, rows, amt));
+            result.add(new RevenueByCategoryDto(catId, catName, rows, netMerch, netMerch, merchCost, merchProfit));
         }
         // Sort DESC
         result.sort((a, b) -> b.totalAmount().compareTo(a.totalAmount()));

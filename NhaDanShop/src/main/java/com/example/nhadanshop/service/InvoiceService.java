@@ -2,6 +2,7 @@ package com.example.nhadanshop.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.nhadanshop.dto.CommercialLineSnapshotDto;
 import com.example.nhadanshop.dto.InvoiceItemRequest;
 import com.example.nhadanshop.dto.PricingBreakdownSnapshotDto;
 import com.example.nhadanshop.dto.PromotionSnapshotDto;
@@ -186,19 +187,29 @@ public class InvoiceService {
             items.add(item);
         }
 
-        invoice.setTotalAmount(totalAmount);
+        PricingBreakdownSnapshotDto directPricing = materializeDirectInvoiceCommercialSnapshot(items, totalAmount, promo);
+        invoice.setPricingBreakdownSnapshotJson(writeJson(directPricing));
+        invoice.setVatPercent(nvl(directPricing.vatPercent()));
+        invoice.setTotalAmount(
+                nvl(directPricing.subtotal())
+                        .add(nvl(directPricing.shippingFee()))
+                        .add(nvl(directPricing.vatAmount()))
+        );
         invoice.getItems().addAll(items);
         if (req.paymentMethod() != null && !req.paymentMethod().isBlank()) {
             invoice.setPaymentMethod(req.paymentMethod());
         }
 
-        BigDecimal discountAmount = BigDecimal.ZERO;
         if (promo != null) {
-            discountAmount = CommercialPricingEngine.computePromotionDiscount(promo, items, totalAmount);
             invoice.setPromotionId(promo.getId());
             invoice.setPromotionName(promo.getName());
         }
-        invoice.setDiscountAmount(discountAmount);
+        invoice.setDiscountAmount(
+                nvl(directPricing.manualDiscount())
+                        .add(nvl(directPricing.promotionDiscount()))
+                        .add(nvl(directPricing.voucherDiscount()))
+                        .add(nvl(directPricing.shippingDiscount()))
+        );
 
         SalesInvoice saved = invoiceRepo.save(invoice);
         appendInvoiceDeductionMovements(saved);
@@ -213,6 +224,55 @@ public class InvoiceService {
         }
 
         return DtoMapper.toResponse(saved);
+    }
+
+    private PricingBreakdownSnapshotDto materializeDirectInvoiceCommercialSnapshot(
+            List<SalesInvoiceItem> items,
+            BigDecimal merchandiseSubtotal,
+            Promotion promo
+    ) {
+        List<SalesInvoiceItem> billableItems = items.stream()
+                .filter(i -> !i.isRewardLine())
+                .toList();
+        if (billableItems.isEmpty()) {
+            throw new IllegalArgumentException("Hoa don truc tiep phai co it nhat mot dong tinh tien");
+        }
+
+        List<CommercialPricingEngine.BillableAllocationRow> allocationRows = new ArrayList<>();
+        List<CommercialPricingEngine.PromoPricingLine> promoLines = new ArrayList<>();
+        for (SalesInvoiceItem item : billableItems) {
+            BigDecimal qty = BigDecimal.valueOf(item.getQuantity());
+            BigDecimal gross = nvl(item.getOriginalUnitPrice()).multiply(qty).setScale(0, RoundingMode.HALF_UP);
+            BigDecimal netBeforeInvoiceDiscount = nvl(item.getUnitPrice()).multiply(qty).setScale(0, RoundingMode.HALF_UP);
+            Long categoryId = item.getProduct().getCategory() != null ? item.getProduct().getCategory().getId() : null;
+            allocationRows.add(new CommercialPricingEngine.BillableAllocationRow(
+                    item.getProduct().getId(),
+                    categoryId,
+                    gross,
+                    netBeforeInvoiceDiscount
+            ));
+            promoLines.add(new CommercialPricingEngine.PromoPricingLine(item.getProduct(), netBeforeInvoiceDiscount));
+        }
+
+        CommercialPricingEngine.QuoteCommercialResult commercial =
+                CommercialPricingEngine.computeMerchandiseQuoteAllocation(
+                        merchandiseSubtotal,
+                        BigDecimal.ZERO,
+                        promo,
+                        promoLines,
+                        allocationRows,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO
+                );
+
+        List<CommercialLineSnapshotDto> snapshots = commercial.billableLineSnapshots();
+        for (int i = 0; i < billableItems.size(); i++) {
+            applyCommercialSnapshot(billableItems.get(i), snapshots.get(i));
+        }
+        return commercial.breakdown();
     }
 
     /**
@@ -367,6 +427,7 @@ public class InvoiceService {
                 : variant.getCostPrice();
         item.setUnitCostSnapshot(costSnap);
         appendBatchAllocations(item, deductionResult.batchDeductions());
+        applyCommercialSnapshot(item, cap.commercialSnapshot());
         invoice.getItems().add(item);
     }
 
@@ -440,7 +501,42 @@ public class InvoiceService {
         item.setUnitCostSnapshot(deductionResult.averageCost().compareTo(BigDecimal.ZERO) > 0
                 ? deductionResult.averageCost() : variant.getCostPrice());
         appendBatchAllocations(item, deductionResult.batchDeductions());
+        applyCommercialFromPendingOrderItem(item, orderItem);
         invoice.getItems().add(item);
+    }
+
+    private static void applyCommercialSnapshot(SalesInvoiceItem item, CommercialLineSnapshotDto snap) {
+        if (snap == null) {
+            return;
+        }
+        item.setLineGrossAmount(snap.lineGrossAmount());
+        item.setLineOwnDiscountAmount(snap.lineOwnDiscountAmount());
+        item.setLineNetBeforeInvoiceDiscount(snap.lineNetBeforeInvoiceDiscount());
+        item.setAllocatedManualDiscount(snap.allocatedManualDiscount());
+        item.setAllocatedPromotionDiscount(snap.allocatedPromotionDiscount());
+        item.setAllocatedVoucherDiscount(snap.allocatedVoucherDiscount());
+        item.setAllocatedMerchandiseDiscount(snap.allocatedMerchandiseDiscount());
+        item.setLineNetRevenue(snap.lineNetRevenue());
+        item.setLineVatBase(snap.lineVatBase());
+        item.setLineVatAmount(snap.lineVatAmount());
+        item.setCommercialAllocationVersion(snap.commercialAllocationVersion());
+    }
+
+    private static void applyCommercialFromPendingOrderItem(SalesInvoiceItem item, PendingOrderItem orderItem) {
+        if (orderItem.getCommercialAllocationVersion() == null) {
+            return;
+        }
+        item.setLineGrossAmount(orderItem.getLineGrossAmount());
+        item.setLineOwnDiscountAmount(orderItem.getLineOwnDiscountAmount());
+        item.setLineNetBeforeInvoiceDiscount(orderItem.getLineNetBeforeInvoiceDiscount());
+        item.setAllocatedManualDiscount(orderItem.getAllocatedManualDiscount());
+        item.setAllocatedPromotionDiscount(orderItem.getAllocatedPromotionDiscount());
+        item.setAllocatedVoucherDiscount(orderItem.getAllocatedVoucherDiscount());
+        item.setAllocatedMerchandiseDiscount(orderItem.getAllocatedMerchandiseDiscount());
+        item.setLineNetRevenue(orderItem.getLineNetRevenue());
+        item.setLineVatBase(orderItem.getLineVatBase());
+        item.setLineVatAmount(orderItem.getLineVatAmount());
+        item.setCommercialAllocationVersion(orderItem.getCommercialAllocationVersion());
     }
 
     /**

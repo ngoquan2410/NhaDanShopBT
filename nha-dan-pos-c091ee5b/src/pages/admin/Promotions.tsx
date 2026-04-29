@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTableToolbar, FilterChip } from "@/components/shared/DataTableToolbar";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { useStore, promotionActions } from "@/lib/store";
+import { useStore } from "@/lib/store";
 import { formatDate } from "@/lib/format";
 import {
   type Promotion,
@@ -19,6 +19,7 @@ import { TablePagination } from "@/components/shared/TablePagination";
 import { useTableControls } from "@/hooks/useTableControls";
 import { Plus, Tags, Calendar, Pencil, Trash2, Power } from "lucide-react";
 import { toast } from "sonner";
+import { promotionsCrud } from "@/services";
 
 const TYPE_ICON_BG: Record<PromotionType, string> = {
   percent: "bg-primary-soft text-primary",
@@ -29,7 +30,10 @@ const TYPE_ICON_BG: Record<PromotionType, string> = {
 };
 
 export default function AdminPromotions() {
-  const { promotions: promoList, categories, products } = useStore();
+  const { promotions: demoPromotions, categories, products } = useStore();
+  const [promoList, setPromoList] = useState<Promotion[]>([]);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<PromotionType | null>(null);
@@ -38,6 +42,28 @@ export default function AdminPromotions() {
 
   const categoryNames = useMemo(() => Object.fromEntries(categories.map((c) => [c.id, c.name])), [categories]);
   const productNames = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p.name])), [products]);
+
+  useEffect(() => {
+    let cancel = false;
+    setLoading(true);
+    promotionsCrud.list({ page: 1, pageSize: 200 })
+      .then((page) => {
+        if (cancel) return;
+        setPromoList(page.items);
+        setApiError(null);
+      })
+      .catch((err) => {
+        if (cancel) return;
+        const message = err instanceof Error ? err.message : "Không tải được khuyến mãi từ backend";
+        setApiError(message);
+        // Demo/test fallback only: never used for persisted admin CRUD.
+        setPromoList(demoPromotions);
+      })
+      .finally(() => {
+        if (!cancel) setLoading(false);
+      });
+    return () => { cancel = true; };
+  }, [demoPromotions]);
 
   const filtered = promoList.filter((p) => {
     if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
@@ -53,31 +79,58 @@ export default function AdminPromotions() {
     resetToken: `${search}|${filterStatus}|${filterType}`,
   });
 
-  const handleSave = (promo: Promotion) => {
-    promotionActions.upsert(promo);
-    toast.success(promo.id ? `Đã cập nhật "${promo.name}"` : `Đã tạo "${promo.name}"`);
-    setEditing(null);
+  const handleSave = async (promo: Promotion) => {
+    try {
+      const saved = await promotionsCrud.upsert(promo);
+      setPromoList((rows) => {
+        const exists = rows.some((p) => p.id === saved.id || (promo.id && p.id === promo.id));
+        return exists ? rows.map((p) => (p.id === saved.id || p.id === promo.id ? saved : p)) : [saved, ...rows];
+      });
+      setApiError(null);
+      toast.success(promo.id ? `Đã cập nhật "${saved.name}"` : `Đã tạo "${saved.name}"`);
+      setEditing(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Lưu khuyến mãi thất bại";
+      setApiError(message);
+      toast.error(message);
+    }
   };
 
-  const toggleActive = (id: string) => {
+  const toggleActive = async (id: string) => {
     const p = promoList.find((x) => x.id === id);
-    promotionActions.toggleActive(id);
-    toast.success(`Đã ${p?.active ? "tạm dừng" : "kích hoạt"} "${p?.name}"`);
+    try {
+      await promotionsCrud.toggleActive(id);
+      setPromoList((rows) => rows.map((x) => (x.id === id ? { ...x, active: !x.active } : x)));
+      setApiError(null);
+      toast.success(`Đã ${p?.active ? "tạm dừng" : "kích hoạt"} "${p?.name}"`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Đổi trạng thái khuyến mãi thất bại";
+      setApiError(message);
+      toast.error(message);
+    }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteTarget) return;
     const p = promoList.find((x) => x.id === deleteTarget);
-    promotionActions.remove(deleteTarget);
-    toast.success(`Đã xóa "${p?.name}"`);
-    setDeleteTarget(null);
+    try {
+      await promotionsCrud.remove(deleteTarget);
+      setPromoList((rows) => rows.filter((x) => x.id !== deleteTarget));
+      setApiError(null);
+      toast.success(`Đã xóa "${p?.name}"`);
+      setDeleteTarget(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Xóa khuyến mãi thất bại";
+      setApiError(message);
+      toast.error(message);
+    }
   };
 
   return (
     <div className="space-y-4 admin-dense">
       <PageHeader
         title="Khuyến mãi"
-        description={`${promoList.length} chương trình`}
+        description={loading ? "Đang tải..." : `${promoList.length} chương trình`}
         actions={
           <button
             onClick={() => setEditing(makeEmptyPromotion("percent"))}
@@ -87,6 +140,12 @@ export default function AdminPromotions() {
           </button>
         }
       />
+
+      {apiError && (
+        <div className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
+          Lỗi API khuyến mãi: {apiError}
+        </div>
+      )}
 
       <DataTableToolbar
         search={search}

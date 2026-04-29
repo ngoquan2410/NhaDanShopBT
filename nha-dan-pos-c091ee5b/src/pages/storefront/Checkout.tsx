@@ -193,9 +193,13 @@ export default function CheckoutPage() {
       shippingQuote: quote,
       voucherCode: appliedVoucherCode ?? undefined,
     };
-    void promotions.pickBest(ctx).then((p) => {
-      if (!cancel) setBestPromo(p);
-    });
+    void promotions.pickBest(ctx)
+      .then((p) => {
+        if (!cancel) setBestPromo(p);
+      })
+      .catch(() => {
+        if (!cancel) setBestPromo(null);
+      });
     return () => {
       cancel = true;
     };

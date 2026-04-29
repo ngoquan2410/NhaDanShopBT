@@ -1,5 +1,7 @@
 package com.example.nhadanshop.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.math.BigDecimal;
 
 /**
@@ -16,5 +18,11 @@ public record SalesQuoteCapturedLineDto(
         Long batchId,
         boolean rewardLine,
         /** Catalog sell price snapshot; used for reward lines (revenue line price is zero). */
-        BigDecimal originalUnitPrice
+        BigDecimal originalUnitPrice,
+        /**
+         * Per-line commercial allocation from {@code CommercialPricingEngine.computeMerchandiseQuoteAllocation}.
+         * Null on legacy quote payloads and reward lines / non-billable lines.
+         */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        CommercialLineSnapshotDto commercialSnapshot
 ) {}

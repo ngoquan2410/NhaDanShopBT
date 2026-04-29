@@ -22,9 +22,9 @@ import { CameraScanner } from "@/components/pos/CameraScanner";
 import { PosQrDialog, type PosQrPaymentType } from "@/components/pos/PosQrDialog";
 import { computeInvoice, type POSCartLine } from "@/lib/pos-invoice";
 import { buildBackendPosPrintSnapshot } from "@/lib/pos-quote-receipt";
-import { applyPromotionToCart, formatPromotionSummary, getPromotionProgress, PROMOTION_TYPE_LABELS, type Cart, type Promotion } from "@/lib/promotions";
-import { shipping } from "@/services";
-import type { ShippingConfig, ShippingZoneRule } from "@/services/types";
+import { formatPromotionSummary, PROMOTION_TYPE_LABELS, type Promotion } from "@/lib/promotions";
+import { promotions as promotionEvaluationService, promotionsCrud, shipping } from "@/services";
+import type { CartContext, EvaluatedPromotion, ShippingConfig, ShippingZoneRule } from "@/services/types";
 import { fetchPosScan } from "@/services/pos/posScanApi";
 import { adminFetchJson, getAdminSession } from "@/services/auth/adminApi";
 import { postSalesQuoteAsPos } from "@/services/sales/salesQuoteApi";
@@ -40,7 +40,7 @@ type BackendSalesInvoiceResponse = {
 type ScanMode = "hid" | "camera" | "manual";
 
 export default function AdminPOS() {
-  const { customers, promotions, products: storeProducts } = useStore();
+  const { customers, products: storeProducts } = useStore();
   const [lines, setLines] = useState<POSCartLine[]>([]);
   const [scanMode, setScanMode] = useState<ScanMode>("hid");
   const [barcodeInput, setBarcodeInput] = useState("");
@@ -67,6 +67,10 @@ export default function AdminPOS() {
   const barcodeRef = useRef<HTMLInputElement>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [posVoucherCode, setPosVoucherCode] = useState("");
+  const [backendPromotions, setBackendPromotions] = useState<Promotion[]>([]);
+  const [promotionLoadError, setPromotionLoadError] = useState<string | null>(null);
+  const [promotionEvaluations, setPromotionEvaluations] = useState<EvaluatedPromotion[]>([]);
+  const [promotionEvalError, setPromotionEvalError] = useState<string | null>(null);
 
   // Load shipping zones once so cashiers can attach a zone code + ETA to the receipt.
   useEffect(() => {
@@ -98,27 +102,91 @@ export default function AdminPOS() {
     [storeProducts],
   );
 
-  // All active promotions (date window enforced inside applyPromotionToCart).
-  // We keep BOTH eligible and ineligible promotions visible in the selector,
-  // grouped by eligibility so cashiers see options even when cart isn't yet qualifying.
+  useEffect(() => {
+    let cancel = false;
+    void promotionsCrud.list({ page: 1, pageSize: 200, active: true })
+      .then((res) => {
+        if (cancel) return;
+        setBackendPromotions(res.items);
+        setPromotionLoadError(null);
+      })
+      .catch((e) => {
+        if (cancel) return;
+        setBackendPromotions([]);
+        setPromotionLoadError(e instanceof Error ? e.message : "Không tải được khuyến mãi backend");
+      });
+    return () => {
+      cancel = true;
+    };
+  }, []);
+
+  // Real POS promotion source is backend DB. Local promotion helpers may still
+  // render demo/offline previews elsewhere, but this selector never reads local store IDs.
   const activePromotions = useMemo(
-    () => promotions.filter((p) => p.active),
-    [promotions],
+    () => backendPromotions.filter((p) => p.active),
+    [backendPromotions],
   );
   const selectedPromotion: Promotion | null =
     activePromotions.find((p) => p.id === promotionId) ?? null;
+
+  const promotionEvaluationById = useMemo(
+    () => Object.fromEntries(promotionEvaluations.map((p) => [p.promotionId, p])),
+    [promotionEvaluations],
+  );
+  const selectedPromotionEvaluation = selectedPromotion ? promotionEvaluationById[selectedPromotion.id] : undefined;
+  const selectedPromotionBackendEligible = selectedPromotionEvaluation?.eligible === true;
+  const promotionForLocalTotals = selectedPromotionBackendEligible ? selectedPromotion : null;
+
+  useEffect(() => {
+    let cancel = false;
+    const billable = lines.filter((l) => !l.reward);
+    if (billable.length === 0 || activePromotions.length === 0) {
+      setPromotionEvaluations([]);
+      setPromotionEvalError(null);
+      return;
+    }
+    const subtotal = billable.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
+    const ctx: CartContext = {
+      lines: billable.map((l) => ({
+        id: l.id,
+        productId: l.productId,
+        variantId: l.variantId ?? "",
+        productName: l.productName,
+        variantName: l.variantName,
+        qty: l.quantity,
+        unitPrice: l.unitPrice,
+        lineSubtotal: l.unitPrice * l.quantity,
+      })),
+      subtotal,
+      shippingQuote: { status: "quoted", fee: shippingFee },
+    };
+    void promotionEvaluationService.evaluateAll(ctx)
+      .then((rows) => {
+        if (cancel) return;
+        setPromotionEvaluations(rows);
+        setPromotionEvalError(null);
+      })
+      .catch((e) => {
+        if (cancel) return;
+        setPromotionEvaluations([]);
+        setPromotionEvalError(e instanceof Error ? e.message : "Không đánh giá được khuyến mãi backend");
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [activePromotions.length, lines, shippingFee]);
 
   // Compute totals
   const totals = useMemo(
     () => computeInvoice({
       lines,
       manualDiscount: { mode: discountMode, value: discountValue },
-      promotion: selectedPromotion,
+      promotion: promotionForLocalTotals,
       shippingFee,
       vatPercent,
       productCategory,
     }),
-    [lines, discountMode, discountValue, selectedPromotion, shippingFee, vatPercent, productCategory],
+    [lines, discountMode, discountValue, promotionForLocalTotals, shippingFee, vatPercent, productCategory],
   );
 
   const billable = lines.filter((l) => !l.reward);
@@ -711,53 +779,30 @@ export default function AdminPOS() {
     p.active && (!search || p.name.toLowerCase().includes(search.toLowerCase()) || p.code.toLowerCase().includes(search.toLowerCase()))
   );
 
-  // Build promotion options with per-promo eligibility evaluation.
-  // Eligible promos appear in group "Đủ điều kiện" first, ineligible (with reason) below.
+  // Build promotion options from backend promotion rows + backend stateless evaluation.
+  // If evaluation fails, keep backend-loaded options visible but do not claim eligibility.
   const promoOptions = useMemo(() => {
-    const billable = lines.filter((l) => !l.reward);
-    const subtotal = billable.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
-    const cart: Cart = {
-      lines: billable.map((l) => ({
-        productId: l.productId,
-        variantId: l.variantId,
-        productName: l.productName,
-        unitPrice: l.unitPrice,
-        quantity: l.quantity,
-      })),
-      subtotal,
-      shippingFee,
-    };
-    const evaluated = activePromotions.map((p) => ({ p, app: applyPromotionToCart(cart, p, { productCategory }) }));
+    const evaluated = activePromotions.map((p) => ({ p, evalRow: promotionEvaluationById[p.id] }));
     evaluated.sort((a, b) => {
-      if (a.app.status !== b.app.status) return a.app.status === "eligible" ? -1 : 1;
+      const aEligible = a.evalRow?.eligible === true;
+      const bEligible = b.evalRow?.eligible === true;
+      if (aEligible !== bEligible) return aEligible ? -1 : 1;
       return a.p.name.localeCompare(b.p.name);
     });
-    return evaluated.map(({ p, app }) => ({
+    return evaluated.map(({ p, evalRow }) => {
+      const eligible = evalRow?.eligible === true;
+      const reason = promotionEvalError ? "Chưa xác nhận eligibility từ backend" : evalRow?.reasonIfIneligible;
+      return {
       id: p.id,
       label: p.name,
-      sub: `${PROMOTION_TYPE_LABELS[p.type]} · ${formatPromotionSummary(p)}${app.status !== "eligible" && app.skipReason ? ` — ${app.skipReason}` : ""}`,
-      group: app.status === "eligible" ? "Đủ điều kiện" : "Chưa đủ điều kiện",
-      badge: app.status === "eligible"
+      sub: `${PROMOTION_TYPE_LABELS[p.type]} · ${formatPromotionSummary(p)}${!eligible && reason ? ` — ${reason}` : ""}`,
+      group: eligible ? "Đủ điều kiện (backend)" : "Khuyến mãi backend",
+      badge: eligible
         ? { label: "Đủ điều kiện", tone: "success" as const }
-        : { label: app.status === "unavailable" ? "Không áp dụng" : "Chưa đủ điều kiện", tone: "warning" as const },
-    }));
-  }, [activePromotions, lines, shippingFee, productCategory]);
-
-  // Progress hint toward the currently-selected promotion (null when eligible / N/A).
-  const promoProgress = useMemo(() => {
-    if (!selectedPromotion) return null;
-    const billable = lines.filter((l) => !l.reward);
-    const subtotal = billable.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
-    const cart: Cart = {
-      lines: billable.map((l) => ({
-        productId: l.productId, variantId: l.variantId, productName: l.productName,
-        unitPrice: l.unitPrice, quantity: l.quantity,
-      })),
-      subtotal,
-      shippingFee,
-    };
-    return getPromotionProgress(cart, selectedPromotion, { productCategory });
-  }, [selectedPromotion, lines, shippingFee, productCategory]);
+        : { label: promotionEvalError ? "Chưa xác nhận" : "Chưa đủ điều kiện", tone: "warning" as const },
+      };
+    });
+  }, [activePromotions, promotionEvaluationById, promotionEvalError]);
 
   // ------ Render helpers ------
   const SummaryBreakdown = () => (
@@ -800,6 +845,13 @@ export default function AdminPOS() {
         placeholder="Chọn khuyến mãi..."
         options={promoOptions}
       />
+      {(promotionLoadError || promotionEvalError) && (
+        <p className="mt-1 text-[10px] text-warning">
+          {promotionLoadError
+            ? `Không tải được khuyến mãi backend: ${promotionLoadError}`
+            : `Không đánh giá được khuyến mãi backend: ${promotionEvalError}. POS sẽ không áp dụng preview local.`}
+        </p>
+      )}
       {hasBatchCart && (
         <p className="mt-1 text-[10px] text-muted-foreground">
           Giỏ có dòng lô (quét BATCH:…) — thanh toán qua <span className="font-medium">quote backend</span> giữ đúng lô; quà KM do máy chủ tính trong báo giá.
@@ -818,33 +870,22 @@ export default function AdminPOS() {
       {selectedPromotion && (
         <div className={cn(
           "mt-1.5 p-2 rounded-md text-[11px] border",
-          totals.promoEligible ? "bg-success-soft border-success/30 text-foreground" : "bg-warning-soft border-warning/30 text-foreground",
+          selectedPromotionBackendEligible ? "bg-success-soft border-success/30 text-foreground" : "bg-warning-soft border-warning/30 text-foreground",
         )}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="font-medium truncate">{selectedPromotion.name}</div>
               <div className="text-muted-foreground">{formatPromotionSummary(selectedPromotion)}</div>
-              {totals.promoEligible ? (
-                <div className="mt-1 text-success font-medium">✓ Đã áp dụng</div>
+              {selectedPromotionBackendEligible ? (
+                <div className="mt-1 text-success font-medium">✓ Backend xác nhận đủ điều kiện</div>
               ) : (
-                <div className="mt-1 text-warning font-medium">⚠ {totals.promoSkipReason || "Chưa đủ điều kiện"}</div>
+                <div className="mt-1 text-warning font-medium">⚠ {promotionEvalError ? "Chưa xác nhận từ backend" : selectedPromotionEvaluation?.reasonIfIneligible || "Chưa đủ điều kiện"}</div>
               )}
             </div>
             <button onClick={() => setPromotionId("")} className="text-muted-foreground hover:text-danger" title="Bỏ khuyến mãi">
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
-          {!totals.promoEligible && promoProgress && (
-            <div className="mt-2">
-              <div className="h-1.5 w-full rounded-full bg-warning/20 overflow-hidden">
-                <div
-                  className="h-full bg-warning transition-all"
-                  style={{ width: `${Math.round(promoProgress.ratio * 100)}%` }}
-                />
-              </div>
-              <div className="mt-1 text-warning">{promoProgress.message}</div>
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -946,25 +987,23 @@ export default function AdminPOS() {
           </div>
 
           <div className="flex-1 overflow-y-auto scrollbar-thin">
-            {selectedPromotion && !lastInvoice && lines.length > 0 && !totals.promoEligible && promoProgress && (
+            {selectedPromotion && !lastInvoice && lines.length > 0 && !selectedPromotionBackendEligible && (
               <div className="m-3 p-2.5 rounded-md border border-warning/40 bg-warning-soft flex items-start gap-2 text-xs">
                 <Tag className="h-4 w-4 text-warning shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-foreground">{promoProgress.message}</p>
-                  <div className="mt-1.5 h-1.5 w-full rounded-full bg-warning/20 overflow-hidden">
-                    <div
-                      className="h-full bg-warning transition-all"
-                      style={{ width: `${Math.round(promoProgress.ratio * 100)}%` }}
-                    />
-                  </div>
+                  <p className="font-medium text-foreground">
+                    {promotionEvalError
+                      ? "Chưa xác nhận được khuyến mãi từ backend; POS không áp dụng preview local."
+                      : selectedPromotionEvaluation?.reasonIfIneligible || "Khuyến mãi chưa đủ điều kiện theo backend."}
+                  </p>
                 </div>
               </div>
             )}
-            {selectedPromotion && !lastInvoice && lines.length > 0 && totals.promoEligible && (
+            {selectedPromotion && !lastInvoice && lines.length > 0 && selectedPromotionBackendEligible && (
               <div className="m-3 p-2.5 rounded-md border border-success/40 bg-success-soft flex items-center gap-2 text-xs">
                 <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
                 <p className="font-medium text-foreground">
-                  Đã áp dụng khuyến mãi <span className="font-semibold">{selectedPromotion.name}</span>
+                  Backend xác nhận đủ điều kiện khuyến mãi <span className="font-semibold">{selectedPromotion.name}</span>
                 </p>
               </div>
             )}
@@ -1214,8 +1253,8 @@ export default function AdminPOS() {
               <span className="font-bold text-primary">{formatVND(totals.total)}</span>
             </span>
             {selectedPromotion && (
-              <span className={cn("text-[10px] px-1.5 py-0.5 rounded", totals.promoEligible ? "bg-success-soft text-success" : "bg-warning-soft text-warning")}>
-                {totals.promoEligible ? "✓ KM" : "⚠ KM"}
+              <span className={cn("text-[10px] px-1.5 py-0.5 rounded", selectedPromotionBackendEligible ? "bg-success-soft text-success" : "bg-warning-soft text-warning")}>
+                {selectedPromotionBackendEligible ? "✓ KM" : "⚠ KM"}
               </span>
             )}
           </button>

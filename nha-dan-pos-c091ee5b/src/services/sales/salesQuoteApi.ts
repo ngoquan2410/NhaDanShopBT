@@ -66,10 +66,13 @@ function normalizePricing(v: Record<string, unknown>): PricingBreakdownSnapshot 
   const voucherDiscount = Number(v.voucherDiscount ?? 0);
   const shippingFee = Number(v.shippingFee ?? 0);
   const shippingDiscount = Number(v.shippingDiscount ?? 0);
+  const itemNetRevenue = v.itemNetRevenue == null ? undefined : Number(v.itemNetRevenue);
+  const shippingNetRevenue = v.shippingNetRevenue == null ? undefined : Number(v.shippingNetRevenue);
   const vatBase = Number(v.vatBase ?? subtotal);
   const vatPercent = Number(v.vatPercent ?? 0);
   const vatAmount = Number(v.vatAmount ?? 0);
   const total = Number(v.total ?? 0);
+  const commercialAllocationVersion = v.commercialAllocationVersion == null ? undefined : Number(v.commercialAllocationVersion);
   return {
     subtotal,
     manualDiscount,
@@ -77,11 +80,14 @@ function normalizePricing(v: Record<string, unknown>): PricingBreakdownSnapshot 
     voucherDiscount,
     shippingFee,
     shippingDiscount,
+    itemNetRevenue,
+    shippingNetRevenue,
     vatBase,
     vatPercent,
     vatAmount,
     vat: vatAmount,
     total,
+    commercialAllocationVersion,
   };
 }
 

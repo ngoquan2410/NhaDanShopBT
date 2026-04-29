@@ -5,12 +5,8 @@ import java.util.List;
 
 /**
  * Response thống kê doanh thu theo sản phẩm.
- * productId / productCode / productName: định danh sản phẩm
- * categoryName: danh mục
- * unit: đơn vị
- * rows: các kỳ (ngày/tuần/tháng/năm) với doanh thu
- * totalAmount: tổng doanh thu tất cả kỳ
- * totalQty: tổng số lượng bán
+ * {@code totalAmount} matches {@link #merchandiseNetRevenue}: allocated net merchandise (after invoice-level
+ * discount smear at line), legacy rows fallback to qty×post-line unit price.
  */
 public record RevenueByProductDto(
         Long productId,
@@ -20,5 +16,9 @@ public record RevenueByProductDto(
         String sellUnit,
         List<RevenueRowDto> rows,
         BigDecimal totalAmount,
-        Long totalQty
+        Long totalQty,
+        BigDecimal merchandiseNetRevenue,
+        BigDecimal merchandiseAllocatedDiscountTotal,
+        BigDecimal merchandiseCost,
+        BigDecimal merchandiseNetProfit
 ) {}

@@ -83,12 +83,12 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
             @Param("to") LocalDateTime to);
 
     /**
-     * Slice 6C: item-level gross profit — line revenue (qty × unit price) − line COGS (no invoice-wide proportional allocation).
-     * Shipping/fees remain at invoice aggregate; excluded from product rollups.
+     * Merchandise line profit Σ — uses persisted {@code lineNetRevenue − lineCOGS}; legacy rows fall back to
+     * {@code qty×unitPrice − qty×cost}. Shipping is invoice aggregate only; excluded here.
      */
     @Query("""
             SELECT COALESCE(SUM(
-                (item.quantity * item.unitPrice)
+                COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)
                 - (item.quantity * item.unitCostSnapshot)
             ), 0)
             FROM SalesInvoiceItem item
@@ -96,6 +96,22 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
               AND item.invoice.status = 'COMPLETED'
             """)
     BigDecimal sumProfitBetween(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
+
+    /**
+     * Sum merchandise net allocated revenue (after invoice-level merchant discount allocation persisted per line).
+     * Legacy rows: {@link SalesInvoiceItem#lineNetRevenue} null → {@code quantity * unitPrice}.
+     */
+    @Query("""
+            SELECT COALESCE(SUM(
+                COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)
+            ), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
+            """)
+    BigDecimal sumLineNetRevenueBetween(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
@@ -165,6 +181,10 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
             """)
     List<Object[]> sumSoldQtyByVariantAfter(@Param("from") LocalDateTime from);
 
+    /**
+     * Per product (group includes sell unit variant): qty, merchandise net revenue, allocated merchant discountTotal,
+     * COGS Σ, net profit Σ. Net revenue COALESCE persists {@code lineNetRevenue}, else qty×unitPrice.
+     */
     @Query("""
             SELECT item.product.id,
                    item.product.code,
@@ -172,13 +192,19 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
                    item.product.category.name,
                    COALESCE(item.variant.sellUnit, 'cai'),
                    COALESCE(SUM(item.quantity), 0),
-                   COALESCE(SUM(item.quantity * item.unitPrice), 0)
+                   COALESCE(SUM(COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)), 0),
+                   COALESCE(SUM(COALESCE(item.allocatedMerchandiseDiscount, 0)), 0),
+                   COALESCE(SUM(item.quantity * item.unitCostSnapshot), 0),
+                   COALESCE(SUM(
+                       COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)
+                       - (item.quantity * item.unitCostSnapshot)
+                   ), 0)
             FROM SalesInvoiceItem item
             WHERE item.invoice.invoiceDate BETWEEN :from AND :to
               AND item.invoice.status = 'COMPLETED'
             GROUP BY item.product.id, item.product.code, item.product.name,
                      item.product.category.name, item.variant.sellUnit
-            ORDER BY COALESCE(SUM(item.quantity * item.unitPrice), 0) DESC
+            ORDER BY COALESCE(SUM(COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)), 0) DESC
             """)
     List<Object[]> revenueByProduct(
             @Param("from") LocalDateTime from,
@@ -187,12 +213,17 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
     @Query("""
             SELECT item.product.category.id,
                    item.product.category.name,
-                   COALESCE(SUM(item.quantity * item.unitPrice), 0)
+                   COALESCE(SUM(COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)), 0),
+                   COALESCE(SUM(item.quantity * item.unitCostSnapshot), 0),
+                   COALESCE(SUM(
+                       COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)
+                       - (item.quantity * item.unitCostSnapshot)
+                   ), 0)
             FROM SalesInvoiceItem item
             WHERE item.invoice.invoiceDate BETWEEN :from AND :to
               AND item.invoice.status = 'COMPLETED'
             GROUP BY item.product.category.id, item.product.category.name
-            ORDER BY COALESCE(SUM(item.quantity * item.unitPrice), 0) DESC
+            ORDER BY COALESCE(SUM(COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)), 0) DESC
             """)
     List<Object[]> revenueByCategory(
             @Param("from") LocalDateTime from,
@@ -227,9 +258,10 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
                    sii.product.category.name,
                    sii.variant.sellUnit,
                    COALESCE(SUM(sii.quantity), 0),
-                   COALESCE(SUM(sii.quantity * sii.unitPrice), 0),
+                   COALESCE(SUM(COALESCE(sii.lineNetRevenue, sii.quantity * sii.unitPrice)), 0),
                    COALESCE(SUM(
-                       (sii.quantity * sii.unitPrice) - (sii.quantity * sii.unitCostSnapshot)
+                       COALESCE(sii.lineNetRevenue, sii.quantity * sii.unitPrice)
+                       - (sii.quantity * sii.unitCostSnapshot)
                    ), 0)
             FROM SalesInvoiceItem sii
             WHERE sii.variant IS NOT NULL
@@ -238,7 +270,7 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
             GROUP BY sii.variant.id, sii.variant.variantCode, sii.variant.variantName,
                      sii.product.id, sii.product.code, sii.product.name,
                      sii.product.category.name, sii.variant.sellUnit
-            ORDER BY COALESCE(SUM(sii.quantity * sii.unitPrice), 0) DESC
+            ORDER BY COALESCE(SUM(COALESCE(sii.lineNetRevenue, sii.quantity * sii.unitPrice)), 0) DESC
             """)
     List<Object[]> topProducts(
             @Param("from") LocalDateTime from,
