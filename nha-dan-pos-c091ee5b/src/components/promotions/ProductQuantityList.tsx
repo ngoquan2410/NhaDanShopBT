@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Plus, Trash2, Search } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { useService } from "@/hooks/useService";
+import { products as productService } from "@/services";
 
 interface Item {
   productId: string;
@@ -17,7 +18,8 @@ interface Props {
 }
 
 export function ProductQuantityList({ label, items, onChange, error, excludeProductIds = [] }: Props) {
-  const { products } = useStore();
+  const { data } = useService(() => productService.list({ page: 1, pageSize: 200, active: true }), []);
+  const products = data?.items ?? [];
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
 

@@ -5,7 +5,8 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ProductImportReview } from "@/components/shared/ProductImportReview";
 import { importStaging } from "@/lib/import-staging";
-import { useStore, productActions } from "@/lib/store";
+import { useService } from "@/hooks/useService";
+import { categories as categoryService, products as productService } from "@/services";
 import type { ProductVariant } from "@/lib/mock-data";
 import { formatVND } from "@/lib/format";
 import { resolveProductImage, fileToDataUrl, MAX_IMAGE_BYTES } from "@/lib/product-image";
@@ -61,9 +62,13 @@ function ImportRouteWrapper() {
 function AdminProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { products, categories } = useStore();
   const isNew = !id || id === "new";
-  const product = isNew ? null : products.find(p => p.id === id);
+  const { data: product, loading: productLoading, error: productError, reload: reloadProduct } = useService(
+    () => isNew ? Promise.resolve(null) : productService.get(id!),
+    [id, isNew],
+  );
+  const { data: categoryData } = useService(() => categoryService.list({ includeInactive: true }), []);
+  const categories = categoryData?.items ?? [];
 
   const [activeTab, setActiveTab] = useState<"general" | "variants" | "images">("general");
   const [variantForm, setVariantForm] = useState<VariantForm | null>(null);
@@ -77,11 +82,20 @@ function AdminProductDetail() {
   const [active, setActive] = useState(product?.active ?? true);
 
   useEffect(() => {
-    if (!isNew && !product) {
+    if (!productLoading && !isNew && !product) {
       // product was deleted from another tab — bounce back
       navigate("/admin/products");
     }
-  }, [isNew, product, navigate]);
+  }, [isNew, product, productLoading, navigate]);
+
+  useEffect(() => {
+    if (!product) return;
+    setName(product.name);
+    setCode(product.code);
+    setCategoryId(product.categoryId);
+    setType(product.type);
+    setActive(product.active);
+  }, [product]);
 
   const tabs = [
     { id: "general" as const, label: "Thông tin chung" },
@@ -89,26 +103,31 @@ function AdminProductDetail() {
     { id: "images" as const, label: "Hình ảnh" },
   ];
 
-  const handleSaveProduct = () => {
+  const handleSaveProduct = async () => {
     if (!name.trim() || !code.trim()) { toast.error("Vui lòng nhập tên và mã sản phẩm"); return; }
     if (!categoryId) { toast.error("Vui lòng chọn danh mục"); return; }
     const cat = categories.find(c => c.id === categoryId);
-    if (isNew) {
-      const created = productActions.create({
-        code: code.trim(), name: name.trim(),
-        categoryId, categoryName: cat?.name ?? "",
-        image: "", active, type,
-        variants: [],
-      } as any);
-      toast.success("Đã tạo sản phẩm mới");
-      navigate(`/admin/products/${created.id}`, { replace: true });
-    } else if (product) {
-      productActions.update(product.id, {
-        name: name.trim(), code: code.trim(),
-        categoryId, categoryName: cat?.name ?? product.categoryName,
-        type, active,
-      });
-      toast.success("Đã lưu thay đổi");
+    try {
+      if (isNew) {
+        const created = await productService.create({
+          code: code.trim(), name: name.trim(),
+          categoryId, categoryName: cat?.name ?? "",
+          image: "", active, type,
+          variants: [],
+        } as any);
+        toast.success("Đã tạo sản phẩm mới");
+        navigate(`/admin/products/${created.id}`, { replace: true });
+      } else if (product) {
+        await productService.update(product.id, {
+          name: name.trim(), code: code.trim(),
+          categoryId, categoryName: cat?.name ?? product.categoryName,
+          type, active,
+        });
+        toast.success("Đã lưu thay đổi");
+        reloadProduct();
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không thể lưu sản phẩm");
     }
   };
 
@@ -136,33 +155,44 @@ function AdminProductDetail() {
   })();
   const variantHasErrors = Object.keys(variantErrors).length > 0;
 
-  const handleSaveVariant = () => {
+  const handleSaveVariant = async () => {
     if (!product || !variantForm) return;
     if (variantHasErrors) { toast.error("Vui lòng sửa các trường không hợp lệ"); return; }
-    if (variantForm.id) {
-      productActions.updateVariant(product.id, variantForm.id, variantForm);
-      toast.success("Đã cập nhật phân loại");
-    } else {
-      productActions.addVariant(product.id, variantForm);
-      toast.success("Đã thêm phân loại mới");
+    try {
+      if (variantForm.id) {
+        await productService.updateVariant(product.id, variantForm.id, variantForm);
+        toast.success("Đã cập nhật phân loại");
+      } else {
+        await productService.addVariant(product.id, variantForm);
+        toast.success("Đã thêm phân loại mới");
+      }
+      setVariantForm(null);
+      reloadProduct();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không thể lưu phân loại");
     }
-    setVariantForm(null);
   };
 
-  const handleDeleteVariant = () => {
+  const handleDeleteVariant = async () => {
     if (!product || !confirmDeleteVariant) return;
     if (product.variants.length === 1) {
       toast.error("Phải có ít nhất 1 phân loại");
       return;
     }
-    productActions.removeVariant(product.id, confirmDeleteVariant.id);
-    toast.success(`Đã xóa phân loại "${confirmDeleteVariant.name}"`);
+    try {
+      await productService.removeVariant(product.id, confirmDeleteVariant.id);
+      toast.success(`Đã xóa phân loại "${confirmDeleteVariant.name}"`);
+      reloadProduct();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không thể xóa phân loại");
+    }
   };
 
-  const handleSetDefault = (v: ProductVariant) => {
+  const handleSetDefault = async (v: ProductVariant) => {
     if (!product || v.isDefault) return;
-    productActions.setDefaultVariant(product.id, v.id);
+    await productService.setDefaultVariant(product.id, v.id);
     toast.success(`Đặt "${v.name}" làm phân loại mặc định`);
+    reloadProduct();
   };
 
   return (
@@ -221,6 +251,24 @@ function AdminProductDetail() {
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
+              {categories.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                  Chưa có danh mục nào.&nbsp;
+                  <Link to="/admin/categories" className="text-primary font-medium hover:underline">
+                    Tạo danh mục
+                  </Link>
+                  &nbsp;trước khi lưu sản phẩm.
+                </p>
+              )}
+              {categories.length > 0 && categories.every((c) => !c.active) && (
+                <p className="mt-1.5 text-[11px] text-warning">
+                  Mọi danh mục đang tắt — kích hoạt một danh mục tại{" "}
+                  <Link to="/admin/categories" className="font-medium underline">
+                    Danh mục
+                  </Link>
+                  &nbsp;hoặc chọn “bao gồm không hoạt động” khi sửa.
+                </p>
+              )}
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Loại sản phẩm</label>
@@ -461,7 +509,8 @@ function ImagesTab({ product }: { product: { id: string; name: string; image: st
     if (file.size > MAX_IMAGE_BYTES) { toast.error("Ảnh vượt quá 5MB"); return; }
     if (!file.type.startsWith("image/")) { toast.error("Chỉ chấp nhận file ảnh"); return; }
     const dataUrl = await fileToDataUrl(file);
-    productActions.update(product.id, { image: dataUrl });
+    await productService.update(product.id, { image: dataUrl });
+    reloadProduct();
     toast.success("Đã cập nhật ảnh sản phẩm");
   };
 
@@ -470,17 +519,18 @@ function ImagesTab({ product }: { product: { id: string; name: string; image: st
     if (file.size > MAX_IMAGE_BYTES) { toast.error("Ảnh vượt quá 5MB"); return; }
     if (!file.type.startsWith("image/")) { toast.error("Chỉ chấp nhận file ảnh"); return; }
     const dataUrl = await fileToDataUrl(file);
-    productActions.updateVariant(product.id, variantId, { image: dataUrl });
+    await productService.updateVariant(product.id, variantId, { image: dataUrl });
+    reloadProduct();
     toast.success("Đã cập nhật ảnh phân loại");
   };
 
   const clearProductImage = () => {
-    productActions.update(product.id, { image: "" });
+    productService.update(product.id, { image: "" }).then(reloadProduct);
     toast.success("Đã xóa ảnh sản phẩm");
   };
 
   const clearVariantImage = (variantId: string) => {
-    productActions.updateVariant(product.id, variantId, { image: "" });
+    productService.updateVariant(product.id, variantId, { image: "" }).then(reloadProduct);
     toast.success("Đã xóa ảnh override");
   };
 

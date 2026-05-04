@@ -1,4 +1,5 @@
 import type { StorePaymentSettings } from "@/services/types";
+import { adminFetchJson } from "@/services/auth/adminApi";
 
 async function parseJsonSafe(res: Response): Promise<any> {
   const text = await res.text();
@@ -42,17 +43,9 @@ export async function fetchPaymentSettings(): Promise<StorePaymentSettings> {
 export async function savePaymentSettings(
   input: StorePaymentSettings,
 ): Promise<StorePaymentSettings> {
-  const res = await fetch("/api/store/payment-settings", {
+  const data = await adminFetchJson<Record<string, unknown>>("/api/store/payment-settings", {
     method: "PUT",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify(input),
   });
-  const data = await parseJsonSafe(res);
-  if (!res.ok) {
-    throw new Error(data?.detail ?? data?.message ?? data?.error ?? `HTTP ${res.status}`);
-  }
   return normalizeSettings(data);
 }

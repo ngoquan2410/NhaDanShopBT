@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { toast } from "sonner";
 import { production } from "@/services";
@@ -25,11 +25,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { BarcodePrintDialog, type BarcodeItem } from "@/components/shared/BarcodePrintDialog";
 import { Loader2, Plus, RefreshCw, Factory, Eye, Trash2, Printer } from "lucide-react";
+import { Link } from "react-router-dom";
 import {
   Select,
   SelectContent,
@@ -44,7 +44,6 @@ export default function AdminProduction() {
   const [recipes, setRecipes] = useState<ProductionRecipeDto[]>([]);
   const [orders, setOrders] = useState<ProductionOrderDto[]>([]);
   const [productOptions, setProductOptions] = useState<Product[]>([]);
-  const [recipeDialog, setRecipeDialog] = useState(false);
   const [preview, setPreview] = useState<ProductionPreviewDto | null>(null);
   const [orderDetail, setOrderDetail] = useState<ProductionOrderDto | null>(null);
   const [voidOrderId, setVoidOrderId] = useState<number | null>(null);
@@ -63,6 +62,12 @@ export default function AdminProduction() {
   orderQueryRef.current = orderQuery;
   orderStatusRef.current = orderStatus;
 
+  /** Avoid toast storms when APIs fail repeatedly (e.g. recipe_code BYTEA / 500 loops). */
+  const recipeErrToastAt = useRef(0);
+  const orderErrToastAt = useRef(0);
+  const productErrToastAt = useRef(0);
+  const ERR_TOAST_GAP_MS = 6000;
+
   const loadRecipes = useCallback(async () => {
     setLoading(true);
     try {
@@ -72,8 +77,13 @@ export default function AdminProduction() {
         query: recipeSearchRef.current.trim() || undefined,
       });
       setRecipes(pg.items);
+      recipeErrToastAt.current = 0;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Không tải công thức");
+      const now = Date.now();
+      if (now - recipeErrToastAt.current >= ERR_TOAST_GAP_MS) {
+        recipeErrToastAt.current = now;
+        toast.error(e instanceof Error ? e.message : "Không tải công thức");
+      }
     } finally {
       setLoading(false);
     }
@@ -89,8 +99,13 @@ export default function AdminProduction() {
         status: orderStatusRef.current || undefined,
       });
       setOrders(pg.items);
+      orderErrToastAt.current = 0;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Không tải phiếu sản xuất");
+      const now = Date.now();
+      if (now - orderErrToastAt.current >= ERR_TOAST_GAP_MS) {
+        orderErrToastAt.current = now;
+        toast.error(e instanceof Error ? e.message : "Không tải phiếu sản xuất");
+      }
     } finally {
       setLoading(false);
     }
@@ -100,8 +115,13 @@ export default function AdminProduction() {
     try {
       const pg = await productService.list({ pageSize: 500 });
       setProductOptions(pg.items);
+      productErrToastAt.current = 0;
     } catch {
-      toast.error("Không tải danh sách sản phẩm");
+      const now = Date.now();
+      if (now - productErrToastAt.current >= ERR_TOAST_GAP_MS) {
+        productErrToastAt.current = now;
+        toast.error("Không tải danh sách sản phẩm");
+      }
     }
   }, []);
 
@@ -153,8 +173,10 @@ export default function AdminProduction() {
             >
               <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
             </Button>
-            <Button size="sm" className="h-8 text-xs" onClick={() => setRecipeDialog(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> Tạo quy trình
+            <Button size="sm" className="h-8 text-xs" asChild>
+              <Link to="/admin/production/recipes/new">
+                <Plus className="h-3.5 w-3.5 mr-1" /> Tạo quy trình
+              </Link>
             </Button>
           </div>
         }
@@ -343,17 +365,6 @@ export default function AdminProduction() {
           </div>
         </TabsContent>
       </Tabs>
-
-      <RecipeFormDialog
-        open={recipeDialog}
-        onOpenChange={setRecipeDialog}
-        products={productOptions}
-        onSaved={() => {
-          void loadRecipes();
-          setRecipeDialog(false);
-          toast.success("Đã lưu quy trình");
-        }}
-      />
 
       <Dialog open={!!orderDetail} onOpenChange={(o) => !o && setOrderDetail(null)}>
         <DialogContent className="w-[calc(100vw-1.25rem)] sm:w-full max-w-3xl max-h-[92vh] overflow-y-auto text-xs px-4">
@@ -585,230 +596,5 @@ function RunProductionPanel(props: {
         )}
       </div>
     </div>
-  );
-}
-
-function RecipeFormDialog(props: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  products: Product[];
-  onSaved: () => void;
-}) {
-  const { open, onOpenChange, products, onSaved } = props;
-  const [code, setCode] = useState("");
-  const [name, setName] = useState("");
-  const [outPid, setOutPid] = useState<string>("");
-  const [outVid, setOutVid] = useState<string>("");
-  const [outQty, setOutQty] = useState(10);
-  const [mustSell, setMustSell] = useState(true);
-  const [rows, setRows] = useState<
-    Array<{ productId: string; variantId: string; qty: number; unit: string }>
-  >([{ productId: "", variantId: "", qty: 1, unit: "u" }]);
-  const [saving, setSaving] = useState(false);
-
-  const outputProduct = useMemo(
-    () => products.find((p) => p.id === outPid) ?? null,
-    [products, outPid],
-  );
-
-  const variantsFor = (pid: string) =>
-    products.find((p) => p.id === pid)?.variants ?? [];
-
-  const submit = async () => {
-    if (!code.trim() || !name.trim() || !outPid || !outVid) {
-      toast.error("Thiếu mã/tên/output");
-      return;
-    }
-    const lines = rows
-      .filter((r) => r.productId && r.variantId && r.qty > 0)
-      .map((r, i) => ({
-        productId: Number(r.productId),
-        variantId: Number(r.variantId),
-        qtyPerOutput: r.qty,
-        unit: r.unit || "u",
-        sortOrder: i,
-      }));
-    if (lines.length === 0) {
-      toast.error("Cần ít nhất 1 nguyên liệu");
-      return;
-    }
-    setSaving(true);
-    try {
-      await production.createRecipe({
-        recipeCode: code.trim().toUpperCase(),
-        name: name.trim(),
-        outputProductId: Number(outPid),
-        outputVariantId: Number(outVid),
-        outputQty: outQty,
-        outputMustBeSellable: mustSell,
-        overheadCost: 0,
-        components: lines,
-      });
-      onSaved();
-      setCode("");
-      setName("");
-      setOutPid("");
-      setOutVid("");
-      setRows([{ productId: "", variantId: "", qty: 1, unit: "u" }]);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Lỗi");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-sm">Tạo quy trình</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-2 text-xs">
-          <div>
-            <Label className="text-[10px]">Mã quy trình</Label>
-            <Input className="h-8 text-xs" value={code} onChange={(e) => setCode(e.target.value)} />
-          </div>
-          <div>
-            <Label className="text-[10px]">Tên</Label>
-            <Input className="h-8 text-xs" value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label className="text-[10px]">SP thành phẩm</Label>
-              <Select value={outPid} onValueChange={(v) => { setOutPid(v); setOutVid(""); }}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Chọn SP" />
-                </SelectTrigger>
-                <SelectContent>
-                  {products.map((p) => (
-                    <SelectItem key={p.id} value={p.id} className="text-xs">
-                      {p.code}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-[10px]">Variant TP</Label>
-              <Select
-                value={outVid}
-                onValueChange={setOutVid}
-                disabled={!outputProduct}
-              >
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Variant" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(outputProduct?.variants ?? []).map((v) => (
-                    <SelectItem key={v.id} value={v.id} className="text-xs">
-                      {v.code} {!v.isSellable ? "(NS)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-[10px]">SL chuẩn output / recipe</Label>
-            <Input
-              type="number"
-              className="h-8 w-20 text-xs"
-              value={outQty}
-              onChange={(e) => setOutQty(Number(e.target.value) || 1)}
-            />
-          </div>
-          <div className="flex items-center gap-2 text-[10px] max-w-[80ch]">
-            <Checkbox id="must" checked={mustSell} onCheckedChange={(c) => setMustSell(!!c)} />
-            <label htmlFor="must">
-              TP phải bán được ở POS / gian hàng. Bỏ chọn khi chỉ có nội bộ hoặc bán kênh khác POS (semi-finished / WIP).
-            </label>
-          </div>
-          <Separator />
-          <p className="font-medium text-[11px]">Nguyên liệu (mỗi đơn vị recipe output)</p>
-          {rows.map((row, idx) => (
-            <div key={idx} className="grid grid-cols-12 gap-1 items-end border-b pb-2">
-              <div className="col-span-5">
-                <Select
-                  value={row.productId}
-                  onValueChange={(v) => {
-                    const next = [...rows];
-                    next[idx] = { ...next[idx], productId: v, variantId: "" };
-                    setRows(next);
-                  }}
-                >
-                  <SelectTrigger className="h-8 text-[10px]">
-                    <SelectValue placeholder="SP" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {products.map((p) => (
-                      <SelectItem key={p.id} value={p.id} className="text-[10px]">
-                        {p.code}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="col-span-4">
-                <Select
-                  value={row.variantId}
-                  onValueChange={(v) => {
-                    const next = [...rows];
-                    next[idx] = { ...next[idx], variantId: v };
-                    setRows(next);
-                  }}
-                >
-                  <SelectTrigger className="h-8 text-[10px]">
-                    <SelectValue placeholder="Var" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {variantsFor(row.productId).map((v) => (
-                      <SelectItem key={v.id} value={v.id} className="text-[10px]">
-                        {v.code} {!v.isSellable ? "NS" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Input
-                className="col-span-2 h-8 text-[10px]"
-                type="number"
-                min={1}
-                value={row.qty}
-                onChange={(e) => {
-                  const next = [...rows];
-                  next[idx] = { ...next[idx], qty: Number(e.target.value) || 1 };
-                  setRows(next);
-                }}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="col-span-1 h-8 px-1"
-                onClick={() => setRows(rows.filter((_, i) => i !== idx))}
-              >
-                ×
-              </Button>
-            </div>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 text-[10px]"
-            onClick={() =>
-              setRows([...rows, { productId: "", variantId: "", qty: 1, unit: "u" }])
-            }
-          >
-            + dòng NL
-          </Button>
-        </div>
-        <DialogFooter>
-          <Button size="sm" className="h-8" disabled={saving} onClick={() => void submit()}>
-            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Lưu
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

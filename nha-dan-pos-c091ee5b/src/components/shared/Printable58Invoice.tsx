@@ -1,4 +1,4 @@
-import type { Invoice, InvoiceLine } from "@/lib/mock-data";
+import type { Invoice, InvoiceLine } from "@/lib/pos-print-types";
 import { PrintableThermalInvoice } from "@/components/shared/PrintableThermalInvoice";
 
 interface Props {

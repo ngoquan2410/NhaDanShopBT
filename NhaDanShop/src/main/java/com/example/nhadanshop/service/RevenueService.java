@@ -47,28 +47,50 @@ public class RevenueService {
     // ══════════════════════════════════════════════════════════════════════
 
     public RevenueTotalDto getTotalRevenue(LocalDate from, LocalDate to, String period) {
+        return getTotalRevenue(from, to, period, null);
+    }
+
+    /**
+     * {@code productIds} non-empty: merchandise net revenue per persisted invoice lines for those products only
+     * (COALESCE(lineNetRevenue, qty×unitPrice)); invoiceCount/itemsSold are meaningful per period bucket.
+     */
+    public RevenueTotalDto getTotalRevenue(LocalDate from, LocalDate to, String period, List<Long> productIds) {
         LocalDateTime fromDt = from.atStartOfDay();
         LocalDateTime toDt   = to.atTime(LocalTime.MAX);
 
+        if (productIds != null && !productIds.isEmpty()) {
+            List<Long> distinct = productIds.stream().distinct().toList();
+            List<Object[]> rawDays = invoiceRepo.dailyMerchandiseStatsByProducts(fromDt, toDt, distinct);
+
+            Map<LocalDate, BigDecimal> dayMerch = new LinkedHashMap<>();
+            Map<LocalDate, Long> dayInvoices = new LinkedHashMap<>();
+            Map<LocalDate, Long> dayQty = new LinkedHashMap<>();
+            fillDailyMerchandiseTripleMaps(rawDays, dayMerch, dayInvoices, dayQty);
+
+            List<RevenueRowDto> rows = switch (period.toLowerCase(Locale.ROOT)) {
+                case "daily"   -> buildDailyRowsFiltered(from, to, dayMerch, dayInvoices, dayQty);
+                case "weekly"  -> buildWeeklyRowsFiltered(from, to, dayMerch, dayInvoices, dayQty);
+                case "monthly" -> buildMonthlyRowsFiltered(from, to, dayMerch, dayInvoices, dayQty);
+                case "yearly"  -> buildYearlyRowsFiltered(from, to, dayMerch, dayInvoices, dayQty);
+                default        -> buildDailyRowsFiltered(from, to, dayMerch, dayInvoices, dayQty);
+            };
+
+            BigDecimal total = rows.stream()
+                    .map(RevenueRowDto::amount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            return new RevenueTotalDto(period, from.format(DAY_FMT), to.format(DAY_FMT), rows, total);
+        }
+
         List<Object[]> rawDays = invoiceRepo.dailyRevenue(fromDt, toDt);
 
-        // Build map date → amount
-        // Native query trả về: r[0] = String/Date (yyyy-MM-dd), r[1] = BigDecimal
         Map<LocalDate, BigDecimal> dayMap = new LinkedHashMap<>();
         for (Object[] r : rawDays) {
-            LocalDate d;
-            if (r[0] instanceof java.sql.Date sqlDate) {
-                d = sqlDate.toLocalDate();
-            } else if (r[0] instanceof LocalDate ld) {
-                d = ld;
-            } else {
-                d = LocalDate.parse(r[0].toString().substring(0, 10));
-            }
-            BigDecimal amt = r[1] != null ? new java.math.BigDecimal(r[1].toString()) : BigDecimal.ZERO;
+            LocalDate d = parseRowLocalDate(r[0]);
+            BigDecimal amt = r[1] != null ? new BigDecimal(r[1].toString()) : BigDecimal.ZERO;
             dayMap.put(d, amt);
         }
 
-        List<RevenueRowDto> rows = switch (period.toLowerCase()) {
+        List<RevenueRowDto> rows = switch (period.toLowerCase(Locale.ROOT)) {
             case "daily"   -> buildDailyRows(from, to, dayMap);
             case "weekly"  -> buildWeeklyRows(from, to, dayMap);
             case "monthly" -> buildMonthlyRows(from, to, dayMap);
@@ -88,10 +110,16 @@ public class RevenueService {
     // ══════════════════════════════════════════════════════════════════════
 
     public List<RevenueByProductDto> getRevenueByProduct(LocalDate from, LocalDate to, String period) {
+        return getRevenueByProduct(from, to, period, null);
+    }
+
+    public List<RevenueByProductDto> getRevenueByProduct(LocalDate from, LocalDate to, String period, List<Long> productIds) {
         LocalDateTime fromDt = from.atStartOfDay();
         LocalDateTime toDt   = to.atTime(LocalTime.MAX);
 
-        List<Object[]> raw = invoiceRepo.revenueByProduct(fromDt, toDt);
+        List<Object[]> raw = (productIds != null && !productIds.isEmpty())
+                ? invoiceRepo.revenueByProductForProductIds(fromDt, toDt, productIds.stream().distinct().toList())
+                : invoiceRepo.revenueByProduct(fromDt, toDt);
         List<RevenueByProductDto> result = new ArrayList<>();
 
         for (Object[] r : raw) {
@@ -107,13 +135,12 @@ public class RevenueService {
             BigDecimal merchProfit = r[9] != null ? (BigDecimal) r[9] : BigDecimal.ZERO;
 
             List<RevenueRowDto> rows = List.of(
-                    new RevenueRowDto(from.format(DAY_FMT) + " → " + to.format(DAY_FMT), netMerch));
+                    RevenueRowDto.ofAmount(from.format(DAY_FMT) + " → " + to.format(DAY_FMT), netMerch));
 
             result.add(new RevenueByProductDto(
                     productId, code, name, categoryName, unit, rows, netMerch, totalQty,
                     netMerch, allocTot, merchCost, merchProfit));
         }
-        // Sort DESC vì JPQL không hỗ trợ ORDER BY aggregate
         result.sort((a, b) -> b.totalAmount().compareTo(a.totalAmount()));
         return result;
     }
@@ -137,7 +164,7 @@ public class RevenueService {
             BigDecimal merchProfit = r[4] != null ? (BigDecimal) r[4] : BigDecimal.ZERO;
 
             List<RevenueRowDto> rows = List.of(
-                    new RevenueRowDto(from.format(DAY_FMT) + " → " + to.format(DAY_FMT), netMerch));
+                    RevenueRowDto.ofAmount(from.format(DAY_FMT) + " → " + to.format(DAY_FMT), netMerch));
 
             result.add(new RevenueByCategoryDto(catId, catName, rows, netMerch, netMerch, merchCost, merchProfit));
         }
@@ -155,7 +182,7 @@ public class RevenueService {
      * Cột: Ngày tháng | Diễn giải | Số tiền
      */
     public byte[] exportTotalRevenueExcel(LocalDate from, LocalDate to, String period) throws IOException {
-        RevenueTotalDto data = getTotalRevenue(from, to, period);
+        RevenueTotalDto data = getTotalRevenue(from, to, period, null);
         try (XSSFWorkbook wb = new XSSFWorkbook()) {
             Sheet sheet = wb.createSheet("So D-thu S1a");
             buildS1aSheet(wb, sheet, data.rows(), data.totalAmount(), period, from, to);
@@ -167,13 +194,13 @@ public class RevenueService {
      * Xuất Excel doanh thu theo sản phẩm.
      */
     public byte[] exportRevenueByProductExcel(LocalDate from, LocalDate to, String period) throws IOException {
-        List<RevenueByProductDto> data = getRevenueByProduct(from, to, period);
+        List<RevenueByProductDto> data = getRevenueByProduct(from, to, period, null);
         try (XSSFWorkbook wb = new XSSFWorkbook()) {
             Sheet sheet = wb.createSheet("So D-thu S1a");
 
             // Convert: mỗi sản phẩm → 1 dòng: label = tên SP, amount = tổng
             List<RevenueRowDto> rows = data.stream()
-                    .map(p -> new RevenueRowDto(
+                    .map(p -> RevenueRowDto.ofAmount(
                             "[" + p.productCode() + "] " + p.productName()
                             + " (" + p.totalQty() + " " + p.sellUnit() + ")",
                             p.totalAmount()))
@@ -196,7 +223,7 @@ public class RevenueService {
             Sheet sheet = wb.createSheet("So D-thu S1a");
 
             List<RevenueRowDto> rows = data.stream()
-                    .map(c -> new RevenueRowDto(c.categoryName(), c.totalAmount()))
+                    .map(c -> RevenueRowDto.ofAmount(c.categoryName(), c.totalAmount()))
                     .collect(Collectors.toList());
 
             BigDecimal total = data.stream().map(RevenueByCategoryDto::totalAmount)
@@ -451,7 +478,7 @@ public class RevenueService {
         LocalDate cur = from;
         while (!cur.isAfter(to)) {
             BigDecimal amt = dayMap.getOrDefault(cur, BigDecimal.ZERO);
-            rows.add(new RevenueRowDto(cur.format(DAY_FMT), amt));
+            rows.add(RevenueRowDto.ofAmount(cur.format(DAY_FMT), amt));
             cur = cur.plusDays(1);
         }
         return rows;
@@ -472,7 +499,7 @@ public class RevenueService {
             }
             String label = "Tuần " + weekNo + " (" + effectiveStart.format(DAY_FMT)
                          + " - " + effectiveEnd.format(DAY_FMT) + ")";
-            rows.add(new RevenueRowDto(label, weekAmt));
+            rows.add(RevenueRowDto.ofAmount(label, weekAmt));
             weekStart = weekStart.plusWeeks(1);
             weekNo++;
         }
@@ -491,7 +518,7 @@ public class RevenueService {
             for (LocalDate d = effectiveStart; !d.isAfter(effectiveEnd); d = d.plusDays(1)) {
                 monthAmt = monthAmt.add(dayMap.getOrDefault(d, BigDecimal.ZERO));
             }
-            rows.add(new RevenueRowDto("Tháng " + monthStart.format(MONTH_FMT), monthAmt));
+            rows.add(RevenueRowDto.ofAmount("Tháng " + monthStart.format(MONTH_FMT), monthAmt));
             monthStart = monthStart.plusMonths(1);
         }
         return rows;
@@ -511,13 +538,137 @@ public class RevenueService {
             for (LocalDate d = es; !d.isAfter(ee); d = d.plusDays(1)) {
                 yearAmt = yearAmt.add(dayMap.getOrDefault(d, BigDecimal.ZERO));
             }
-            rows.add(new RevenueRowDto("Năm " + y, yearAmt));
+            rows.add(RevenueRowDto.ofAmount("Năm " + y, yearAmt));
         }
         return rows;
     }
 
+    private void fillDailyMerchandiseTripleMaps(
+            List<Object[]> rawDays,
+            Map<LocalDate, BigDecimal> dayMerch,
+            Map<LocalDate, Long> dayInvoices,
+            Map<LocalDate, Long> dayQty) {
+        for (Object[] r : rawDays) {
+            LocalDate d = parseRowLocalDate(r[0]);
+            BigDecimal merch = r[1] != null ? new BigDecimal(r[1].toString()) : BigDecimal.ZERO;
+            long inv = r[2] instanceof Number n ? n.longValue() : 0L;
+            long qty = r[3] instanceof Number n ? n.longValue() : 0L;
+            dayMerch.put(d, merch);
+            dayInvoices.put(d, inv);
+            dayQty.put(d, qty);
+        }
+    }
+
+    private TripleSum sumTripleRange(
+            LocalDate effectiveStart,
+            LocalDate effectiveEnd,
+            Map<LocalDate, BigDecimal> dayMerch,
+            Map<LocalDate, Long> dayInvoices,
+            Map<LocalDate, Long> dayQty) {
+        BigDecimal merch = BigDecimal.ZERO;
+        long invSum = 0L;
+        long qtySum = 0L;
+        for (LocalDate d = effectiveStart; !d.isAfter(effectiveEnd); d = d.plusDays(1)) {
+            merch = merch.add(dayMerch.getOrDefault(d, BigDecimal.ZERO));
+            invSum += dayInvoices.getOrDefault(d, 0L);
+            qtySum += dayQty.getOrDefault(d, 0L);
+        }
+        return new TripleSum(merch, invSum, qtySum);
+    }
+
+    private List<RevenueRowDto> buildDailyRowsFiltered(
+            LocalDate from,
+            LocalDate to,
+            Map<LocalDate, BigDecimal> dayMerch,
+            Map<LocalDate, Long> dayInvoices,
+            Map<LocalDate, Long> dayQty) {
+        List<RevenueRowDto> rows = new ArrayList<>();
+        LocalDate cur = from;
+        while (!cur.isAfter(to)) {
+            TripleSum t = sumTripleRange(cur, cur, dayMerch, dayInvoices, dayQty);
+            rows.add(RevenueRowDto.withCounts(cur.format(DAY_FMT), t.merch, t.inv, t.qty));
+            cur = cur.plusDays(1);
+        }
+        return rows;
+    }
+
+    private List<RevenueRowDto> buildWeeklyRowsFiltered(
+            LocalDate from,
+            LocalDate to,
+            Map<LocalDate, BigDecimal> dayMerch,
+            Map<LocalDate, Long> dayInvoices,
+            Map<LocalDate, Long> dayQty) {
+        List<RevenueRowDto> rows = new ArrayList<>();
+        LocalDate weekStart = from.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        int weekNo = 1;
+        while (!weekStart.isAfter(to)) {
+            LocalDate weekEnd = weekStart.plusDays(6);
+            LocalDate effectiveStart = weekStart.isBefore(from) ? from : weekStart;
+            LocalDate effectiveEnd = weekEnd.isAfter(to) ? to : weekEnd;
+            TripleSum t = sumTripleRange(effectiveStart, effectiveEnd, dayMerch, dayInvoices, dayQty);
+            String label = "Tuần " + weekNo + " (" + effectiveStart.format(DAY_FMT)
+                    + " - " + effectiveEnd.format(DAY_FMT) + ")";
+            rows.add(RevenueRowDto.withCounts(label, t.merch, t.inv, t.qty));
+            weekStart = weekStart.plusWeeks(1);
+            weekNo++;
+        }
+        return rows;
+    }
+
+    private List<RevenueRowDto> buildMonthlyRowsFiltered(
+            LocalDate from,
+            LocalDate to,
+            Map<LocalDate, BigDecimal> dayMerch,
+            Map<LocalDate, Long> dayInvoices,
+            Map<LocalDate, Long> dayQty) {
+        List<RevenueRowDto> rows = new ArrayList<>();
+        LocalDate monthStart = from.withDayOfMonth(1);
+        while (!monthStart.isAfter(to)) {
+            LocalDate monthEnd = monthStart.with(TemporalAdjusters.lastDayOfMonth());
+            LocalDate effectiveStart = monthStart.isBefore(from) ? from : monthStart;
+            LocalDate effectiveEnd = monthEnd.isAfter(to) ? to : monthEnd;
+            TripleSum t = sumTripleRange(effectiveStart, effectiveEnd, dayMerch, dayInvoices, dayQty);
+            rows.add(RevenueRowDto.withCounts("Tháng " + monthStart.format(MONTH_FMT), t.merch, t.inv, t.qty));
+            monthStart = monthStart.plusMonths(1);
+        }
+        return rows;
+    }
+
+    private List<RevenueRowDto> buildYearlyRowsFiltered(
+            LocalDate from,
+            LocalDate to,
+            Map<LocalDate, BigDecimal> dayMerch,
+            Map<LocalDate, Long> dayInvoices,
+            Map<LocalDate, Long> dayQty) {
+        List<RevenueRowDto> rows = new ArrayList<>();
+        int startYear = from.getYear();
+        int endYear = to.getYear();
+        for (int y = startYear; y <= endYear; y++) {
+            LocalDate yStart = LocalDate.of(y, 1, 1);
+            LocalDate yEnd = LocalDate.of(y, 12, 31);
+            LocalDate es = yStart.isBefore(from) ? from : yStart;
+            LocalDate ee = yEnd.isAfter(to) ? to : yEnd;
+            TripleSum t = sumTripleRange(es, ee, dayMerch, dayInvoices, dayQty);
+            rows.add(RevenueRowDto.withCounts("Năm " + y, t.merch, t.inv, t.qty));
+        }
+        return rows;
+    }
+
+    private LocalDate parseRowLocalDate(Object cell) {
+        if (cell instanceof java.sql.Date sqlDate) {
+            return sqlDate.toLocalDate();
+        }
+        if (cell instanceof LocalDate ld) {
+            return ld;
+        }
+        String s = cell.toString();
+        return LocalDate.parse(s.substring(0, Math.min(10, s.length())));
+    }
+
+    private record TripleSum(BigDecimal merch, long inv, long qty) {}
+
     private String buildKyLabel(String period, LocalDate from, LocalDate to) {
-        return switch (period.toLowerCase()) {
+        return switch (period.toLowerCase(Locale.ROOT)) {
             case "daily"   -> "Ngày " + from.format(DAY_FMT) + " - " + to.format(DAY_FMT);
             case "weekly"  -> "Tuần " + from.format(DAY_FMT) + " - " + to.format(DAY_FMT);
             case "monthly" -> "Tháng " + from.format(MONTH_FMT) + " - " + to.format(MONTH_FMT);

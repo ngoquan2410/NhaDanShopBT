@@ -1,10 +1,6 @@
-// Thin adapter — wraps the legacy in-memory `invoiceActions` store so the new
-// service-layer flow (Checkout COD, future POS) can snapshot promotions and
-// vouchers in a uniform way without disturbing the admin Invoices UI.
-//
-// IMPORTANT: This is intentionally not a re-implementation. Persistence still
-// lives in src/lib/store.ts (mock data for the admin app). When a real BE
-// arrives, swap this adapter for a remote one — the UI contract stays the same.
+// Thin adapter — wraps the legacy in-memory `invoiceActions` store for **tests**
+// and **`VITE_ADMIN_INVOICE_LOCAL_DEMO`** only (see `services/index.ts`).
+// Production admin invoice list/detail uses **`BackendInvoiceAdapter`**.
 //
 // P0 invariants (do NOT regress):
 //  - voucher discount is NEVER merged into promo discount
@@ -22,7 +18,9 @@ import type { PagedResult, ID } from "@/services/types";
 import { invoiceActions } from "@/lib/store";
 import { getStoreState } from "@/lib/store";
 
-const TODAY_PREFIX = "2025-04-15"; // mock "today" used by the admin UI
+function isoDayRolling(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 function buildBreakdown(input: CreateInvoiceInput): InvoiceBreakdown {
   const p = input.pricingBreakdownSnapshot;
@@ -79,9 +77,10 @@ function generateNumber(): string {
 
 export class LocalInvoiceAdapter implements InvoiceService {
   async create(input: CreateInvoiceInput): Promise<Invoice> {
+    const dated = input.date ?? new Date().toISOString();
     const inv = invoiceActions.create({
       number: input.number ?? generateNumber(),
-      date: input.date ?? new Date().toISOString(),
+      date: dated,
       customerId: input.customerId ?? "",
       customerName: input.customerName,
       total: input.pricingBreakdownSnapshot.total,
@@ -94,6 +93,7 @@ export class LocalInvoiceAdapter implements InvoiceService {
       note: input.note,
       sourceType: input.sourceType ?? "online_pending",
       pendingOrderId: input.pendingOrderId,
+      allowPhysicalDelete: dated.startsWith(isoDayRolling()),
     });
     return inv;
   }
@@ -158,7 +158,13 @@ export class LocalInvoiceAdapter implements InvoiceService {
   async remove(id: ID): Promise<void> {
     const inv = getStoreState().invoices.find((i) => i.id === id);
     if (!inv) throw new Error("Invoice not found");
-    if (!inv.date.startsWith(TODAY_PREFIX)) {
+    if (inv.allowPhysicalDelete === false) {
+      throw new Error("Hóa đơn này không cho phép xóa vật lý.");
+    }
+    const day = isoDayRolling();
+    const ok =
+      inv.allowPhysicalDelete === true || (inv.allowPhysicalDelete !== false && inv.date.startsWith(day));
+    if (!ok) {
       throw new Error("Chỉ được xóa hóa đơn trong ngày tạo");
     }
     invoiceActions.remove(id);

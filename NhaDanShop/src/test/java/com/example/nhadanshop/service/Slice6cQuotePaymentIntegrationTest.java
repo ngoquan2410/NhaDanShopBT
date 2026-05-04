@@ -38,6 +38,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -66,6 +67,7 @@ import static org.mockito.Mockito.when;
         PendingOrderService.class,
         InvoiceService.class,
         SalesQuoteService.class,
+        ShippingSettingsService.class,
         ShippingQuoteService.class,
         GhnShippingService.class,
         ProductBatchService.class,
@@ -79,6 +81,12 @@ class Slice6cQuotePaymentIntegrationTest {
 
     @MockBean
     private InvoiceNumberGenerator invoiceNumberGenerator;
+
+    @MockBean
+    private CustomerLoyaltyService customerLoyaltyService;
+
+    @MockBean
+    private AccountService accountService;
 
     @Autowired
     private PaymentEventService paymentEventService;
@@ -258,7 +266,15 @@ class Slice6cQuotePaymentIntegrationTest {
         salesQuoteRepository.save(sq);
 
         SecurityContextHolder.getContext().setAuthentication(adminAuth());
-        assertNotNull(pendingOrderService.confirmOrder(Long.parseLong(po.id()), null, "admin:test").invoice());
+        var confirmed = pendingOrderService.confirmOrder(Long.parseLong(po.id()), null, "admin:test");
+        assertNotNull(confirmed.invoice());
+        Long invoiceId = confirmed.invoice().id();
+        var slice = invoiceService.listInvoices(PageRequest.of(0, 50));
+        assertTrue(slice.getContent().stream().anyMatch(inv -> invoiceId.equals(inv.id())));
+        PendingOrder refreshedPo = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
+        assertEquals(PendingOrder.Status.CONFIRMED, refreshedPo.getStatus());
+        assertNotNull(refreshedPo.getInvoice());
+        assertEquals(invoiceId, refreshedPo.getInvoice().getId());
     }
 
     @Test

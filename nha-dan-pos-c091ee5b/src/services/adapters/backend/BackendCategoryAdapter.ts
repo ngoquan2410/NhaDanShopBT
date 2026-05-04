@@ -9,23 +9,34 @@ import type { Category } from "@/lib/mock-data";
 
 const API = "/api/categories";
 
+type SpringPageLike<T> = { content?: T[] };
+
+function normalizeCategoryPayload(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[];
+  if (payload && typeof payload === "object" && "content" in payload) {
+    const c = (payload as SpringPageLike<Record<string, unknown>>).content;
+    return Array.isArray(c) ? c : [];
+  }
+  return [];
+}
+
 function mapCategory(raw: Record<string, unknown>): Category {
   return {
-    id: String(raw.id),
-    name: String(raw.name),
-    description: (raw.description as string) ?? "",
-    active: Boolean(raw.active),
-    productCount: 0,
+    id: String(raw.id ?? ""),
+    name: String(raw.name ?? ""),
+    description: typeof raw.description === "string" ? raw.description : "",
+    active: raw.active !== false,
+    productCount: typeof raw.productCount === "number" ? raw.productCount : 0,
   };
 }
 
 export class BackendCategoryAdapter implements CategoryService {
   async list(params?: CategoryListParams): Promise<PagedResult<Category>> {
     const q = new URLSearchParams();
-    if (params?.active === false) q.set("includeInactive", "true");
+    if (params?.includeInactive) q.set("includeInactive", "true");
     const url = q.toString() ? `${API}?${q}` : API;
-    const rows = await adminFetchJson<Record<string, unknown>[]>(url);
-    const list = Array.isArray(rows) ? rows : [];
+    const payload = await adminFetchJson<unknown>(url);
+    const list = normalizeCategoryPayload(payload).map(mapCategory);
     const filtered = list.filter((c) => {
       if (params?.active === undefined) return true;
       return Boolean(c.active) === params.active;
@@ -34,7 +45,7 @@ export class BackendCategoryAdapter implements CategoryService {
       items: filtered,
       total: filtered.length,
       page: 1,
-      pageSize: filtered.length || 1,
+      pageSize: Math.max(filtered.length, 1),
     };
   }
 

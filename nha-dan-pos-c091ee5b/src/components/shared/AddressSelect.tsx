@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { addresses } from "@/services";
 import type { District, Province, Ward } from "@/services/types";
 import { cn } from "@/lib/utils";
@@ -33,6 +33,10 @@ const selectCls =
   "mt-1.5 w-full h-11 px-3 text-sm border rounded-xl bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50";
 
 export function AddressSelect({ value, onChange, className, errors }: Props) {
+  const idBase = useId();
+  const provinceId = `${idBase}-province`;
+  const districtId = `${idBase}-district`;
+  const wardId = `${idBase}-ward`;
   const [provinces, setProvinces] = useState<Province[]>([]);
   const [districts, setDistricts] = useState<District[]>([]);
   const [wards, setWards] = useState<Ward[]>([]);
@@ -91,8 +95,9 @@ export function AddressSelect({ value, onChange, className, errors }: Props) {
   return (
     <div className={cn("grid gap-3.5 sm:grid-cols-3", className)}>
       <div>
-        <label className="text-xs font-semibold text-muted-foreground">Tỉnh / Thành phố *</label>
+        <label htmlFor={provinceId} className="text-xs font-semibold text-muted-foreground">Tỉnh / Thành phố *</label>
         <select
+          id={provinceId}
           value={value.provinceCode}
           onChange={(e) => handleProvince(e.target.value)}
           className={cn(selectCls, errors?.province && errCls)}
@@ -105,8 +110,9 @@ export function AddressSelect({ value, onChange, className, errors }: Props) {
         {errors?.province && <p className="mt-1 text-[11px] text-destructive">{errors.province}</p>}
       </div>
       <div>
-        <label className="text-xs font-semibold text-muted-foreground">Quận / Huyện *</label>
+        <label htmlFor={districtId} className="text-xs font-semibold text-muted-foreground">Quận / Huyện *</label>
         <select
+          id={districtId}
           value={value.districtCode}
           onChange={(e) => handleDistrict(e.target.value)}
           disabled={!value.provinceCode}
@@ -120,8 +126,9 @@ export function AddressSelect({ value, onChange, className, errors }: Props) {
         {errors?.district && <p className="mt-1 text-[11px] text-destructive">{errors.district}</p>}
       </div>
       <div>
-        <label className="text-xs font-semibold text-muted-foreground">Phường / Xã *</label>
+        <label htmlFor={wardId} className="text-xs font-semibold text-muted-foreground">Phường / Xã *</label>
         <select
+          id={wardId}
           value={value.wardCode}
           onChange={(e) => handleWard(e.target.value)}
           disabled={!value.districtCode}

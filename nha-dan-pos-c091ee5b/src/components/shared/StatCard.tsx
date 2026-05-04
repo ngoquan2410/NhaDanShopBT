@@ -9,6 +9,7 @@ interface StatCardProps {
   trend?: { value: string; positive: boolean };
   variant?: 'default' | 'primary' | 'success' | 'warning' | 'danger';
   className?: string;
+  valueTestId?: string;
 }
 
 const variantStyles = {
@@ -27,7 +28,7 @@ const iconVariantStyles = {
   danger: 'bg-danger/10 text-danger',
 };
 
-export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = 'default', className }: StatCardProps) {
+export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = 'default', className, valueTestId }: StatCardProps) {
   return (
     <div className={cn(
       "rounded-lg border p-4 transition-shadow hover:shadow-md",
@@ -37,7 +38,7 @@ export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = 
       <div className="flex items-start justify-between">
         <div className="space-y-1 min-w-0 flex-1">
           <p className="text-xs font-medium text-muted-foreground truncate">{title}</p>
-          <p className="text-xl font-bold tracking-tight text-card-foreground">{value}</p>
+          <p className="text-xl font-bold tracking-tight text-card-foreground" data-testid={valueTestId}>{value}</p>
           {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
           {trend && (
             <p className={cn("text-xs font-medium", trend.positive ? "text-success" : "text-danger")}>

@@ -30,6 +30,21 @@ public final class DtoMapper {
         List<ProductVariantResponse> variants = p.getVariants() == null
                 ? Collections.emptyList()
                 : p.getVariants().stream().map(DtoMapper::toResponse).collect(Collectors.toList());
+        return productResponse(p, variants);
+    }
+
+    /**
+     * Build product response using an explicit variant list (e.g. after create, when the entity's lazy
+     * {@code variants} bag may not reflect rows created in the same transaction).
+     */
+    public static ProductResponse toResponse(Product p, List<ProductVariant> variantEntities) {
+        List<ProductVariantResponse> variants = variantEntities == null || variantEntities.isEmpty()
+                ? Collections.emptyList()
+                : variantEntities.stream().map(DtoMapper::toResponse).collect(Collectors.toList());
+        return productResponse(p, variants);
+    }
+
+    private static ProductResponse productResponse(Product p, List<ProductVariantResponse> variants) {
         return new ProductResponse(
                 p.getId(), p.getCode(), p.getName(), p.getActive(),
                 p.getCategory().getId(), p.getCategory().getName(),
@@ -225,6 +240,7 @@ public final class DtoMapper {
                 item.getAllocatedManualDiscount(),
                 item.getAllocatedPromotionDiscount(),
                 item.getAllocatedVoucherDiscount(),
+                item.getAllocatedLoyaltyDiscount(),
                 item.getAllocatedMerchandiseDiscount(),
                 item.getLineNetRevenue(),
                 item.getLineVatBase(),
@@ -245,6 +261,7 @@ public final class DtoMapper {
                 item.getAllocatedManualDiscount(),
                 item.getAllocatedPromotionDiscount(),
                 item.getAllocatedVoucherDiscount(),
+                item.getAllocatedLoyaltyDiscount(),
                 item.getAllocatedMerchandiseDiscount(),
                 item.getLineNetRevenue(),
                 item.getLineVatBase(),
@@ -319,7 +336,8 @@ public final class DtoMapper {
                 v != null ? v.getId()          : null,
                 v != null ? v.getVariantCode() : item.getProduct().getCode(),
                 v != null ? v.getVariantName() : item.getProduct().getName(),
-                v != null ? v.getSellUnit()    : "cai"
+                v != null ? v.getSellUnit()    : "cai",
+                v != null && v.getSellPrice() != null ? v.getSellPrice() : null
         );
     }
 

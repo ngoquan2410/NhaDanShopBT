@@ -8,7 +8,6 @@ import { StorefrontLayout } from "@/components/layout/StorefrontLayout";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { AdminAuthGuard } from "@/components/layout/AdminAuthGuard";
 import { AdminAuthProvider } from "@/lib/admin-auth";
-import AdminLoginPage from "@/pages/admin/AdminLogin";
 
 import StorefrontHome from "@/pages/storefront/Home";
 import StorefrontProducts from "@/pages/storefront/Products";
@@ -17,6 +16,8 @@ import CheckoutPage from "@/pages/storefront/Checkout";
 import PendingPaymentPage from "@/pages/storefront/PendingPayment";
 import LoginPage from "@/pages/storefront/Login";
 import SignupPage from "@/pages/storefront/Signup";
+import ForgotPasswordPage from "@/pages/storefront/ForgotPassword";
+import ResetPasswordPage from "@/pages/storefront/ResetPassword";
 import AccountPage from "@/pages/storefront/Account";
 import StorefrontProductDetail from "@/pages/storefront/ProductDetail";
 import StorefrontCombos from "@/pages/storefront/Combos";
@@ -48,6 +49,7 @@ import AdminShippingSettings from "@/pages/admin/ShippingSettings";
 import AdminGhnQuoteLogs from "@/pages/admin/GhnQuoteLogs";
 import AdminGoongTest from "@/pages/admin/GoongTestPage";
 import AdminProduction from "@/pages/admin/Production";
+import AdminProductionRecipeForm from "@/pages/admin/ProductionRecipeFormPage";
 
 import PlaceholderPage from "@/pages/PlaceholderPage";
 import NotFound from "@/pages/NotFound";
@@ -78,9 +80,9 @@ const App = () => (
             {/* Auth (no layout) */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
 
-            {/* Admin login (Supabase auth) */}
-            <Route path="/admin/login" element={<AdminLoginPage />} />
 
             {/* Admin (guarded) */}
             <Route
@@ -108,6 +110,7 @@ const App = () => (
               <Route path="stock-adjustments" element={<AdminStockAdjustments />} />
               <Route path="stock-adjustments/create" element={<AdminStockAdjustmentCreate />} />
               <Route path="inventory-report" element={<AdminInventoryReport />} />
+              <Route path="production/recipes/new" element={<AdminProductionRecipeForm />} />
               <Route path="production" element={<AdminProduction />} />
               <Route path="revenue" element={<AdminRevenueReport />} />
               <Route path="profit" element={<AdminProfitReport />} />

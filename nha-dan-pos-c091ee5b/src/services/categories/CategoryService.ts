@@ -8,6 +8,8 @@ import type { Category } from "@/lib/mock-data";
 
 export interface CategoryListParams extends ListQuery {
   active?: boolean;
+  /** When true, request /api/categories?includeInactive=true (admin views). */
+  includeInactive?: boolean;
 }
 
 export interface CreateCategoryInput {

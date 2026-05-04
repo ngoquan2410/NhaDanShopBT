@@ -8,18 +8,20 @@ import { UserFormDrawer } from "@/components/shared/UserFormDrawer";
 import { RowActions } from "@/components/shared/RowActions";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { useTableControls } from "@/hooks/useTableControls";
-import { useStore, userActions } from "@/lib/store";
+import { useService } from "@/hooks/useService";
+import { adminUsers } from "@/services";
 import { formatDateTime } from "@/lib/format";
 import { Plus, UserCog, Pencil, Shield, Trash2, KeyRound, Power, PowerOff } from "lucide-react";
 import { toast } from "sonner";
-import { UserAccount } from "@/lib/mock-data";
+import type { UserAccount } from "@/lib/mock-data";
 
 export default function AdminUsers() {
-  const { users } = useStore();
   const [search, setSearch] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<UserAccount | null>(null);
   const [deleting, setDeleting] = useState<UserAccount | null>(null);
+  const { data, loading, error, reload } = useService(() => adminUsers.list(), []);
+  const users = data ?? [];
 
   const filtered = useMemo(() => users.filter(u =>
     !search || u.username.toLowerCase().includes(search.toLowerCase()) || u.fullName.toLowerCase().includes(search.toLowerCase())
@@ -47,9 +49,12 @@ export default function AdminUsers() {
 
       <DataTableToolbar search={search} onSearchChange={setSearch} searchPlaceholder="Tìm username, họ tên..." />
 
-      {filtered.length === 0 ? (
+      {loading && <p className="text-sm text-muted-foreground">Đang tải người dùng từ backend...</p>}
+      {error && <p className="text-sm text-danger">Không tải được người dùng: {error.message}</p>}
+
+      {!loading && filtered.length === 0 ? (
         <EmptyState icon={UserCog} title="Không tìm thấy người dùng" />
-      ) : (
+      ) : !loading && (
         <>
           <div className="hidden md:block bg-card rounded-lg border overflow-hidden">
             <table className="w-full text-sm">
@@ -92,8 +97,9 @@ export default function AdminUsers() {
                               label: u.active ? "Khóa tài khoản" : "Mở khóa",
                               icon: u.active ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />,
                               onClick: () => {
-                                userActions.update(u.id, { active: !u.active });
-                                toast.success(u.active ? "Đã khóa tài khoản" : "Đã mở khóa");
+                                adminUsers.save({ ...u, active: !u.active })
+                                  .then(() => { toast.success(u.active ? "Đã khóa tài khoản" : "Đã mở khóa"); reload(); })
+                                  .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể đổi trạng thái"));
                               },
                             },
                             {
@@ -146,11 +152,22 @@ export default function AdminUsers() {
         </>
       )}
 
-      <UserFormDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} user={editing} />
+      <UserFormDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        user={editing}
+        onSave={async (input) => { await adminUsers.save(input); reload(); }}
+      />
       <ConfirmDialog
         open={!!deleting}
         onClose={() => setDeleting(null)}
-        onConfirm={() => { if (deleting) { userActions.remove(deleting.id); toast.success("Đã xóa người dùng"); } }}
+        onConfirm={() => {
+          if (deleting) {
+            adminUsers.remove(deleting.id)
+              .then(() => { toast.success("Đã xóa người dùng"); reload(); })
+              .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể xóa người dùng"));
+          }
+        }}
         title="Xóa người dùng?"
         description={`Tài khoản "${deleting?.username}" sẽ bị xóa vĩnh viễn. Lịch sử thao tác vẫn được giữ lại.`}
         variant="danger"

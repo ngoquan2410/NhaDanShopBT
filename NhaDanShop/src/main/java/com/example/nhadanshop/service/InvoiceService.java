@@ -63,6 +63,7 @@ public class InvoiceService {
     private final Clock clock;
     private final ObjectMapper objectMapper;
     private final SalesQuoteRepository salesQuoteRepository;
+    private final CustomerLoyaltyService loyaltyService;
 
     @Transactional
     public SalesInvoiceResponse createInvoice(SalesInvoiceRequest req) {
@@ -208,8 +209,11 @@ public class InvoiceService {
                 nvl(directPricing.manualDiscount())
                         .add(nvl(directPricing.promotionDiscount()))
                         .add(nvl(directPricing.voucherDiscount()))
+                        .add(nvl(directPricing.loyaltyDiscount()))
                         .add(nvl(directPricing.shippingDiscount()))
         );
+        invoice.setLoyaltyDiscountAmount(nvl(directPricing.loyaltyDiscount()));
+        invoice.setLoyaltyRedeemedPoints(directPricing.loyaltyRedeemedPoints() != null ? directPricing.loyaltyRedeemedPoints() : 0L);
 
         SalesInvoice saved = invoiceRepo.save(invoice);
         appendInvoiceDeductionMovements(saved);
@@ -222,6 +226,7 @@ public class InvoiceService {
             customerService.addSpend(saved.getCustomer().getId(),
                     saved.getTotalAmount().subtract(saved.getDiscountAmount()));
         }
+        loyaltyService.earnForInvoice(saved);
 
         return DtoMapper.toResponse(saved);
     }
@@ -340,8 +345,11 @@ public class InvoiceService {
                 nvl(pricing.manualDiscount())
                         .add(nvl(pricing.promotionDiscount()))
                         .add(nvl(pricing.voucherDiscount()))
+                        .add(nvl(pricing.loyaltyDiscount()))
                         .add(nvl(pricing.shippingDiscount()))
         );
+        invoice.setLoyaltyDiscountAmount(nvl(pricing.loyaltyDiscount()));
+        invoice.setLoyaltyRedeemedPoints(pricing.loyaltyRedeemedPoints() != null ? pricing.loyaltyRedeemedPoints() : 0L);
 
         PromotionSnapshotDto promoSnap = payload.promotionSnapshot();
         if (promoSnap != null) {
@@ -371,6 +379,7 @@ public class InvoiceService {
                     saved.getTotalAmount().subtract(saved.getDiscountAmount())
             );
         }
+        loyaltyService.earnForInvoice(saved);
 
         return DtoMapper.toResponse(saved);
     }
@@ -380,6 +389,13 @@ public class InvoiceService {
                 .orElseThrow(() -> new EntityNotFoundException("Khong tim thay san pham ID: " + cap.productId()));
         if (!product.getActive()) {
             throw new IllegalArgumentException("San pham '" + product.getName() + "' da ngung kinh doanh");
+        }
+        if (product.isCombo()) {
+            if (cap.rewardLine()) {
+                throw new IllegalArgumentException("Combo khong the la reward line tren quote");
+            }
+            expandComboFromCapturedQuoteLine(invoice, cap, affectedProductIds);
+            return;
         }
 
         ProductVariant resolved = variantService.resolveVariant(cap.variantId(), product.getId(), true);
@@ -452,8 +468,11 @@ public class InvoiceService {
             throw new IllegalArgumentException("San pham '" + product.getName() + "' da ngung kinh doanh");
         }
         if (product.isCombo()) {
-            throw new IllegalArgumentException(
-                    "San pham '" + product.getName() + "' la combo. Slice 2 chi ho tro xac nhan lai theo dong pending-order.");
+            if (orderItem.isRewardLine()) {
+                throw new IllegalArgumentException("Combo reward line chua ho tro");
+            }
+            expandComboFromPendingOrderItem(orderItem, invoice, affectedProductIds);
+            return;
         }
 
         Long variantId = orderItem.getVariant() != null ? orderItem.getVariant().getId() : null;
@@ -515,6 +534,7 @@ public class InvoiceService {
         item.setAllocatedManualDiscount(snap.allocatedManualDiscount());
         item.setAllocatedPromotionDiscount(snap.allocatedPromotionDiscount());
         item.setAllocatedVoucherDiscount(snap.allocatedVoucherDiscount());
+        item.setAllocatedLoyaltyDiscount(snap.allocatedLoyaltyDiscount());
         item.setAllocatedMerchandiseDiscount(snap.allocatedMerchandiseDiscount());
         item.setLineNetRevenue(snap.lineNetRevenue());
         item.setLineVatBase(snap.lineVatBase());
@@ -532,6 +552,7 @@ public class InvoiceService {
         item.setAllocatedManualDiscount(orderItem.getAllocatedManualDiscount());
         item.setAllocatedPromotionDiscount(orderItem.getAllocatedPromotionDiscount());
         item.setAllocatedVoucherDiscount(orderItem.getAllocatedVoucherDiscount());
+        item.setAllocatedLoyaltyDiscount(orderItem.getAllocatedLoyaltyDiscount());
         item.setAllocatedMerchandiseDiscount(orderItem.getAllocatedMerchandiseDiscount());
         item.setLineNetRevenue(orderItem.getLineNetRevenue());
         item.setLineVatBase(orderItem.getLineVatBase());
@@ -645,8 +666,11 @@ public class InvoiceService {
                 nvl(pricing.manualDiscount())
                         .add(nvl(pricing.promotionDiscount()))
                         .add(nvl(pricing.voucherDiscount()))
+                        .add(nvl(pricing.loyaltyDiscount()))
                         .add(nvl(pricing.shippingDiscount()))
         );
+        invoice.setLoyaltyDiscountAmount(nvl(pricing.loyaltyDiscount()));
+        invoice.setLoyaltyRedeemedPoints(pricing.loyaltyRedeemedPoints() != null ? pricing.loyaltyRedeemedPoints() : 0L);
 
         Set<Long> affectedProductIds = new java.util.HashSet<>();
         for (PendingOrderItem orderItem : order.getItems()) {
@@ -690,41 +714,106 @@ public class InvoiceService {
                                            SalesInvoice invoice,
                                            List<SalesInvoiceItem> items,
                                            Set<Long> affectedProductIds) {
-        // Load combo
+        return expandComboCore(
+                comboId, comboQty, null, null, invoice, items, affectedProductIds, null, null);
+    }
+
+    private void expandComboFromPendingOrderItem(
+            PendingOrderItem orderItem,
+            SalesInvoice invoice,
+            Set<Long> affectedProductIds) {
+        Product combo = orderItem.getProduct();
+        if (!combo.isCombo()) {
+            throw new IllegalStateException("expandComboFromPendingOrderItem: san pham khong phai combo");
+        }
+        int comboQty = orderItem.getQuantity();
+        BigDecimal totalComboRevenue =
+                orderItem.getLineSubtotal() != null
+                        && orderItem.getLineSubtotal().compareTo(BigDecimal.ZERO) > 0
+                        ? orderItem.getLineSubtotal()
+                        : nvl(orderItem.getUnitPrice()).multiply(BigDecimal.valueOf(comboQty));
+        BigDecimal comboUnitSnap =
+                orderItem.getUnitPrice() != null
+                        ? orderItem.getUnitPrice()
+                        : (comboQty > 0
+                        ? totalComboRevenue.divide(BigDecimal.valueOf(comboQty), 0, RoundingMode.HALF_UP)
+                        : BigDecimal.ZERO);
+        expandComboCore(
+                combo.getId(),
+                comboQty,
+                totalComboRevenue,
+                comboUnitSnap,
+                invoice,
+                invoice.getItems(),
+                affectedProductIds,
+                orderItem,
+                null);
+    }
+
+    private void expandComboFromCapturedQuoteLine(
+            SalesInvoice invoice,
+            SalesQuoteCapturedLineDto cap,
+            Set<Long> affectedProductIds) {
+        expandComboCore(
+                cap.productId(),
+                cap.quantity(),
+                cap.lineSubtotal(),
+                cap.unitPrice(),
+                invoice,
+                invoice.getItems(),
+                affectedProductIds,
+                null,
+                cap.commercialSnapshot());
+    }
+
+    /**
+     * Shared combo expansion: POS ({@code overrides null}), pending-order, or quote-captured line.
+     */
+    private BigDecimal expandComboCore(
+            Long comboId,
+            int comboQty,
+            BigDecimal totalComboRevenueOverride,
+            BigDecimal comboUnitPriceOverride,
+            SalesInvoice invoice,
+            List<SalesInvoiceItem> targetItems,
+            Set<Long> affectedProductIds,
+            PendingOrderItem pendingCommercialSource,
+            CommercialLineSnapshotDto quoteCommercialSnapshot) {
         Product combo = productRepo.findById(comboId)
                 .orElseThrow(() -> new EntityNotFoundException("Khong tim thay combo ID: " + comboId));
-        if (!combo.isCombo())
+        if (!combo.isCombo()) {
             throw new IllegalArgumentException("San pham ID " + comboId + " khong phai combo");
-        if (!combo.getActive())
+        }
+        if (!combo.getActive()) {
             throw new IllegalArgumentException("Combo '" + combo.getName() + "' da ngung kinh doanh");
+        }
 
-        // Lấy giá bán combo từ default variant
         ProductVariant comboVariant = variantRepo.findByProductIdAndIsDefaultTrue(comboId)
                 .orElseThrow(() -> new IllegalStateException(
-                    "Combo '" + combo.getName() + "' chua co default variant. Vui long cap nhat combo."));
+                        "Combo '" + combo.getName() + "' chua co default variant. Vui long cap nhat combo."));
         BigDecimal comboSellPrice = comboVariant.getSellPrice();
 
-        // Lấy danh sách thành phần
         List<ProductComboItem> comboItems = comboItemRepo.findByComboProduct(combo);
-        if (comboItems.isEmpty())
+        if (comboItems.isEmpty()) {
             throw new IllegalStateException("Combo '" + combo.getName() + "' chua co thanh phan nao");
+        }
 
-        // Kiểm tra tồn kho đủ cho tất cả thành phần trước khi trừ
         for (ProductComboItem ci : comboItems) {
             Product component = ci.getProduct();
             ProductVariant compVariant = variantService.resolveVariant(null, component.getId(), false);
             int required = ci.getQuantity() * comboQty;
             if (compVariant.getStockQty() < required) {
                 throw new IllegalArgumentException(
-                    "Combo '" + combo.getName() + "': Thanh phan '" + component.getName() +
-                    "' khong du hang. Can: " + required + ", ton kho: " + compVariant.getStockQty());
+                        "Combo '" + combo.getName() + "': Thanh phan '" + component.getName() +
+                                "' khong du hang. Can: " + required + ", ton kho: " + compVariant.getStockQty());
             }
         }
 
-        // Trừ kho và tạo invoice items
-        BigDecimal totalComboRevenue = comboSellPrice.multiply(BigDecimal.valueOf(comboQty));
+        BigDecimal totalComboRevenue = totalComboRevenueOverride != null
+                ? totalComboRevenueOverride
+                : comboSellPrice.multiply(BigDecimal.valueOf(comboQty));
+        BigDecimal comboUnitSnap = comboUnitPriceOverride != null ? comboUnitPriceOverride : comboSellPrice;
 
-        // Phân bổ doanh thu combo theo tỷ lệ giá vốn từng thành phần
         BigDecimal totalCost = comboItems.stream()
                 .map(ci -> {
                     ProductVariant v = ci.getProduct().getDefaultVariant();
@@ -742,12 +831,10 @@ public class InvoiceService {
                     .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy variant ID: " + compVariantId));
             int requiredQty = ci.getQuantity() * comboQty;
 
-            // FEFO deduct
             ProductBatchService.DeductionResult deductionResult = batchService.deductStockFEFOWithTrace(
                     component.getId(), compVariant.getId(), requiredQty);
             affectedProductIds.add(component.getId());
 
-            // Phân bổ doanh thu combo theo tỷ lệ giá vốn thành phần (hoặc chia đều nếu cost = 0)
             BigDecimal componentCost = totalCost.compareTo(BigDecimal.ZERO) > 0
                     ? compVariant.getCostPrice().multiply(BigDecimal.valueOf(ci.getQuantity()))
                     : BigDecimal.ZERO;
@@ -755,10 +842,9 @@ public class InvoiceService {
                     ? componentCost.divide(totalCost, 10, RoundingMode.HALF_UP)
                     : BigDecimal.ONE.divide(BigDecimal.valueOf(comboItems.size()), 10, RoundingMode.HALF_UP);
 
-            // Dòng cuối nhận phần dư để tránh sai số làm tròn
             BigDecimal allocatedRevenue;
             if (i == comboItems.size() - 1) {
-                BigDecimal alreadyAllocated = items.stream()
+                BigDecimal alreadyAllocated = targetItems.stream()
                         .filter(it -> comboId.equals(it.getComboSourceId()))
                         .map(it -> it.getUnitPrice().multiply(BigDecimal.valueOf(it.getQuantity())))
                         .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -776,13 +862,18 @@ public class InvoiceService {
             item.setQuantity(requiredQty);
             item.setOriginalUnitPrice(compVariant.getSellPrice());
             item.setLineDiscountPercent(BigDecimal.ZERO);
-            item.setUnitPrice(allocatedRevenue);   // giá phân bổ từ combo
+            item.setUnitPrice(allocatedRevenue);
             item.setUnitCostSnapshot(deductionResult.averageCost().compareTo(BigDecimal.ZERO) > 0
                     ? deductionResult.averageCost() : compVariant.getCostPrice());
             appendBatchAllocations(item, deductionResult.batchDeductions());
             item.setComboSourceId(comboId);
-            item.setComboUnitPrice(comboSellPrice); // snapshot giá combo
-            items.add(item);
+            item.setComboUnitPrice(comboUnitSnap);
+            if (i == 0 && pendingCommercialSource != null) {
+                applyCommercialFromPendingOrderItem(item, pendingCommercialSource);
+            } else if (i == 0 && quoteCommercialSnapshot != null) {
+                applyCommercialSnapshot(item, quoteCommercialSnapshot);
+            }
+            targetItems.add(item);
         }
 
         return totalComboRevenue;
@@ -828,7 +919,14 @@ public class InvoiceService {
     }
 
     public Page<SalesInvoiceResponse> listInvoices(Pageable pageable) {
-        Page<Long> invoiceIdPage = invoiceRepo.findInvoiceIdsForList(pageable);
+        return listInvoices(pageable, null, null);
+    }
+
+    public Page<SalesInvoiceResponse> listInvoices(Pageable pageable, SalesInvoice.Status status, String query) {
+        String q = (query != null && !query.isBlank()) ? query.trim() : null;
+        Page<Long> invoiceIdPage = (status == null && q == null)
+                ? invoiceRepo.findInvoiceIdsForList(pageable)
+                : invoiceRepo.findInvoiceIdsForListFiltered(status, q, pageable);
         List<Long> invoiceIds = invoiceIdPage.getContent();
         if (invoiceIds.isEmpty()) {
             return Page.empty(pageable);
@@ -840,7 +938,6 @@ public class InvoiceService {
         }
 
         Map<Long, SalesInvoice> invoiceById = invoiceRepo.findAllByIdInForList(invoiceIds).stream()
-                // Preserve DB ordering from paged id query.
                 .sorted(java.util.Comparator.comparingInt(inv -> orderIndex.getOrDefault(inv.getId(), Integer.MAX_VALUE)))
                 .collect(Collectors.toMap(SalesInvoice::getId, inv -> inv, (left, right) -> left, LinkedHashMap::new));
 
@@ -926,6 +1023,7 @@ public class InvoiceService {
         }
 
         invoiceRepo.save(inv);
+        loyaltyService.reverseForInvoice(inv, reason);
         affectedProductIds.forEach(comboService::refreshCombosContaining);
         return DtoMapper.toResponse(inv);
     }

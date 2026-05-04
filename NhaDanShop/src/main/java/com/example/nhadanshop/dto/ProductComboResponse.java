@@ -12,6 +12,8 @@ public record ProductComboResponse(
         BigDecimal sellPrice,
         Boolean active,
         Integer stockQty,          // virtual stock = min(component/qty)
+        /** Default variant of the combo product (storefront cart / quote lines). */
+        Long defaultVariantId,
         String imageUrl,
         Long categoryId,
         String categoryName,

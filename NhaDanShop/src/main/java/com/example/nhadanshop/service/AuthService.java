@@ -1,14 +1,19 @@
 package com.example.nhadanshop.service;
 
 import com.example.nhadanshop.dto.*;
+import com.example.nhadanshop.entity.Customer;
 import com.example.nhadanshop.entity.RefreshToken;
+import com.example.nhadanshop.entity.PasswordResetToken;
 import com.example.nhadanshop.entity.Role;
 import com.example.nhadanshop.entity.User;
 import com.example.nhadanshop.repository.RefreshTokenRepository;
+import com.example.nhadanshop.repository.PasswordResetTokenRepository;
+import com.example.nhadanshop.repository.CustomerRepository;
 import com.example.nhadanshop.repository.RoleRepository;
 import com.example.nhadanshop.repository.UserRepository;
 import com.example.nhadanshop.security.CustomUserDetailsService;
 import com.example.nhadanshop.security.JwtTokenProvider;
+import com.example.nhadanshop.security.PasswordPolicy;
 import com.example.nhadanshop.security.TotpService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -18,10 +23,16 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -37,10 +48,23 @@ public class AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final TotpService totpService;
     private final PasswordEncoder passwordEncoder;
+    private final CustomerRepository customerRepository;
+    private final PasswordResetTokenRepository passwordResetTokenRepo;
+    private final JavaMailSender mailSender;
+
+    @Value("${spring.mail.host:}")
+    private String mailHost;
+
+    @Value("${spring.mail.from:}")
+    private String mailFrom;
+
+    @Value("${app.public-base-url:http://localhost:5173}")
+    private String publicBaseUrl;
 
     // ── Sign Up: Đăng ký tài khoản mới (ROLE_USER) ──────────────────────────────────
     @Transactional
     public LoginResponse signUp(SignUpRequest req) {
+        PasswordPolicy.validate(req.password(), req.username());
         if (userRepo.existsByUsername(req.username())) {
             throw new IllegalStateException("Tên đăng nhập '" + req.username() + "' đã tồn tại");
         }
@@ -54,6 +78,12 @@ public class AuthService {
         user.setFullName(req.fullName() != null ? req.fullName() : req.username());
         user.setActive(true);
         user.getRoles().add(userRole);
+
+        Customer customer = new Customer();
+        customer.setCode(nextCustomerCode());
+        customer.setName(user.getFullName());
+        customer.setActive(true);
+        user.setCustomer(customerRepository.save(customer));
         userRepo.save(user);
 
         // Tự động login sau khi đăng ký thành công
@@ -91,6 +121,7 @@ public class AuthService {
                     user.getUsername(),
                     user.getFullName(),
                     roles,
+                    user.getCustomer() != null ? user.getCustomer().getId() : null,
                     true,
                     true            // totpRequired = true → FE hiện màn hình nhập OTP
             );
@@ -220,7 +251,7 @@ public class AuthService {
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
 
         if (!Boolean.TRUE.equals(user.getTotpEnabled())) {
-            throw new IllegalStateException("TOTP chưa đ��ợc bật");
+            throw new IllegalStateException("TOTP chưa được bật");
         }
 
         if (!totpService.verifyCode(user.getTotpSecret(), otp)) {
@@ -230,6 +261,71 @@ public class AuthService {
         user.setTotpEnabled(false);
         user.setTotpSecret(null);
         userRepo.save(user);
+    }
+
+    // ── Password reset (SMTP) ─────────────────────────────────────────────────
+    @Transactional
+    public void requestPasswordReset(String username) {
+        if (username == null || username.isBlank()) {
+            return;
+        }
+        User user = userRepo.findByUsername(username.trim()).orElse(null);
+        if (user == null) {
+            log.debug("Password reset requested for unknown user (no email sent)");
+            return;
+        }
+        if (mailHost == null || mailHost.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Email SMTP chưa được cấu hình (spring.mail.host).");
+        }
+        String email = user.getCustomer() != null ? user.getCustomer().getEmail() : null;
+        if (email == null || email.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Tài khoản chưa có email trên hồ sơ khách hàng — không thể gửi liên kết đặt lại mật khẩu.");
+        }
+        String raw = jwtTokenProvider.generateRawRefreshToken();
+        String hash = jwtTokenProvider.hashRefreshToken(raw);
+        PasswordResetToken pr = new PasswordResetToken();
+        pr.setUser(user);
+        pr.setTokenHash(hash);
+        pr.setExpiresAt(LocalDateTime.now().plusHours(1));
+        passwordResetTokenRepo.save(pr);
+
+        String base = publicBaseUrl == null ? "http://localhost:5173" : publicBaseUrl.trim().replaceAll("/$", "");
+        String link = base + "/reset-password?token=" + java.net.URLEncoder.encode(raw, StandardCharsets.UTF_8);
+
+        SimpleMailMessage msg = new SimpleMailMessage();
+        if (mailFrom != null && !mailFrom.isBlank()) {
+            msg.setFrom(mailFrom.trim());
+        }
+        msg.setTo(email);
+        msg.setSubject("Đặt lại mật khẩu NhaDanShop");
+        msg.setText("Xin chào,\n\nĐể đặt lại mật khẩu, mở liên kết sau (hiệu lực 1 giờ):\n" + link
+                + "\n\nNếu bạn không yêu cầu, vui lòng bỏ qua email này.\n");
+        mailSender.send(msg);
+    }
+
+    @Transactional
+    public void resetPasswordWithToken(String rawToken, String newPassword) {
+        if (rawToken == null || rawToken.isBlank()) {
+            throw new BadCredentialsException("Token không hợp lệ");
+        }
+        String hash = jwtTokenProvider.hashRefreshToken(rawToken.trim());
+        PasswordResetToken pr = passwordResetTokenRepo.findByTokenHash(hash)
+                .orElseThrow(() -> new BadCredentialsException("Token không hợp lệ"));
+        if (pr.getUsedAt() != null) {
+            throw new BadCredentialsException("Token đã được sử dụng");
+        }
+        if (pr.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new BadCredentialsException("Token đã hết hạn");
+        }
+        User user = pr.getUser();
+        PasswordPolicy.validate(newPassword, user.getUsername());
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepo.save(user);
+        pr.setUsedAt(LocalDateTime.now());
+        passwordResetTokenRepo.save(pr);
+        refreshTokenRepo.revokeAllByUser(user);
     }
 
     // ── Helper: cấp đầy đủ access + refresh token ─────────────────────────────
@@ -244,7 +340,7 @@ public class AuthService {
         RefreshToken rt = new RefreshToken();
         rt.setUser(user);
         rt.setTokenHash(refreshHash);
-        rt.setExpiresAt(LocalDateTime.now().plusDays(jwtTokenProvider.getRefreshTokenExpiryDays()));
+        rt.setExpiresAt(LocalDateTime.now().plusMinutes(jwtTokenProvider.getRefreshTokenExpiryMinutes()));
         refreshTokenRepo.save(rt);
 
         return new LoginResponse(
@@ -255,9 +351,26 @@ public class AuthService {
                 user.getUsername(),
                 user.getFullName(),
                 roles,
+                user.getCustomer() != null ? user.getCustomer().getId() : null,
                 Boolean.TRUE.equals(user.getTotpEnabled()),
                 false // totpRequired = false vì đã xác thực xong
         );
+    }
+
+    private String nextCustomerCode() {
+        long maxNum = customerRepository.findAll().stream()
+                .map(Customer::getCode)
+                .filter(c -> c != null && c.matches("KH\\d+"))
+                .mapToLong(c -> {
+                    try { return Long.parseLong(c.substring(2)); }
+                    catch (NumberFormatException e) { return 0L; }
+                })
+                .max().orElse(0L);
+        String candidate;
+        do {
+            candidate = String.format("KH%03d", ++maxNum);
+        } while (customerRepository.existsByCode(candidate));
+        return candidate;
     }
 
     // ── Cleanup: xóa refresh tokens hết hạn mỗi giờ ──────────────────────────

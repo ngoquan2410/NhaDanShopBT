@@ -19,6 +19,7 @@ import type {
 } from "@/services/types";
 import { LocalPendingOrderAdapter } from "../local/LocalPendingOrderAdapter";
 import { adminFetchJson } from "@/services/auth/adminApi";
+import { storefrontAuthHeaders } from "@/lib/storefrontAuthHeaders";
 
 type BackendPendingOrder = {
   id: string | number;
@@ -82,7 +83,10 @@ function normalizePricingBreakdown(value: any): PricingBreakdownSnapshot {
   };
 }
 
-function backendToOrder(raw: BackendPendingOrder): PendingOrder {
+function backendToOrder(
+  raw: BackendPendingOrder,
+  confirmMeta?: { confirmedInvoiceId?: string; confirmedInvoiceNo?: string },
+): PendingOrder {
   return {
     id: String(raw.id),
     code: raw.code,
@@ -119,6 +123,8 @@ function backendToOrder(raw: BackendPendingOrder): PendingOrder {
     shippingQuoteSnapshot: (raw.shippingQuoteSnapshot as PendingOrder["shippingQuoteSnapshot"]) ?? null,
     pricingBreakdownSnapshot: normalizePricingBreakdown(raw.pricingBreakdownSnapshot),
     note: raw.note ?? undefined,
+    confirmedInvoiceId: confirmMeta?.confirmedInvoiceId,
+    confirmedInvoiceNo: confirmMeta?.confirmedInvoiceNo,
   };
 }
 
@@ -175,8 +181,26 @@ export class CloudPendingOrderAdapter implements PendingOrderService {
   async list(params?: PendingOrderListParams): Promise<PagedResult<PendingOrder>> {
     if (isTestEnv) return this.local.list(params);
 
-    const rows = await adminFetchJson<BackendPendingOrder[]>(API_BASE);
-    let items = rows.map(backendToOrder);
+    const all: BackendPendingOrder[] = [];
+    let pageIdx = 0;
+    const chunk = 100;
+    for (;;) {
+      const url = `${API_BASE}?page=${pageIdx}&size=${chunk}&sort=createdAt,desc`;
+      const data = await adminFetchJson<{
+        content?: BackendPendingOrder[];
+        last?: boolean;
+        totalPages?: number;
+      }>(url);
+      const batch = Array.isArray(data.content) ? data.content : [];
+      if (batch.length === 0) break;
+      all.push(...batch);
+      if (data.last === true) break;
+      if (batch.length < chunk) break;
+      pageIdx += 1;
+      if (pageIdx > 200) break;
+    }
+
+    let items = all.map(backendToOrder);
 
     if (params?.status) {
       items = items.filter((item) => item.status === params.status);
@@ -257,6 +281,7 @@ export class CloudPendingOrderAdapter implements PendingOrderService {
 
     const order = await this.requestJson<BackendPendingOrder>(API_BASE, {
       method: "POST",
+      headers: storefrontAuthHeaders(),
       body: JSON.stringify(body),
     });
     return backendToOrder(order as BackendPendingOrder);
@@ -353,7 +378,13 @@ export class CloudPendingOrderAdapter implements PendingOrderService {
           : {}),
       },
     );
-    return backendToOrder(data.pendingOrder);
+    const invRaw = data.invoice as Record<string, unknown> | null | undefined;
+    const invId = invRaw?.id != null ? String(invRaw.id) : undefined;
+    const invNo = typeof invRaw?.invoiceNo === "string" ? invRaw.invoiceNo : undefined;
+    if (!invId || !invNo) {
+      throw new Error("Xác nhận đơn không trả về hóa đơn từ backend — không thể hoàn tất.");
+    }
+    return backendToOrder(data.pendingOrder, { confirmedInvoiceId: invId, confirmedInvoiceNo: invNo });
   }
 
   async cancel(id: string, opts?: { note?: string }): Promise<PendingOrder> {

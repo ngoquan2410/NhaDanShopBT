@@ -9,6 +9,7 @@ import com.example.nhadanshop.repository.InventoryReceiptRepository;
 import com.example.nhadanshop.repository.ProductBatchRepository;
 import com.example.nhadanshop.repository.ProductVariantRepository;
 import com.example.nhadanshop.repository.SalesInvoiceRepository;
+import com.example.nhadanshop.repository.StockAdjustmentItemRepository;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,10 +42,10 @@ import java.util.Map;
  *   ProdNet = Σ qty_delta trên {@code inventory_movements} với source_type thuộc
  *   production_consume / production_output / production_void_restore / production_void_output
  *
- *   openingStock  = currentStock - recv(from→∞) + sold(from→∞) - prodNet(from→∞)
+ *   openingStock  = currentStock - recv(from→∞) + sold(from→∞) - prodNet(from→∞) - adjustmentNet(from→∞)
  *   totalReceived = tổng nhập kho (receipt) trong kỳ [from, to] — chỉ nhập kho*, không gồm SX
  *   totalSold     = tổng xuất bán (invoice) trong kỳ [from, to]
- *   closingStock  = openingStock + totalReceived - totalSold + prodNet trong kỳ [from,to]
+ *   closingStock  = openingStock + totalReceived - totalSold + prodNet + adjustmentNet trong kỳ [from,to]
  *
  * *) Cột nhập/xuất vẫn là nhập/bán; chênh SX được cộng trừ qua prodNet trong công thức đóng.
  *
@@ -65,6 +66,7 @@ public class InventoryStockService {
     private final ProductBatchRepository batchRepository;
     private final InventoryMovementRepository movementRepository;
     private final ProductVariantRepository variantRepository; // [Sprint 0]
+    private final StockAdjustmentItemRepository stockAdjustmentItemRepository;
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
@@ -118,6 +120,10 @@ public class InventoryStockService {
                 movementRepository.sumProductionQtyDeltaByVariantCreatedOnOrAfter(fromDt));
         Map<Long, Integer> prodNetInPeriod = buildSignedIntQtyMap(
                 movementRepository.sumProductionQtyDeltaByVariantBetweenInclusive(fromDt, toDt));
+        Map<Long, Integer> adjustedAfterFrom = buildSignedIntQtyMap(
+                stockAdjustmentItemRepository.sumConfirmedDiffByVariantConfirmedOnOrAfter(fromDt));
+        Map<Long, Integer> adjustedInPeriod = buildSignedIntQtyMap(
+                stockAdjustmentItemRepository.sumConfirmedDiffByVariantBetweenInclusive(fromDt, toDt));
 
         // [Fix closingValue] Dùng avg cost price theo variant từ batch hiện tại
         // closingValue = closingStock * avgCostPrice  ← phụ thuộc closingStock của kỳ
@@ -134,12 +140,14 @@ public class InventoryStockService {
             int recvAfter  = receivedAfterFrom.getOrDefault(vid, 0);
             int soldAfter  = soldAfterFrom.getOrDefault(vid, 0);
             int prodAfter  = prodNetAfterFrom.getOrDefault(vid, 0);
-            int openingStock = currentStock - recvAfter + soldAfter - prodAfter;
+            int adjAfter   = adjustedAfterFrom.getOrDefault(vid, 0);
+            int openingStock = currentStock - recvAfter + soldAfter - prodAfter - adjAfter;
 
             int totalReceived = receivedInPeriod.getOrDefault(vid, 0);
             int totalSold     = soldInPeriod.getOrDefault(vid, 0);
             int prodPeriod    = prodNetInPeriod.getOrDefault(vid, 0);
-            int closingStock  = openingStock + totalReceived - totalSold + prodPeriod;
+            int totalAdjusted = adjustedInPeriod.getOrDefault(vid, 0);
+            int closingStock  = openingStock + totalReceived - totalSold + prodPeriod + totalAdjusted;
 
             requireNonNegativeStockReportFigures(vid, v.getVariantCode(), openingStock, closingStock);
 
@@ -157,6 +165,7 @@ public class InventoryStockService {
                     vid, v.getVariantCode(), v.getVariantName(),
                     openingStock,
                     totalReceived, totalSold,
+                    totalAdjusted,
                     closingStock,
                     closingValue,
                     v.getMinStockQty() != null ? v.getMinStockQty() : 5,

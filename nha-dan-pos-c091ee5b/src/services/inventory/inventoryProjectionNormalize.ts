@@ -13,6 +13,7 @@ type RawProjection = {
   reserved?: number;
   available?: number;
   sellableQty?: number | string | null;
+  minStockQty?: number | string | null;
   byBatch?: RawBatch[] | null;
 };
 
@@ -67,6 +68,10 @@ export function normalizeInventoryProjection(raw: RawProjection): InventoryProje
     raw.sellableQty != null && raw.sellableQty !== ""
       ? Number(raw.sellableQty)
       : undefined;
+  const minStock =
+    raw.minStockQty != null && raw.minStockQty !== ""
+      ? Number(raw.minStockQty)
+      : undefined;
   return {
     variantId: idString(raw.variantId),
     productId: raw.productId != null ? idString(raw.productId) : undefined,
@@ -79,6 +84,7 @@ export function normalizeInventoryProjection(raw: RawProjection): InventoryProje
     reserved,
     available,
     sellableQty: sellable,
+    minStockQty: Number.isFinite(minStock) ? minStock : undefined,
     byBatch: by,
   };
 }

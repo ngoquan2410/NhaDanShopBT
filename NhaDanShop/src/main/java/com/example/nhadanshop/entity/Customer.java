@@ -56,6 +56,18 @@ public class Customer {
     @Column(name = "debt", nullable = false, precision = 18, scale = 2)
     private BigDecimal debt = BigDecimal.ZERO;
 
+    @Column(name = "point_balance", nullable = false)
+    private Long pointBalance = 0L;
+
+    @Column(name = "point_reserved", nullable = false)
+    private Long pointReserved = 0L;
+
+    @Column(name = "lifetime_points_earned", nullable = false)
+    private Long lifetimePointsEarned = 0L;
+
+    @Column(name = "lifetime_points_redeemed", nullable = false)
+    private Long lifetimePointsRedeemed = 0L;
+
     @Column(name = "note", length = 500)
     private String note;
 
@@ -77,6 +89,10 @@ public class Customer {
         if (group == null) group = CustomerGroup.RETAIL;
         if (totalSpend == null) totalSpend = BigDecimal.ZERO;
         if (debt == null) debt = BigDecimal.ZERO;
+        if (pointBalance == null) pointBalance = 0L;
+        if (pointReserved == null) pointReserved = 0L;
+        if (lifetimePointsEarned == null) lifetimePointsEarned = 0L;
+        if (lifetimePointsRedeemed == null) lifetimePointsRedeemed = 0L;
     }
 
     @PreUpdate

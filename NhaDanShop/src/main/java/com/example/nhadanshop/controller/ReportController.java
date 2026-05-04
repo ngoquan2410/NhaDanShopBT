@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/reports")
@@ -36,8 +37,14 @@ public class ReportController {
     @GetMapping("/profit")
     public ProfitReportResponse profitByRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        return reportService.getProfitReport(from, to);
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) List<Long> productIds) {
+        if (productIds == null || productIds.isEmpty()) {
+            return reportService.getProfitReport(from, to);
+        }
+        return reportService.getProfitReportForProducts(from, to, productIds.stream()
+                .distinct()
+                .collect(Collectors.toList()));
     }
 
     /**

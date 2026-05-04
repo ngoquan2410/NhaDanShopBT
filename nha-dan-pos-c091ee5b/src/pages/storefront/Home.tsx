@@ -9,14 +9,13 @@ import {
   Headphones,
   ArrowRight,
 } from "lucide-react";
-import { products, combos, categories } from "@/lib/mock-data";
 import { ProductCard } from "@/components/storefront/ProductCard";
-import { ComboCard } from "@/components/storefront/ComboCard";
 import { HotProductsCarousel } from "@/components/storefront/HotProductsCarousel";
 import { HeroSlider } from "@/components/storefront/HeroSlider";
 import { Reveal } from "@/components/storefront/Reveal";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { listPublicCategories, listPublicProducts, type StorefrontCategory, type StorefrontProduct } from "@/services/catalog/publicCatalog";
 
 const trustItems = [
   { icon: Truck, label: "Giao nhanh trong ngày", sub: "Nội thành 2 giờ" },
@@ -26,9 +25,24 @@ const trustItems = [
 ];
 
 export default function StorefrontHome() {
-  const activeCategories = categories.filter((c) => c.active);
-  const activeProducts = products.filter((p) => p.active);
+  const [activeCategories, setActiveCategories] = useState<StorefrontCategory[]>([]);
+  const [activeProducts, setActiveProducts] = useState<StorefrontProduct[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeChip, setActiveChip] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    Promise.all([listPublicProducts(), listPublicCategories()])
+      .then(([products, categories]) => {
+        if (!alive) return;
+        setActiveProducts(products);
+        setActiveCategories(categories);
+        setError(null);
+      })
+      .catch((e) => alive && setError(e instanceof Error ? e.message : "Không tải được catalog"))
+      .finally(() => alive && setLoading(false));
+    return () => { alive = false; };
+  }, []);
   const filteredProducts = activeChip
     ? activeProducts.filter((p) => p.categoryId === activeChip)
     : activeProducts;
@@ -39,6 +53,9 @@ export default function StorefrontHome() {
       <HeroSlider items={activeProducts.slice(0, 5)} />
 
       {/* === Trust strip === */}
+      {loading && <div className="max-w-7xl mx-auto px-4 py-3 text-sm text-muted-foreground">Đang tải catalog backend...</div>}
+      {error && <div className="max-w-7xl mx-auto px-4 py-3 text-sm text-danger">{error}</div>}
+
       <section className="border-y bg-storefront-surface">
         <div className="max-w-7xl mx-auto px-4 py-5 grid grid-cols-2 md:grid-cols-4 gap-4">
           {trustItems.map((t) => (
@@ -132,9 +149,7 @@ export default function StorefrontHome() {
                 </Link>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                {combos.filter((c) => c.active).slice(0, 2).map((c) => (
-                  <ComboCard key={c.id} combo={c} />
-                ))}
+                {activeProducts.slice(0, 2).map((p) => <ProductCard key={p.id} product={p} compact />)}
               </div>
             </div>
           </section>

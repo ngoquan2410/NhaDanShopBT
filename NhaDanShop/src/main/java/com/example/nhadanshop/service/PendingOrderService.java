@@ -8,6 +8,8 @@ import com.example.nhadanshop.repository.*;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -41,6 +43,9 @@ public class PendingOrderService {
     private final SalesQuoteRepository salesQuoteRepository;
     private final ProductBatchRepository productBatchRepository;
     private final Clock clock;
+    private final CustomerLoyaltyService loyaltyService;
+    private final AccountService accountService;
+    private final ProductComboRepository comboItemRepo;
 
     private static final Set<String> ONLINE_PAYMENT_METHODS = Set.of(
             "bank_transfer", "momo", "zalopay", "cod", "cash_on_delivery");
@@ -78,7 +83,7 @@ public class PendingOrderService {
             throw new IllegalArgumentException("Thiếu pricingBreakdownSnapshot");
         }
 
-        Long boundCustomerId = parseNullableLong(req.customerId());
+        Long boundCustomerId = resolveAllowedCustomerBinding(req.customerId(), null);
         if (boundCustomerId != null) {
             customerRepository.findById(boundCustomerId).ifPresent(
                     c -> ActiveEntityGuards.requireActiveCustomerForBinding(c, boundCustomerId));
@@ -109,7 +114,7 @@ public class PendingOrderService {
 
         PendingOrder order = new PendingOrder();
         order.setOrderNo(nextOrderNo());
-        order.setCustomerId(req.customerId());
+        order.setCustomerId(boundCustomerId != null ? String.valueOf(boundCustomerId) : null);
         order.setCustomerName(req.customerName());
         order.setCustomerPhone(req.customerPhone());
         order.setNote(req.note());
@@ -184,7 +189,6 @@ public class PendingOrderService {
         return toResponse(pendingOrderRepo.save(order));
     }
 
-    @Transactional
     private PendingOrderResponse createOrderFromBackendQuote(PendingOrderRequest req) {
         if (!ONLINE_PAYMENT_METHODS.contains(req.paymentMethod())) {
             throw new IllegalArgumentException(
@@ -208,7 +212,8 @@ public class PendingOrderService {
             throw new IllegalStateException("Thiếu pricingBreakdownSnapshot trong quote");
         }
 
-        Long boundCustomerId = parseNullableLong(req.customerId());
+        LoyaltyRedemptionSnapshotDto loyaltySnapshot = payload.loyaltySnapshot();
+        Long boundCustomerId = resolveAllowedCustomerBinding(req.customerId(), loyaltySnapshot);
         if (boundCustomerId != null) {
             customerRepository.findById(boundCustomerId).ifPresent(
                     c -> ActiveEntityGuards.requireActiveCustomerForBinding(c, boundCustomerId));
@@ -217,7 +222,7 @@ public class PendingOrderService {
         PendingOrder order = new PendingOrder();
         order.setOrderNo(nextOrderNo());
         order.setQuotePublicId(req.quotePublicId().trim());
-        order.setCustomerId(req.customerId());
+        order.setCustomerId(boundCustomerId != null ? String.valueOf(boundCustomerId) : null);
         order.setCustomerName(req.customerName());
         order.setCustomerPhone(req.customerPhone());
         order.setNote(req.note());
@@ -262,13 +267,36 @@ public class PendingOrderService {
                 throw new IllegalArgumentException("Variant không bán được");
             }
             boolean reward = cap.rewardLine();
-            if (!reward && cap.batchId() == null && variant.getStockQty() < cap.quantity()) {
-                throw new IllegalArgumentException(
-                        "Không đủ hàng [" + variant.getVariantCode() + "]");
-            }
-            if (reward && variant.getStockQty() < cap.quantity()) {
-                throw new IllegalArgumentException(
-                        "Không đủ hàng reward [" + variant.getVariantCode() + "]");
+            if (product.isCombo()) {
+                if (cap.batchId() != null) {
+                    throw new IllegalArgumentException("Combo pending-order không hỗ trợ batchId");
+                }
+                List<ProductComboItem> comboItems = comboItemRepo.findByComboProduct(product);
+                if (comboItems.isEmpty()) {
+                    throw new IllegalStateException("Combo '" + product.getName() + "' chưa có thành phần");
+                }
+                int comboQty = cap.quantity();
+                for (ProductComboItem ci : comboItems) {
+                    ProductVariant compVariant = variantService.resolveVariant(null, ci.getProduct().getId(), false);
+                    int required = ci.getQuantity() * comboQty;
+                    if (!reward && compVariant.getStockQty() < required) {
+                        throw new IllegalArgumentException(
+                                "Không đủ hàng cho combo — " + ci.getProduct().getName());
+                    }
+                    if (reward && compVariant.getStockQty() < required) {
+                        throw new IllegalArgumentException(
+                                "Không đủ hàng reward combo — " + ci.getProduct().getName());
+                    }
+                }
+            } else {
+                if (!reward && cap.batchId() == null && variant.getStockQty() < cap.quantity()) {
+                    throw new IllegalArgumentException(
+                            "Không đủ hàng [" + variant.getVariantCode() + "]");
+                }
+                if (reward && variant.getStockQty() < cap.quantity()) {
+                    throw new IllegalArgumentException(
+                            "Không đủ hàng reward [" + variant.getVariantCode() + "]");
+                }
             }
             PendingOrderItem item = new PendingOrderItem();
             item.setPendingOrder(order);
@@ -304,7 +332,14 @@ public class PendingOrderService {
         locked.setConsumedAt(LocalDateTime.now(clock));
         salesQuoteRepository.save(locked);
 
+        loyaltyService.reserveForPendingOrder(savedOrder, loyaltySnapshot);
+
         return toResponse(savedOrder);
+    }
+
+    @Transactional
+    public Page<PendingOrderResponse> listPage(Pageable pageable) {
+        return pendingOrderRepo.findAllByOrderByCreatedAtDesc(pageable).map(this::toResponse);
     }
 
     @Transactional
@@ -389,6 +424,8 @@ public class PendingOrderService {
         order.setNote(appendNote(order.getNote(), note));
         SalesInvoice invoice = invoiceService.createInvoiceFromPendingOrder(order, confirmedBy);
         order.setInvoice(invoice);
+        loyaltyService.redeemForPendingOrder(order, invoice, confirmedBy != null ? confirmedBy : "pending_confirm");
+        loyaltyService.earnForInvoice(invoice);
         order.setStatus(PendingOrder.Status.CONFIRMED);
         pendingOrderRepo.save(order);
 
@@ -408,6 +445,7 @@ public class PendingOrderService {
 
         order.setStatus(PendingOrder.Status.CANCELLED);
         order.setCancelReason(reason);
+        loyaltyService.releaseForPendingOrder(order, CustomerPointReservation.Status.RELEASED);
         return toResponse(pendingOrderRepo.save(order));
     }
 
@@ -419,6 +457,7 @@ public class PendingOrderService {
         for (PendingOrder order : expired) {
             order.setStatus(PendingOrder.Status.CANCELLED);
             order.setCancelReason("Hết hạn xác nhận");
+            loyaltyService.releaseForPendingOrder(order, CustomerPointReservation.Status.EXPIRED);
             pendingOrderRepo.save(order);
         }
     }
@@ -484,6 +523,28 @@ public class PendingOrderService {
         return auth == null || !auth.isAuthenticated()
                 || auth.getName() == null
                 || "anonymousUser".equalsIgnoreCase(auth.getName());
+    }
+
+    private Long resolveAllowedCustomerBinding(String requestedCustomerId, LoyaltyRedemptionSnapshotDto loyaltySnapshot) {
+        Long requested = loyaltySnapshot != null && loyaltySnapshot.customerId() != null
+                ? loyaltySnapshot.customerId()
+                : parseNullableLong(requestedCustomerId);
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getName() == null || "anonymousUser".equalsIgnoreCase(auth.getName())) {
+            if (requested != null || (requestedCustomerId != null && !requestedCustomerId.isBlank())) {
+                throw new IllegalArgumentException("Khách vãng lai không được gắn customerId; chỉ gửi customerName/customerPhone");
+            }
+            return null;
+        }
+        boolean admin = auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+        if (admin) return requested;
+        boolean roleUser = auth.getAuthorities().stream().anyMatch(a -> "ROLE_USER".equals(a.getAuthority()));
+        if (!roleUser) return requested;
+        Customer own = accountService.ensureLinkedCustomer(auth.getName());
+        if (requested != null && !requested.equals(own.getId())) {
+            throw new IllegalArgumentException("Không thể tạo đơn cho customerId không thuộc tài khoản đăng nhập");
+        }
+        return own.getId();
     }
 
     private String mapStatus(PendingOrder.Status status) {
@@ -565,6 +626,7 @@ public class PendingOrderService {
         item.setAllocatedManualDiscount(snap.allocatedManualDiscount());
         item.setAllocatedPromotionDiscount(snap.allocatedPromotionDiscount());
         item.setAllocatedVoucherDiscount(snap.allocatedVoucherDiscount());
+        item.setAllocatedLoyaltyDiscount(snap.allocatedLoyaltyDiscount());
         item.setAllocatedMerchandiseDiscount(snap.allocatedMerchandiseDiscount());
         item.setLineNetRevenue(snap.lineNetRevenue());
         item.setLineVatBase(snap.lineVatBase());

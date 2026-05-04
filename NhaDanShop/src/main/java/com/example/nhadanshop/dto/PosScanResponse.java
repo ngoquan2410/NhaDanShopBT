@@ -24,5 +24,7 @@ public record PosScanResponse(
         String batchStatus,
         boolean batchActiveForSale,
         Boolean sellable,
-        String blockReason
+        String blockReason,
+        /** Non-null for variant scans: aggregate sellable stock on variant (not batch-specific). */
+        Integer variantStockQty
 ) {}

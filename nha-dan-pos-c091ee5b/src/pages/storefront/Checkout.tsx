@@ -31,10 +31,11 @@ import type {
 import { useCart, cartActions } from "@/lib/cart";
 import { AddressSelect, type AddressSelectValue } from "@/components/shared/AddressSelect";
 import { AddressAutocomplete, type GoongResolvedAddress, type FallbackReason, clearSessionFallback } from "@/components/shared/AddressAutocomplete";
-import { currentCustomerActions, useCurrentCustomer } from "@/lib/current-customer";
+import { useAuth } from "@/lib/admin-auth";
+import { accountApi, type CustomerPointsSummary } from "@/services/account/accountApi";
 
 const paymentMethods = [
-  { id: "cash", label: "Tiền mặt khi nhận (COD)", icon: Banknote, desc: "Tạo đơn chờ — không lập hóa đơn cục bộ; admin xác nhận & xuất hóa đơn backend" },
+  { id: "cash_on_delivery", label: "Tiền mặt khi nhận (COD)", icon: Banknote, desc: "Tạo đơn chờ — không lập hóa đơn cục bộ; admin xác nhận & xuất hóa đơn backend" },
   { id: "bank_transfer", label: "Chuyển khoản ngân hàng", icon: CreditCard, desc: "Tạo đơn chờ — admin xác nhận sau khi nhận tiền" },
   { id: "momo", label: "Ví MoMo", icon: Smartphone, desc: "Quét QR — admin xác nhận thanh toán" },
   { id: "zalopay", label: "ZaloPay", icon: Smartphone, desc: "Quét QR — admin xác nhận thanh toán" },
@@ -54,8 +55,9 @@ const EMPTY_ADDR: AddressSelectValue = {
 export default function CheckoutPage() {
   const navigate = useNavigate();
   const cartItems = useCart();
-  const { customer, defaultAddress } = useCurrentCustomer();
-  const [payment, setPayment] = useState<PaymentId>("cash");
+  const auth = useAuth();
+  const [accountPoints, setAccountPoints] = useState<CustomerPointsSummary | null>(null);
+  const [payment, setPayment] = useState<PaymentId>("cash_on_delivery");
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -69,27 +71,24 @@ export default function CheckoutPage() {
   const [mappingWarning, setMappingWarning] = useState<string | null>(null);
   const [unmatchedLevels, setUnmatchedLevels] = useState<Array<"province" | "district" | "ward">>([]);
   const [acRetryNonce, setAcRetryNonce] = useState(0);
+  const [requestedRedeemPoints, setRequestedRedeemPoints] = useState(0);
+
+  useEffect(() => {
+    if (!auth.session) { setAccountPoints(null); return; }
+    accountApi.points().then(setAccountPoints).catch(() => setAccountPoints(null));
+  }, [auth.session]);
 
   // One-shot pre-fill from the persistent customer profile.
   useEffect(() => {
     if (prefilled) return;
-    if (!customer && !defaultAddress) return;
-    if (customer?.name && !name) setName(customer.name);
-    if (customer?.phone && !phone) setPhone(customer.phone);
-    if (defaultAddress) {
-      setAddr({
-        provinceCode: defaultAddress.provinceCode,
-        provinceName: defaultAddress.provinceName,
-        districtCode: defaultAddress.districtCode,
-        districtName: defaultAddress.districtName,
-        wardCode: defaultAddress.wardCode,
-        wardName: defaultAddress.wardName,
-      });
-      if (defaultAddress.street && !street) setStreet(defaultAddress.street);
-    }
-    setPrefilled(true);
+    if (!auth.session) return;
+    accountApi.me().then((m) => {
+      if (m.customerName && !name) setName(m.customerName);
+      if (m.phone && !phone) setPhone(m.phone);
+      setPrefilled(true);
+    }).catch(() => setPrefilled(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customer, defaultAddress]);
+  }, [auth.session]);
 
   // Voucher: code sent to backend quote — commercial amounts come from beQuote only.
   const [voucherInput, setVoucherInput] = useState("");
@@ -244,12 +243,14 @@ export default function CheckoutPage() {
               : undefined;
           const res = await postSalesQuote({
             source: "storefront",
+            customerId: auth.session?.customerId ? String(auth.session.customerId) : undefined,
             lines,
             promotionId,
             voucherCode: appliedVoucherCode || undefined,
             shippingAddress,
             manualDiscount: 0,
             vatPercent: 0,
+            requestedRedeemPoints: auth.session ? requestedRedeemPoints : 0,
           });
           if (!cancel) {
             setBeQuote(res);
@@ -275,6 +276,8 @@ export default function CheckoutPage() {
     quote.status,
     shippingAddress,
     bestPromo,
+    requestedRedeemPoints,
+    auth.session,
   ]);
 
   const promoDiscountPreview = bestPromo?.discountAmount ?? 0;
@@ -289,6 +292,7 @@ export default function CheckoutPage() {
   const rowSubtotal = pb ? pb.subtotal : subtotal;
   const rowPromoDisc = pb ? pb.promotionDiscount : promoDiscountPreview;
   const rowVoucherDisc = pb ? pb.voucherDiscount : 0;
+  const rowLoyaltyDisc = pb ? pb.loyaltyDiscount ?? 0 : 0;
   const rowShipFee = pb ? pb.shippingFee : shippingFeePreview;
   const rowShipDisc = pb ? pb.shippingDiscount : promoShippingDiscountPreview;
   const rowShipPayable = Math.max(0, rowShipFee - rowShipDisc);
@@ -300,6 +304,7 @@ export default function CheckoutPage() {
   const addressUnmapped = quote.usedFallback && quote.fallbackReason === "address_unmapped";
   const canSubmit =
     cartItems.length > 0 &&
+    cartItems.every((i) => i.catalogSource === "backend" && i.schemaVersion === 2 && /^\d+$/.test(String(i.productId)) && /^\d+$/.test(String(i.variantId))) &&
     name.trim().length > 0 &&
     phoneOk &&
     quote.status === "quoted" &&
@@ -346,13 +351,8 @@ export default function CheckoutPage() {
     }
     setSubmitting(true);
     try {
-      void currentCustomerActions.save({
-        name: name.trim(),
-        phone: phone.trim(),
-      });
-      currentCustomerActions.saveDefaultAddress(shippingAddress);
-
       const order = await pendingOrders.create({
+        customerId: auth.session?.customerId ? String(auth.session.customerId) : undefined,
         customerName: name.trim(),
         customerPhone: phone.trim(),
         shippingAddress,
@@ -365,6 +365,8 @@ export default function CheckoutPage() {
       cartActions.clear();
       toast.success("Đã tạo đơn — chuyển sang trang chờ thanh toán");
       navigate(`/pending-payment/${order.id}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Không tạo được đơn — kiểm tra báo giá, tồn kho, hoặc đăng nhập.");
     } finally {
       setSubmitting(false);
     }
@@ -408,7 +410,9 @@ export default function CheckoutPage() {
                       <p className="text-[11px] text-warning-foreground">
                         {acFallback === "quota_exceeded"
                           ? "Đã đạt giới hạn gợi ý địa chỉ trong ngày — vui lòng nhập thủ công bên dưới."
-                          : "Không kết nối được dịch vụ gợi ý địa chỉ — vui lòng nhập thủ công bên dưới."}
+                          : acFallback === "provider_disabled"
+                            ? "Gợi ý địa chỉ tạm không dùng được (chưa cấu hình Goong trên máy chủ) — vui lòng nhập thủ công bên dưới."
+                            : "Không kết nối được dịch vụ gợi ý địa chỉ — vui lòng nhập thủ công bên dưới."}
                       </p>
                       <button
                         type="button"
@@ -615,6 +619,31 @@ export default function CheckoutPage() {
                 )}
               </div>
 
+              {auth.session && accountPoints && (
+                <div className="mt-4 pt-4 border-t">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-xs font-semibold">Đổi điểm</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Số dư {accountPoints.pointBalance} · đang giữ {accountPoints.pointReserved} · khả dụng {accountPoints.availablePoints}
+                    </p>
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    max={accountPoints.availablePoints}
+                    value={requestedRedeemPoints}
+                    onChange={(e) => setRequestedRedeemPoints(Math.max(0, Math.min(accountPoints.availablePoints, Number(e.target.value || 0))))}
+                    className="w-full h-10 px-3.5 text-sm border rounded-full bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+                    placeholder="Nhập số điểm muốn đổi"
+                  />
+                </div>
+              )}
+              {!auth.session && (
+                <div className="mt-4 pt-4 border-t text-[11px] text-muted-foreground">
+                  Đăng nhập để xem và đổi điểm tích lũy. Khách vãng lai vẫn có thể thanh toán nhưng không thể đổi điểm.
+                </div>
+              )}
+
               <div className="border-t mt-4 pt-4 space-y-2 text-sm">
                 <Row label="Tạm tính" value={formatVND(rowSubtotal)} />
                 {bestPromo && rowPromoDisc > 0 && (
@@ -627,6 +656,12 @@ export default function CheckoutPage() {
                   <Row
                     label={`Voucher: ${vs.code}`}
                     value={<span className="text-success">−{formatVND(rowVoucherDisc)}</span>}
+                  />
+                )}
+                {rowLoyaltyDisc > 0 && (
+                  <Row
+                    label={`Đổi điểm (${beQuote?.loyaltySnapshot?.redeemedPoints ?? pb?.loyaltyRedeemedPoints ?? 0} điểm)`}
+                    value={<span className="text-success">−{formatVND(rowLoyaltyDisc)}</span>}
                   />
                 )}
                 <Row
@@ -685,6 +720,8 @@ export default function CheckoutPage() {
                 </div>
               </div>
               <button
+                type="button"
+                data-testid="checkout-create-pending"
                 onClick={submit}
                 disabled={!canSubmit}
                 className={cn(

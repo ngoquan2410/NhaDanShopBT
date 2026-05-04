@@ -3,13 +3,18 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { StatCard } from "@/components/shared/StatCard";
 import { DataTableToolbar } from "@/components/shared/DataTableToolbar";
 import { DateInput } from "@/components/shared/DateInput";
-import { inventoryReport } from "@/lib/mock-data";
+import { useService } from "@/hooks/useService";
+import { adminReports } from "@/services";
 import { formatVND, formatNumber } from "@/lib/format";
 import { BarChart3, Download, Package, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function AdminInventoryReport() {
   const [search, setSearch] = useState('');
+  const [from, setFrom] = useState("2026-04-01");
+  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const { data, loading, error } = useService(() => adminReports.inventory(from, to), [from, to]);
+  const inventoryReport = data ?? [];
   const filtered = inventoryReport.filter(r =>
     !search || r.productName.toLowerCase().includes(search.toLowerCase()) || r.variantCode.toLowerCase().includes(search.toLowerCase())
   );
@@ -39,12 +44,15 @@ export default function AdminInventoryReport() {
         searchPlaceholder="Tìm sản phẩm, mã phân loại..."
         actions={
           <div className="flex gap-2">
-            <DateInput defaultValue="2025-04-01" />
+            <DateInput value={from} onChange={setFrom} />
             <span className="text-xs text-muted-foreground self-center">—</span>
-            <DateInput defaultValue="2025-04-15" />
+            <DateInput value={to} onChange={setTo} />
           </div>
         }
       />
+
+      {loading && <p className="text-sm text-muted-foreground">Đang tải báo cáo tồn kho từ backend...</p>}
+      {error && <p className="text-sm text-danger">Không tải được báo cáo tồn kho: {error.message}</p>}
 
       <div className="bg-card rounded-lg border overflow-x-auto">
         <table className="w-full text-sm min-w-[700px]">

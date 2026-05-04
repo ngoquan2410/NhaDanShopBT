@@ -35,6 +35,10 @@ public class User {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt = LocalDateTime.now();
 
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "customer_id", unique = true)
+    private Customer customer;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
             name = "user_roles",

@@ -7,7 +7,8 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { SortableTh } from "@/components/shared/SortableTh";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { useTableControls } from "@/hooks/useTableControls";
-import { useStore, comboActions, computeDerivedStock } from "@/lib/store";
+import { useService } from "@/hooks/useService";
+import { adminCombos, products as productService } from "@/services";
 import type { Combo, ComboItem } from "@/lib/mock-data";
 import { formatVND } from "@/lib/format";
 import { Plus, Layers, Package, Pencil, AlertTriangle, Info, Trash2, X, Check, Power } from "lucide-react";
@@ -22,11 +23,19 @@ interface ComboForm {
 
 const emptyForm: ComboForm = { code: "", name: "", price: 0, active: true, components: [] };
 
+function computeDerivedStock(components: ComboItem[]) {
+  if (components.length === 0) return 0;
+  return Math.min(...components.map((c) => Math.floor(c.stock / Math.max(1, c.quantity))));
+}
+
 export default function AdminCombos() {
-  const { combos, products } = useStore();
   const [search, setSearch] = useState("");
   const [form, setForm] = useState<ComboForm | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Combo | null>(null);
+  const { data: combosData, loading, error, reload } = useService(() => adminCombos.list(), []);
+  const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 100 }), []);
+  const combos = combosData ?? [];
+  const products = productData?.items ?? [];
 
   const filtered = useMemo(() => combos.filter(c =>
     !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.code.toLowerCase().includes(search.toLowerCase())
@@ -51,32 +60,34 @@ export default function AdminCombos() {
   const openCreate = () => setForm({ ...emptyForm });
   const openEdit = (c: Combo) => setForm({ id: c.id, code: c.code, name: c.name, price: c.price, active: c.active, components: [...c.components] });
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form) return;
     if (!form.code.trim() || !form.name.trim()) { toast.error("Nhập mã và tên combo"); return; }
     if (form.price <= 0) { toast.error("Giá combo phải lớn hơn 0"); return; }
     if (form.components.length === 0) { toast.error("Combo cần ít nhất 1 sản phẩm thành phần"); return; }
     if (form.components.some(c => c.quantity <= 0)) { toast.error("Số lượng thành phần phải lớn hơn 0"); return; }
 
-    if (form.id) {
-      comboActions.update(form.id, { code: form.code.trim(), name: form.name.trim(), price: form.price, active: form.active, components: form.components });
-      toast.success("Đã cập nhật combo");
-    } else {
-      comboActions.create({ code: form.code.trim(), name: form.name.trim(), price: form.price, active: form.active, components: form.components });
-      toast.success("Đã tạo combo mới");
+    try {
+      await adminCombos.save({ id: form.id, code: form.code.trim(), name: form.name.trim(), price: form.price, active: form.active, components: form.components });
+      toast.success(form.id ? "Đã cập nhật combo" : "Đã tạo combo mới");
+      setForm(null);
+      reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không thể lưu combo");
     }
-    setForm(null);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!confirmDelete) return;
-    comboActions.remove(confirmDelete.id);
+    await adminCombos.remove(confirmDelete.id);
     toast.success(`Đã xóa "${confirmDelete.name}"`);
+    reload();
   };
 
-  const handleToggle = (c: Combo) => {
-    comboActions.update(c.id, { active: !c.active });
+  const handleToggle = async (c: Combo) => {
+    await adminCombos.toggle(c.id);
     toast.success(c.active ? `Đã ngưng "${c.name}"` : `Đã kích hoạt "${c.name}"`);
+    reload();
   };
 
   // ===== Form helpers =====
@@ -138,7 +149,10 @@ export default function AdminCombos() {
 
       <DataTableToolbar search={search} onSearchChange={setSearch} searchPlaceholder="Tìm combo..." />
 
-      {form && (
+      {loading && <p className="text-sm text-muted-foreground">Đang tải combo từ backend...</p>}
+      {error && <p className="text-sm text-danger">Không tải được combo: {error.message}</p>}
+
+      {form && !error && (
         <div className="bg-card rounded-lg border p-4 animate-fade-in space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-sm">{form.id ? "Sửa combo" : "Tạo combo mới"}</h3>
@@ -232,9 +246,9 @@ export default function AdminCombos() {
         </div>
       )}
 
-      {filtered.length === 0 ? (
+      {!loading && filtered.length === 0 ? (
         <EmptyState icon={Layers} title="Chưa có combo" description="Tạo combo để bán gộp nhiều sản phẩm" />
-      ) : (
+      ) : !loading && (
         <>
           {/* Desktop table */}
           <div className="hidden md:block bg-card rounded-lg border overflow-hidden">

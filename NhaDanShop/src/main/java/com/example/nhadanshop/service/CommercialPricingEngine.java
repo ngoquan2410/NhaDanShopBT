@@ -96,6 +96,26 @@ public final class CommercialPricingEngine {
             BigDecimal shippingDiscountVoucherRaw,
             BigDecimal vatPercentRaw
     ) {
+        return computeMerchandiseQuoteAllocation(
+                merchandiseSubtotal, manualRaw, promoOrNull, promoLines, billableRows,
+                voucherDiscountRaw, BigDecimal.ZERO, 0L, shippingFeeRaw,
+                shippingDiscountPromoRaw, shippingDiscountVoucherRaw, vatPercentRaw);
+    }
+
+    public static QuoteCommercialResult computeMerchandiseQuoteAllocation(
+            BigDecimal merchandiseSubtotal,
+            BigDecimal manualRaw,
+            Promotion promoOrNull,
+            List<PromoPricingLine> promoLines,
+            List<BillableAllocationRow> billableRows,
+            BigDecimal voucherDiscountRaw,
+            BigDecimal loyaltyDiscountRaw,
+            Long loyaltyRedeemedPointsRaw,
+            BigDecimal shippingFeeRaw,
+            BigDecimal shippingDiscountPromoRaw,
+            BigDecimal shippingDiscountVoucherRaw,
+            BigDecimal vatPercentRaw
+    ) {
         if (billableRows.isEmpty()) {
             throw new IllegalArgumentException("Quote must have billable lines");
         }
@@ -117,6 +137,13 @@ public final class CommercialPricingEngine {
             vd = afterMp.max(BigDecimal.ZERO);
         }
 
+        BigDecimal ld = nz(loyaltyDiscountRaw).max(BigDecimal.ZERO);
+        BigDecimal afterMpv = afterMp.subtract(vd).max(BigDecimal.ZERO);
+        if (ld.compareTo(afterMpv) > 0) {
+            ld = afterMpv;
+        }
+        Long loyaltyRedeemedPoints = loyaltyRedeemedPointsRaw != null && loyaltyRedeemedPointsRaw > 0 ? loyaltyRedeemedPointsRaw : 0L;
+
         List<BigDecimal> bases = new ArrayList<>();
         for (BillableAllocationRow row : billableRows) {
             bases.add(nz(row.lineNetBeforeInvoiceDiscount()));
@@ -130,6 +157,7 @@ public final class CommercialPricingEngine {
         List<BigDecimal> am = CommercialDiscountAllocationService.allocate(md, bases, allMask);
         List<BigDecimal> ap = CommercialDiscountAllocationService.allocate(pd, bases, promoMask);
         List<BigDecimal> av = CommercialDiscountAllocationService.allocate(vd, bases, allMask);
+        List<BigDecimal> al = CommercialDiscountAllocationService.allocate(ld, bases, allMask);
 
         BigDecimal itemNet = BigDecimal.ZERO;
         List<BigDecimal> netRevenues = new ArrayList<>();
@@ -138,7 +166,8 @@ public final class CommercialPricingEngine {
             BigDecimal man = nz(am.get(i));
             BigDecimal pr = nz(ap.get(i));
             BigDecimal vo = nz(av.get(i));
-            BigDecimal allo = man.add(pr).add(vo);
+            BigDecimal lo = nz(al.get(i));
+            BigDecimal allo = man.add(pr).add(vo).add(lo);
             BigDecimal netRev = base.subtract(allo);
             if (netRev.compareTo(BigDecimal.ZERO) < 0) {
                 netRev = BigDecimal.ZERO;
@@ -183,7 +212,8 @@ public final class CommercialPricingEngine {
             BigDecimal man = nz(am.get(i));
             BigDecimal pr = nz(ap.get(i));
             BigDecimal vo = nz(av.get(i));
-            BigDecimal allo = man.add(pr).add(vo);
+            BigDecimal lo = nz(al.get(i));
+            BigDecimal allo = man.add(pr).add(vo).add(lo);
             BigDecimal nr = netRevenues.get(i);
             BigDecimal lvat = i < vatPerLine.size() ? nz(vatPerLine.get(i)) : BigDecimal.ZERO;
             lineSnapshots.add(new CommercialLineSnapshotDto(
@@ -193,6 +223,7 @@ public final class CommercialPricingEngine {
                     man,
                     pr,
                     vo,
+                    lo,
                     allo,
                     nr,
                     nr,
@@ -215,7 +246,9 @@ public final class CommercialPricingEngine {
                 total,
                 itemNet,
                 shippingNet,
-                COMMERCIAL_SNAPSHOT_VERSION
+                COMMERCIAL_SNAPSHOT_VERSION,
+                ld,
+                loyaltyRedeemedPoints
         );
         return new QuoteCommercialResult(breakdown, lineSnapshots);
     }

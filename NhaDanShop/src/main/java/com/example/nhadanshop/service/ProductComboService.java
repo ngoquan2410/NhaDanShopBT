@@ -280,6 +280,7 @@ public class ProductComboService {
                 combo.getId(), combo.getCode(), combo.getName(),
                 combo.getDescription(),
                 sell, combo.getActive(), stockQty,
+                comboVariant != null ? comboVariant.getId() : null,
                 combo.getImageUrl(),
                 combo.getCategory() != null ? combo.getCategory().getId() : null,
                 combo.getCategory() != null ? combo.getCategory().getName() : null,

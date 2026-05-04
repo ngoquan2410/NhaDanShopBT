@@ -17,6 +17,15 @@ export default defineConfig(({ mode }) => ({
       "/actuator": "http://localhost:8080",
     },
   },
+  /** Matches dev proxy so `vite preview` + Selenium in CI/local mirror full-stack routing. */
+  preview: {
+    host: "127.0.0.1",
+    port: 5173,
+    proxy: {
+      "/api": "http://127.0.0.1:8080",
+      "/actuator": "http://127.0.0.1:8080",
+    },
+  },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {
     alias: {

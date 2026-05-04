@@ -1,6 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { products } from "@/lib/mock-data";
 import { formatVND } from "@/lib/format";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { QuantityStepper } from "@/components/shared/QuantityStepper";
@@ -20,6 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { cartActions } from "@/lib/cart";
+import { getPublicProduct, listPublicProducts, type StorefrontProduct } from "@/services/catalog/publicCatalog";
 
 function getStockStatus(stock: number, minStock: number) {
   if (stock === 0) return "out-of-stock" as const;
@@ -30,11 +30,26 @@ function getStockStatus(stock: number, minStock: number) {
 export default function StorefrontProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const product = useMemo(() => products.find((p) => p.id === id), [id]);
-  const [variantId, setVariantId] = useState<string | undefined>(
-    product?.variants.find((v) => v.isDefault)?.id ?? product?.variants[0]?.id
-  );
+  const [product, setProduct] = useState<StorefrontProduct | null | undefined>(undefined);
+  const [allProducts, setAllProducts] = useState<StorefrontProduct[]>([]);
+  const [variantId, setVariantId] = useState<string | undefined>();
   const [qty, setQty] = useState(1);
+
+  useEffect(() => {
+    let alive = true;
+    if (!id) return;
+    Promise.all([getPublicProduct(id), listPublicProducts()]).then(([p, all]) => {
+      if (!alive) return;
+      setProduct(p);
+      setAllProducts(all);
+      setVariantId(p?.variants.find((v) => v.isDefault)?.id ?? p?.variants[0]?.id);
+    }).catch(() => alive && setProduct(null));
+    return () => { alive = false; };
+  }, [id]);
+
+  if (product === undefined) {
+    return <div className="max-w-4xl mx-auto px-4 py-12 text-sm text-muted-foreground">Đang tải sản phẩm backend...</div>;
+  }
 
   if (!product) {
     return (
@@ -58,7 +73,7 @@ export default function StorefrontProductDetail() {
 
   const variant = product.variants.find((v) => v.id === variantId) || product.variants[0];
   const stockStatus = getStockStatus(variant.stock, variant.minStock);
-  const related = products
+  const related = allProducts
     .filter((p) => p.id !== product.id && p.categoryId === product.categoryId && p.active)
     .slice(0, 5);
 
@@ -83,6 +98,8 @@ export default function StorefrontProductDetail() {
       qty,
       unitPrice: variant.sellPrice,
       stock: variant.stock,
+      catalogSource: "backend",
+      schemaVersion: 2,
     });
     toast.success(`Đã thêm ${qty} ${variant.sellUnit} ${product.name} vào giỏ`);
   };

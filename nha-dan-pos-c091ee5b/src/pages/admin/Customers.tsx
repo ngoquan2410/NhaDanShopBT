@@ -9,20 +9,22 @@ import { RowActions } from "@/components/shared/RowActions";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { SortableTh } from "@/components/shared/SortableTh";
 import { useTableControls } from "@/hooks/useTableControls";
-import { useStore, customerActions } from "@/lib/store";
+import { useService } from "@/hooks/useService";
+import { adminCustomers } from "@/services";
 import { formatVND } from "@/lib/format";
 import { Plus, Users, Pencil, Trash2, Power, PowerOff } from "lucide-react";
 import { toast } from "sonner";
-import { Customer } from "@/lib/mock-data";
+import type { Customer } from "@/lib/mock-data";
 
 export default function AdminCustomers() {
-  const { customers } = useStore();
   const initialQ = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('q') ?? '' : '';
   const [search, setSearch] = useState(initialQ);
   const [filterGroup, setFilterGroup] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [deleting, setDeleting] = useState<Customer | null>(null);
+  const { data, loading, error, reload } = useService(() => adminCustomers.list(search), [search]);
+  const customers = data ?? [];
 
   const filtered = useMemo(() => customers.filter(c => {
     if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !c.phone.includes(search) && !c.code.toLowerCase().includes(search.toLowerCase())) return false;
@@ -67,9 +69,12 @@ export default function AdminCustomers() {
         </>}
       />
 
-      {filtered.length === 0 ? (
+      {loading && <p className="text-sm text-muted-foreground">Đang tải khách hàng từ backend...</p>}
+      {error && <p className="text-sm text-danger">Không tải được khách hàng: {error.message}</p>}
+
+      {!loading && filtered.length === 0 ? (
         <EmptyState icon={Users} title="Không tìm thấy khách hàng" description="Thử thay đổi bộ lọc hoặc thêm mới" />
-      ) : (
+      ) : !loading && (
         <>
           <div className="hidden md:block bg-card rounded-lg border overflow-hidden">
             <table className="w-full text-sm">
@@ -112,8 +117,9 @@ export default function AdminCustomers() {
                               label: c.active ? "Ngừng hoạt động" : "Kích hoạt lại",
                               icon: c.active ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />,
                               onClick: () => {
-                                customerActions.update(c.id, { active: !c.active });
-                                toast.success(c.active ? "Đã ngừng hoạt động" : "Đã kích hoạt lại");
+                                adminCustomers.save({ ...c, active: !c.active })
+                                  .then(() => { toast.success(c.active ? "Đã ngừng hoạt động" : "Đã kích hoạt lại"); reload(); })
+                                  .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể đổi trạng thái"));
                               },
                             },
                             { separatorBefore: true, label: "Xóa", icon: <Trash2 className="h-3.5 w-3.5" />, danger: true, onClick: () => setDeleting(c) },
@@ -151,11 +157,22 @@ export default function AdminCustomers() {
         </>
       )}
 
-      <CustomerFormDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} customer={editing} />
+      <CustomerFormDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        customer={editing}
+        onSave={async (input) => { await adminCustomers.save(input); reload(); }}
+      />
       <ConfirmDialog
         open={!!deleting}
         onClose={() => setDeleting(null)}
-        onConfirm={() => { if (deleting) { customerActions.remove(deleting.id); toast.success("Đã xóa khách hàng"); } }}
+        onConfirm={() => {
+          if (deleting) {
+            adminCustomers.remove(deleting.id)
+              .then(() => { toast.success("Đã xóa khách hàng"); reload(); })
+              .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể xóa khách hàng"));
+          }
+        }}
         title="Xóa khách hàng?"
         description={`Bạn chắc chắn muốn xóa "${deleting?.name}"? Lịch sử đơn hàng sẽ vẫn được giữ lại.`}
         variant="danger"

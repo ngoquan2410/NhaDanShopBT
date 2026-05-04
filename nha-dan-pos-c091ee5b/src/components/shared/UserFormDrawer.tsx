@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { FormDrawer, Field } from "./FormDrawer";
-import { userActions } from "@/lib/store";
 import type { UserAccount } from "@/lib/mock-data";
 import { toast } from "sonner";
 import { validateRequired } from "@/lib/validation";
@@ -10,6 +9,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   user?: UserAccount | null;
+  onSave: (input: Partial<UserAccount> & Pick<UserAccount, "fullName" | "role"> & { password?: string }) => Promise<void>;
 }
 
 const inputCls = "w-full h-9 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60";
@@ -24,13 +24,13 @@ function validateUsername(v: string): string | null {
 
 export function UserFormDrawer({ open, onClose, user }: Props) {
   const [form, setForm] = useState({
-    username: "", fullName: "", role: "staff" as UserAccount["role"], active: true, totpEnabled: false,
+    username: "", fullName: "", role: "staff" as UserAccount["role"], active: true, totpEnabled: false, password: "",
   });
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    if (user) setForm({ username: user.username, fullName: user.fullName, role: user.role, active: user.active, totpEnabled: user.totpEnabled });
-    else setForm({ username: "", fullName: "", role: "staff", active: true, totpEnabled: false });
+    if (user) setForm({ username: user.username, fullName: user.fullName, role: user.role, active: user.active, totpEnabled: user.totpEnabled, password: "" });
+    else setForm({ username: "", fullName: "", role: "staff", active: true, totpEnabled: false, password: "" });
     setTouched({});
   }, [user, open]);
 
@@ -42,17 +42,16 @@ export function UserFormDrawer({ open, onClose, user }: Props) {
   const isValid = !errors.fullName && !errors.username;
   const showErr = (k: keyof typeof errors) => touched[k] && errors[k];
 
-  const submit = () => {
+  const submit = async () => {
     setTouched({ fullName: true, username: true });
     if (!isValid) { toast.error("Vui lòng kiểm tra lại thông tin"); return; }
-    if (user) {
-      userActions.update(user.id, form);
-      toast.success("Đã cập nhật người dùng");
-    } else {
-      userActions.create(form);
-      toast.success("Đã thêm người dùng");
+    try {
+      await onSave({ ...form, id: user?.id });
+      toast.success(user ? "Đã cập nhật người dùng" : "Đã thêm người dùng");
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không thể lưu người dùng");
     }
-    onClose();
   };
 
   return (
@@ -81,7 +80,7 @@ export function UserFormDrawer({ open, onClose, user }: Props) {
           {showErr('username') && <p className="text-[11px] text-danger mt-1">{errors.username}</p>}
         </Field>
         {!user && <Field label="Mật khẩu tạm" hint="Người dùng sẽ đổi mật khẩu lần đăng nhập đầu">
-          <input type="password" placeholder="••••••" className={inputCls} />
+          <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="••••••" className={inputCls} />
         </Field>}
         <Field label="Vai trò">
           <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value as UserAccount["role"] })} className={inputCls}>

@@ -2,17 +2,39 @@ import { useMemo, useState, useRef, useEffect } from "react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatCard } from "@/components/shared/StatCard";
 import { DateInput } from "@/components/shared/DateInput";
-import { profitData, dashboardStats, revenueByProduct } from "@/lib/mock-data";
-import { useStore } from "@/lib/store";
+import { useService } from "@/hooks/useService";
+import { adminReports, products as productService } from "@/services";
 import { formatVND, formatPercent, formatNumber } from "@/lib/format";
 import { DollarSign, TrendingUp, Download, Receipt, Search, X, Check } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
+type BeProductRow = Record<string, unknown>;
+
+function numFromRow(row: BeProductRow | undefined, keys: string[]): number | null {
+  if (!row) return null;
+  for (const k of keys) {
+    const v = row[k];
+    if (v != null && Number.isFinite(Number(v))) return Number(v);
+  }
+  return null;
+}
+
+function mapRowToMetrics(row: BeProductRow | undefined) {
+  if (!row) {
+    return { revenue: null as number | null, cost: null as number | null, profit: null as number | null, qty: null as number | null };
+  }
+  const revenue = numFromRow(row, ["merchandiseNetRevenue", "totalAmount", "revenue", "totalRevenue"]);
+  const cost = numFromRow(row, ["merchandiseCost", "cogs", "cost"]);
+  const profit = numFromRow(row, ["merchandiseNetProfit", "profit", "netProfit"]);
+  const qty = numFromRow(row, ["totalQty", "qty", "quantitySold", "quantity"]);
+  const profitResolved = profit != null ? profit : revenue != null && cost != null ? revenue - cost : null;
+  return { revenue, cost, profit: profitResolved, qty };
+}
+
 export default function AdminProfitReport() {
-  const { products } = useStore();
-  const [from, setFrom] = useState("2025-04-07");
-  const [to, setTo] = useState("2025-04-15");
+  const [from, setFrom] = useState("2026-04-01");
+  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
   const [selected, setSelected] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
@@ -26,49 +48,124 @@ export default function AdminProfitReport() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  // Build deterministic per-product profit rows from existing mock revenueByProduct
-  // so the multi-select filter visibly drives summary + table + chart.
-  const productProfitRows = useMemo(() => {
-    return products.map(p => {
-      const sample = revenueByProduct.find(r => r.name.toLowerCase().includes(p.name.toLowerCase()));
-      const revenue = sample?.revenue ?? Math.round(2000000 + p.id.charCodeAt(0) * 9000);
-      const qty = sample?.qty ?? Math.round(40 + (p.id.charCodeAt(0) % 7) * 25);
-      const cost = Math.round(revenue * 0.72);
-      return { id: p.id, name: p.name, revenue, cost, profit: revenue - cost, qty, margin: (revenue - cost) / revenue };
-    });
-  }, [products]);
+  const productIdsArg = selected.length > 0 ? selected : undefined;
+  const selectedKey = selected.length ? [...selected].sort().join(",") : "";
 
-  const filteredRows = useMemo(() => {
-    if (selected.length === 0) return productProfitRows;
-    return productProfitRows.filter(r => selected.includes(r.id));
-  }, [productProfitRows, selected]);
+  const { data: reportData, loading, error } = useService(async () => {
+    const [profitRows, productRowsRaw, productPage] = await Promise.all([
+      adminReports.profit(from, to, productIdsArg),
+      adminReports.revenueByProduct(from, to, "daily", productIdsArg),
+      productService.list({ page: 1, pageSize: 100 }),
+    ]);
+    return { profitRows, productRowsRaw, products: productPage.items };
+  }, [from, to, selectedKey]);
 
-  const totalRevenue = filteredRows.reduce((s, r) => s + r.revenue, 0);
-  const totalCost = filteredRows.reduce((s, r) => s + r.cost, 0);
-  const totalProfit = totalRevenue - totalCost;
-  const margin = totalRevenue > 0 ? totalProfit / totalRevenue : 0;
-  const totalQty = filteredRows.reduce((s, r) => s + r.qty, 0);
+  const products = reportData?.products ?? [];
+  const backendProductRows = (reportData?.productRowsRaw ?? []) as BeProductRow[];
+  const profitAgg = reportData?.profitRows?.[0];
+
   const isFiltered = selected.length > 0;
 
-  const pickerProducts = products.filter(p => !pickerSearch || p.name.toLowerCase().includes(pickerSearch.toLowerCase()));
-  const toggle = (id: string) => setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const headerRevenue = profitAgg?.revenue ?? 0;
+  const headerCost = profitAgg?.cost ?? 0;
+  const headerProfit = profitAgg?.profit ?? 0;
+  /** Backend trả profitMarginPct dạng 0–100 */
+  const headerMarginFraction =
+    profitAgg?.margin != null ? profitAgg.margin / 100 : headerRevenue > 0 ? headerProfit / headerRevenue : 0;
+
+  /** SL bán (đơn vị dòng hàng) — từ báo cáo doanh thu theo SP backend, không suy diễn. */
+  const totalSoldQty = useMemo(() => {
+    if (!isFiltered) {
+      return backendProductRows.reduce((s, r) => s + (numFromRow(r, ["totalQty", "qty", "quantitySold", "quantity"]) ?? 0), 0);
+    }
+    return selected.reduce((s, id) => {
+      const row = backendProductRows.find((x) => String(x.productId ?? x.id) === id);
+      const q = numFromRow(row, ["totalQty", "qty", "quantitySold", "quantity"]);
+      return s + (q ?? 0);
+    }, 0);
+  }, [backendProductRows, isFiltered, selected]);
+
+  const chartRows = useMemo(() => {
+    const list = backendProductRows.slice(0, 8);
+    return list.map((row) => {
+      const { revenue, cost, profit, qty } = mapRowToMetrics(row);
+      const name = String(row.productName ?? row.name ?? "—");
+      const rev = revenue ?? 0;
+      const prof = profit ?? (revenue != null && cost != null ? revenue - cost : 0);
+      const margin = rev > 0 ? prof / rev : 0;
+      return { id: String(row.productId ?? row.id ?? name), name, revenue: rev, profit: prof, margin, qty };
+    });
+  }, [backendProductRows]);
+
+  const filteredDetailRows = useMemo(() => {
+    if (!isFiltered) return [];
+    return selected.map((id) => {
+      const p = products.find((x) => x.id === id);
+      const row = backendProductRows.find((x) => String(x.productId ?? x.id) === id);
+      const { revenue, cost, profit, qty } = mapRowToMetrics(row);
+      const missing = !row || (revenue == null && profit == null);
+      const margin = revenue != null && revenue > 0 && profit != null ? profit / revenue : null;
+      return {
+        id,
+        name: p?.name ?? String(row?.productName ?? id),
+        revenue,
+        cost,
+        profit,
+        qty,
+        margin,
+        missing,
+      };
+    });
+  }, [selected, products, backendProductRows, isFiltered]);
+
+  const footerFiltered = useMemo(() => {
+    const withData = filteredDetailRows.filter((r) => !r.missing && r.revenue != null);
+    const rev = withData.reduce((s, r) => s + (r.revenue ?? 0), 0);
+    const cst = withData.reduce((s, r) => s + (r.cost ?? 0), 0);
+    const prof = withData.reduce((s, r) => s + (r.profit ?? 0), 0);
+    const q = withData.reduce((s, r) => s + (r.qty ?? 0), 0);
+    return { rev, cst, prof, q, margin: rev > 0 ? prof / rev : 0 };
+  }, [filteredDetailRows]);
+
+  const money = (n: number | null | undefined) => (n == null || Number.isNaN(n) ? "—" : formatVND(n));
+  const pct = (n: number | null | undefined) => (n == null || Number.isNaN(n) ? "—" : formatPercent(n));
+
+  const pickerProducts = products.filter((p) => !pickerSearch || p.name.toLowerCase().includes(pickerSearch.toLowerCase()));
+  const toggle = (id: string) =>
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   return (
     <div className="space-y-4 admin-dense">
       <PageHeader
         title="Lợi nhuận"
-        description={isFiltered ? `Đang phân tích ${selected.length} sản phẩm` : "Báo cáo lợi nhuận kinh doanh"}
-        actions={<button onClick={() => toast.success("Đã xuất báo cáo Excel")} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted"><Download className="h-3.5 w-3.5" /> Xuất Excel</button>}
+        description={isFiltered ? `Đang phân tích ${selected.length} sản phẩm (theo dòng hàng HĐ)` : "Báo cáo lợi nhuận kinh doanh"}
+        actions={
+          <button
+            type="button"
+            onClick={() => toast.success("Đã xuất báo cáo Excel")}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted"
+          >
+            <Download className="h-3.5 w-3.5" /> Xuất Excel
+          </button>
+        }
       />
+      {loading && <p className="text-sm text-muted-foreground">Đang tải báo cáo lợi nhuận từ backend...</p>}
+      {error && <p className="text-sm text-danger">Không tải được báo cáo lợi nhuận: {error.message}</p>}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard icon={TrendingUp} title="Doanh thu" value={formatVND(totalRevenue)} variant="primary" />
-        <StatCard icon={DollarSign} title="Giá vốn" value={formatVND(totalCost)} />
-        <StatCard icon={DollarSign} title="Lợi nhuận" value={formatVND(totalProfit)} variant="success" trend={{ value: formatPercent(margin), positive: totalProfit > 0 }} />
-        <StatCard icon={Receipt} title="SL bán" value={formatNumber(totalQty)} />
+        <StatCard icon={TrendingUp} title="Doanh thu" value={formatVND(headerRevenue)} variant="primary" valueTestId="admin-profit-stat-revenue" />
+        <StatCard icon={DollarSign} title="Giá vốn" value={formatVND(headerCost)} valueTestId="admin-profit-stat-cost" />
+        <StatCard
+          icon={DollarSign}
+          title="Lợi nhuận"
+          value={formatVND(headerProfit)}
+          variant="success"
+          valueTestId="admin-profit-stat-profit"
+          trend={{ value: formatPercent(headerMarginFraction), positive: headerProfit > 0 }}
+        />
+        <StatCard icon={Receipt} title="SL bán (dòng SP)" value={formatNumber(totalSoldQty)} />
       </div>
 
-      {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
         <DateInput value={from} onChange={setFrom} />
         <span className="text-xs text-muted-foreground">—</span>
@@ -76,8 +173,12 @@ export default function AdminProfitReport() {
 
         <div className="relative ml-auto" ref={pickerRef}>
           <button
-            onClick={() => setPickerOpen(o => !o)}
-            className={cn("flex items-center gap-1.5 h-8 px-3 text-xs font-medium border rounded-md hover:bg-muted", isFiltered && "border-primary text-primary bg-primary-soft")}
+            type="button"
+            onClick={() => setPickerOpen((o) => !o)}
+            className={cn(
+              "flex items-center gap-1.5 h-8 px-3 text-xs font-medium border rounded-md hover:bg-muted",
+              isFiltered && "border-primary text-primary bg-primary-soft",
+            )}
           >
             <Search className="h-3.5 w-3.5" />
             {isFiltered ? `${selected.length} sản phẩm đã chọn` : "Lọc theo sản phẩm"}
@@ -88,7 +189,9 @@ export default function AdminProfitReport() {
                 <div className="relative">
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                   <input
-                    autoFocus value={pickerSearch} onChange={e => setPickerSearch(e.target.value)}
+                    autoFocus
+                    value={pickerSearch}
+                    onChange={(e) => setPickerSearch(e.target.value)}
                     placeholder="Tìm sản phẩm..."
                     className="w-full h-8 pl-8 pr-2 text-xs border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                   />
@@ -97,22 +200,38 @@ export default function AdminProfitReport() {
               <div className="max-h-64 overflow-y-auto scrollbar-thin">
                 {pickerProducts.length === 0 ? (
                   <p className="p-4 text-center text-xs text-muted-foreground">Không tìm thấy</p>
-                ) : pickerProducts.map(p => {
-                  const checked = selected.includes(p.id);
-                  return (
-                    <button key={p.id} onClick={() => toggle(p.id)} className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted text-left">
-                      <span className={cn("h-4 w-4 rounded border flex items-center justify-center shrink-0", checked ? "bg-primary border-primary" : "border-input")}>
-                        {checked && <Check className="h-3 w-3 text-primary-foreground" />}
-                      </span>
-                      <span className="flex-1 truncate">{p.name}</span>
-                      <span className="text-[10px] text-muted-foreground font-mono">{p.code}</span>
-                    </button>
-                  );
-                })}
+                ) : (
+                  pickerProducts.map((p) => {
+                    const checked = selected.includes(p.id);
+                    return (
+                      <button
+                        type="button"
+                        key={p.id}
+                        onClick={() => toggle(p.id)}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted text-left"
+                      >
+                        <span
+                          className={cn(
+                            "h-4 w-4 rounded border flex items-center justify-center shrink-0",
+                            checked ? "bg-primary border-primary" : "border-input",
+                          )}
+                        >
+                          {checked && <Check className="h-3 w-3 text-primary-foreground" />}
+                        </span>
+                        <span className="flex-1 truncate">{p.name}</span>
+                        <span className="text-[10px] text-muted-foreground font-mono">{p.code}</span>
+                      </button>
+                    );
+                  })
+                )}
               </div>
               <div className="flex items-center justify-between gap-2 p-2 border-t bg-muted/30">
-                <button onClick={() => setSelected([])} className="text-[11px] text-muted-foreground hover:text-foreground">Xóa lọc</button>
-                <button onClick={() => setPickerOpen(false)} className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded-md">Xong</button>
+                <button type="button" onClick={() => setSelected([])} className="text-[11px] text-muted-foreground hover:text-foreground">
+                  Xóa lọc
+                </button>
+                <button type="button" onClick={() => setPickerOpen(false)} className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded-md">
+                  Xong
+                </button>
               </div>
             </div>
           )}
@@ -121,54 +240,84 @@ export default function AdminProfitReport() {
 
       {isFiltered && (
         <div className="flex flex-wrap gap-1.5">
-          {selected.map(id => {
-            const p = products.find(x => x.id === id);
+          {selected.map((id) => {
+            const p = products.find((x) => x.id === id);
             if (!p) return null;
             return (
               <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] bg-primary-soft text-primary rounded-full">
                 {p.name}
-                <button onClick={() => toggle(id)} className="hover:text-foreground"><X className="h-3 w-3" /></button>
+                <button type="button" onClick={() => toggle(id)} className="hover:text-foreground">
+                  <X className="h-3 w-3" />
+                </button>
               </span>
             );
           })}
         </div>
       )}
 
-      {/* Quick stats — only show period summary when no filter applied */}
       {!isFiltered && (
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="bg-card rounded-lg border p-4">
-            <h3 className="font-semibold text-sm mb-1">Tuần này</h3>
+            <h3 className="font-semibold text-sm mb-1">Kỳ đang chọn</h3>
             <div className="space-y-2 text-sm">
-              <div className="flex justify-between"><span className="text-muted-foreground">Doanh thu</span><span className="font-medium">{formatVND(dashboardStats.revenueThisWeek)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Lợi nhuận</span><span className="font-medium text-success">{formatVND(dashboardStats.profitThisWeek)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Biên lợi nhuận</span><span className="font-medium">{formatPercent(dashboardStats.profitThisWeek / dashboardStats.revenueThisWeek)}</span></div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Doanh thu</span>
+                <span className="font-medium">{formatVND(headerRevenue)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Lợi nhuận</span>
+                <span className="font-medium text-success">{formatVND(headerProfit)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Biên lợi nhuận</span>
+                <span className="font-medium">{formatPercent(headerMarginFraction)}</span>
+              </div>
             </div>
           </div>
           <div className="bg-card rounded-lg border p-4">
-            <h3 className="font-semibold text-sm mb-1">Tháng này</h3>
+            <h3 className="font-semibold text-sm mb-1">Nguồn dữ liệu</h3>
             <div className="space-y-2 text-sm">
-              <div className="flex justify-between"><span className="text-muted-foreground">Doanh thu</span><span className="font-medium">{formatVND(dashboardStats.revenueThisMonth)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Lợi nhuận</span><span className="font-medium text-success">{formatVND(dashboardStats.profitThisMonth)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Biên lợi nhuận</span><span className="font-medium">{formatPercent(dashboardStats.profitThisMonth / dashboardStats.revenueThisMonth)}</span></div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Tổng hợp kỳ</span>
+                <span className="font-medium text-right">Dữ liệu máy chủ</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Chi tiết theo SP</span>
+                <span className="font-medium text-right">Dữ liệu máy chủ</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Sản phẩm (catalog)</span>
+                <span className="font-medium">{products.length}</span>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Chart: profit per product (bar) */}
       <div className="bg-card rounded-lg border p-4">
-        <h3 className="font-semibold text-sm mb-3">{isFiltered ? "Lợi nhuận theo sản phẩm đã chọn" : "Lợi nhuận theo sản phẩm"}</h3>
+        <h3 className="font-semibold text-sm mb-3">
+          {isFiltered ? "Lợi nhuận theo sản phẩm đã chọn" : "Lợi nhuận theo sản phẩm (top 8 backend)"}
+        </h3>
         <div className="space-y-2">
-          {filteredRows.slice(0, 8).map((r) => {
-            const maxRev = Math.max(...filteredRows.map(x => x.revenue), 1);
-            const revPct = (r.revenue / maxRev) * 100;
-            const profitPct = (r.profit / maxRev) * 100;
+          {(isFiltered ? filteredDetailRows.filter((r) => !r.missing) : chartRows).slice(0, 8).map((r) => {
+            const rev = r.revenue ?? 0;
+            const prof = r.profit ?? 0;
+            const marginFrac = r.margin != null ? r.margin : rev > 0 ? prof / rev : 0;
+            const maxRev = Math.max(
+              ...(isFiltered
+                ? filteredDetailRows.filter((x) => !x.missing).map((x) => x.revenue ?? 0)
+                : chartRows.map((x) => x.revenue)),
+              1,
+            );
+            const revPct = (rev / maxRev) * 100;
+            const profitPct = (prof / maxRev) * 100;
             return (
               <div key={r.id} className="space-y-1">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-medium truncate">{r.name}</span>
-                  <span className="text-success font-medium">{formatVND(r.profit)} · {formatPercent(r.margin)}</span>
+                  <span className="text-success font-medium">
+                    {money(prof)} · {formatPercent(marginFrac)}
+                  </span>
                 </div>
                 <div className="relative h-4 bg-muted rounded-full overflow-hidden">
                   <div className="absolute inset-y-0 left-0 bg-muted-foreground/30" style={{ width: `${revPct}%` }} />
@@ -180,9 +329,10 @@ export default function AdminProfitReport() {
         </div>
       </div>
 
-      {/* Detail table */}
       <div className="bg-card rounded-lg border overflow-hidden">
-        <div className="px-4 py-3 border-b"><h3 className="font-semibold text-sm">{isFiltered ? "Chi tiết sản phẩm đã chọn" : "Chi tiết theo kỳ"}</h3></div>
+        <div className="px-4 py-3 border-b">
+          <h3 className="font-semibold text-sm">{isFiltered ? "Chi tiết sản phẩm đã chọn" : "Tổng hợp kỳ"}</h3>
+        </div>
         {isFiltered ? (
           <table className="w-full text-sm">
             <thead>
@@ -196,25 +346,25 @@ export default function AdminProfitReport() {
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map((r) => (
+              {filteredDetailRows.map((r) => (
                 <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
                   <td className="px-3 py-2.5 font-medium">{r.name}</td>
-                  <td className="px-3 py-2.5 text-right">{formatNumber(r.qty)}</td>
-                  <td className="px-3 py-2.5 text-right">{formatVND(r.revenue)}</td>
-                  <td className="px-3 py-2.5 text-right text-muted-foreground">{formatVND(r.cost)}</td>
-                  <td className="px-3 py-2.5 text-right font-medium text-success">{formatVND(r.profit)}</td>
-                  <td className="px-3 py-2.5 text-right">{formatPercent(r.margin)}</td>
+                  <td className="px-3 py-2.5 text-right">{r.qty != null ? formatNumber(r.qty) : "—"}</td>
+                  <td className="px-3 py-2.5 text-right">{money(r.revenue)}</td>
+                  <td className="px-3 py-2.5 text-right text-muted-foreground">{money(r.cost)}</td>
+                  <td className="px-3 py-2.5 text-right font-medium text-success">{money(r.profit)}</td>
+                  <td className="px-3 py-2.5 text-right">{pct(r.margin)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr className="bg-muted/50 font-bold">
-                <td className="px-3 py-2">Tổng</td>
-                <td className="px-3 py-2 text-right">{formatNumber(totalQty)}</td>
-                <td className="px-3 py-2 text-right">{formatVND(totalRevenue)}</td>
-                <td className="px-3 py-2 text-right">{formatVND(totalCost)}</td>
-                <td className="px-3 py-2 text-right text-success">{formatVND(totalProfit)}</td>
-                <td className="px-3 py-2 text-right">{formatPercent(margin)}</td>
+                <td className="px-3 py-2">Tổng (hàng có dữ liệu)</td>
+                <td className="px-3 py-2 text-right">{formatNumber(footerFiltered.q)}</td>
+                <td className="px-3 py-2 text-right">{formatVND(footerFiltered.rev)}</td>
+                <td className="px-3 py-2 text-right">{formatVND(footerFiltered.cst)}</td>
+                <td className="px-3 py-2 text-right text-success">{formatVND(footerFiltered.prof)}</td>
+                <td className="px-3 py-2 text-right">{formatPercent(footerFiltered.margin)}</td>
               </tr>
             </tfoot>
           </table>
@@ -231,14 +381,14 @@ export default function AdminProfitReport() {
               </tr>
             </thead>
             <tbody>
-              {profitData.map((r, i) => (
+              {(reportData?.profitRows ?? []).map((row, i) => (
                 <tr key={i} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2.5 font-medium">{r.period}</td>
-                  <td className="px-3 py-2.5 text-right">{formatVND(r.revenue)}</td>
-                  <td className="px-3 py-2.5 text-right text-muted-foreground">{formatVND(r.cost)}</td>
-                  <td className="px-3 py-2.5 text-right font-medium text-success">{formatVND(r.profit)}</td>
-                  <td className="px-3 py-2.5 text-right">{formatPercent(r.margin)}</td>
-                  <td className="px-3 py-2.5 text-center">{r.invoiceCount}</td>
+                  <td className="px-3 py-2.5 font-medium">{row.period}</td>
+                  <td className="px-3 py-2.5 text-right">{formatVND(row.revenue)}</td>
+                  <td className="px-3 py-2.5 text-right text-muted-foreground">{formatVND(row.cost)}</td>
+                  <td className="px-3 py-2.5 text-right font-medium text-success">{formatVND(row.profit)}</td>
+                  <td className="px-3 py-2.5 text-right">{formatPercent((row.margin ?? 0) / 100)}</td>
+                  <td className="px-3 py-2.5 text-center">{row.invoiceCount}</td>
                 </tr>
               ))}
             </tbody>

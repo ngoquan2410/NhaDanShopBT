@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { FormDrawer, Field } from "./FormDrawer";
-import { customerActions } from "@/lib/store";
 import type { Customer } from "@/lib/mock-data";
 import { toast } from "sonner";
 import { validatePhone, validateEmail, validateRequired, normalizePhone } from "@/lib/validation";
@@ -10,6 +9,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   customer?: Customer | null;
+  onSave: (input: Partial<Customer> & Pick<Customer, "name" | "phone">) => Promise<void>;
 }
 
 const inputCls = "w-full h-9 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring";
@@ -35,18 +35,17 @@ export function CustomerFormDrawer({ open, onClose, customer }: Props) {
   const isValid = !errors.name && !errors.phone && !errors.email;
   const showErr = (k: keyof typeof errors) => touched[k] && errors[k];
 
-  const submit = () => {
+  const submit = async () => {
     setTouched({ name: true, phone: true, email: true });
     if (!isValid) { toast.error("Vui lòng kiểm tra lại thông tin"); return; }
-    const payload = { ...form, phone: normalizePhone(form.phone), email: form.email.trim() || undefined };
-    if (customer) {
-      customerActions.update(customer.id, payload);
-      toast.success("Đã cập nhật khách hàng");
-    } else {
-      customerActions.create(payload);
-      toast.success("Đã thêm khách hàng");
+    try {
+      const payload = { ...form, id: customer?.id, code: customer?.code, phone: normalizePhone(form.phone), email: form.email.trim() || undefined };
+      await onSave(payload);
+      toast.success(customer ? "Đã cập nhật khách hàng" : "Đã thêm khách hàng");
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không thể lưu khách hàng");
     }
-    onClose();
   };
 
   return (

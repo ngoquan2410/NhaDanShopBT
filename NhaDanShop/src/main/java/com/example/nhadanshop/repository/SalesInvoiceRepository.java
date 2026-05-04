@@ -50,6 +50,20 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
             """)
     Page<Long> findInvoiceIdsForList(Pageable pageable);
 
+    @Query("""
+            SELECT i.id
+            FROM SalesInvoice i
+            WHERE (:invoiceStatus IS NULL OR i.status = :invoiceStatus)
+              AND (:q IS NULL OR :q = ''
+                   OR LOWER(i.invoiceNo) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(COALESCE(i.customerName, '')) LIKE LOWER(CONCAT('%', :q, '%')))
+            ORDER BY i.invoiceDate DESC, i.id DESC
+            """)
+    Page<Long> findInvoiceIdsForListFiltered(
+            @Param("invoiceStatus") SalesInvoice.Status invoiceStatus,
+            @Param("q") String q,
+            Pageable pageable);
+
     @EntityGraph(type = EntityGraphType.FETCH, attributePaths = {"createdBy", "customer", "items", "items.product", "items.variant"})
     @Query("""
             SELECT DISTINCT i
@@ -245,6 +259,116 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
     List<Object[]> dailyRevenue(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
+
+    /** Merchandise net revenue Σ per calendar day filtered by sold product IDs (persisted lines). */
+    @Query("""
+            SELECT CAST(item.invoice.invoiceDate AS date),
+                   COALESCE(SUM(COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)), 0),
+                   COUNT(DISTINCT item.invoice.id),
+                   COALESCE(SUM(item.quantity), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
+              AND item.product.id IN :productIds
+            GROUP BY CAST(item.invoice.invoiceDate AS date)
+            ORDER BY CAST(item.invoice.invoiceDate AS date)
+            """)
+    List<Object[]> dailyMerchandiseStatsByProducts(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("productIds") Collection<Long> productIds);
+
+    /** Same aggregates as {@link #revenueByProduct} restricted to listed products. */
+    @Query("""
+            SELECT item.product.id,
+                   item.product.code,
+                   item.product.name,
+                   item.product.category.name,
+                   COALESCE(item.variant.sellUnit, 'cai'),
+                   COALESCE(SUM(item.quantity), 0),
+                   COALESCE(SUM(COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)), 0),
+                   COALESCE(SUM(COALESCE(item.allocatedMerchandiseDiscount, 0)), 0),
+                   COALESCE(SUM(item.quantity * item.unitCostSnapshot), 0),
+                   COALESCE(SUM(
+                       COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)
+                       - (item.quantity * item.unitCostSnapshot)
+                   ), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
+              AND item.product.id IN :productIds
+            GROUP BY item.product.id, item.product.code, item.product.name,
+                     item.product.category.name, item.variant.sellUnit
+            ORDER BY COALESCE(SUM(COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)), 0) DESC
+            """)
+    List<Object[]> revenueByProductForProductIds(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("productIds") Collection<Long> productIds);
+
+    @Query("""
+            SELECT COALESCE(SUM(COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
+              AND item.product.id IN :productIds
+            """)
+    BigDecimal sumLineNetRevenueBetweenForProductIds(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("productIds") Collection<Long> productIds);
+
+    @Query("""
+            SELECT COALESCE(SUM(item.quantity * item.unitCostSnapshot), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
+              AND item.product.id IN :productIds
+            """)
+    BigDecimal sumCostBetweenForProductIds(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("productIds") Collection<Long> productIds);
+
+    @Query("""
+            SELECT COALESCE(SUM(
+                COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)
+                - (item.quantity * item.unitCostSnapshot)
+            ), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
+              AND item.product.id IN :productIds
+            """)
+    BigDecimal sumProfitBetweenForProductIds(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("productIds") Collection<Long> productIds);
+
+    @Query("""
+            SELECT COUNT(DISTINCT item.invoice.id)
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
+              AND item.product.id IN :productIds
+            """)
+    long countDistinctInvoicesBetweenForProductIds(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("productIds") Collection<Long> productIds);
+
+    @Query("""
+            SELECT DISTINCT item.invoice.pricingBreakdownSnapshotJson
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
+              AND item.invoice.pricingBreakdownSnapshotJson IS NOT NULL
+              AND item.product.id IN :productIds
+            """)
+    List<String> findDistinctPricingSnapshotsBetweenForProductIds(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("productIds") Collection<Long> productIds);
 
     Page<SalesInvoice> findByCustomerIdOrderByInvoiceDateDesc(Long customerId, Pageable pageable);
 

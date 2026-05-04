@@ -209,9 +209,13 @@ public class ProductionOrderService {
             LocalDate dateTo) {
         String q = StringUtils.hasText(query) ? query.trim() : null;
         String st = StringUtils.hasText(status) ? status.trim() : null;
-        LocalDateTime fromDt = dateFrom != null ? dateFrom.atStartOfDay() : null;
-        LocalDateTime toDt = dateTo != null ? dateTo.atTime(LocalTime.MAX) : null;
-        return orderRepo.searchOrders(st, recipeId, variantId, fromDt, toDt, q, pg)
+        LocalDateTime fromDt = dateFrom != null ? dateFrom.atStartOfDay() : LocalDateTime.of(2000, 1, 1, 0, 0);
+        LocalDateTime toDt = dateTo != null ? dateTo.atTime(LocalTime.MAX) : LocalDateTime.of(2100, 12, 31, 23, 59, 59);
+        if (q == null) {
+            return orderRepo.searchOrdersWithoutText(st, recipeId, variantId, fromDt, toDt, pg)
+                    .map(o -> mapOrder(o, false));
+        }
+        return orderRepo.searchOrdersWithText(st, recipeId, variantId, fromDt, toDt, q, pg)
                 .map(o -> mapOrder(o, false));
     }
 

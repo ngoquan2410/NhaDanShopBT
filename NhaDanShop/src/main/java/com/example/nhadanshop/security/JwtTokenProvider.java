@@ -159,7 +159,7 @@ public class JwtTokenProvider {
         return jwtProps.getAccessTokenExpiryMinutes() * 60;
     }
 
-    public long getRefreshTokenExpiryDays() {
-        return jwtProps.getRefreshTokenExpiryDays();
+    public long getRefreshTokenExpiryMinutes() {
+        return jwtProps.getRefreshTokenExpiryMinutes();
     }
 }

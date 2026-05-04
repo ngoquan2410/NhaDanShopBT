@@ -3,75 +3,39 @@ import type {
   GoodsReceiptListParams,
   GoodsReceiptService,
 } from "@/services/goodsReceipts/GoodsReceiptService";
-import { getAdminSession } from "@/services/auth/adminApi";
-import { LocalGoodsReceiptAdapter } from "@/services/adapters/local/LocalGoodsReceiptAdapter";
 import { BackendGoodsReceiptAdapter } from "@/services/adapters/backend/BackendGoodsReceiptAdapter";
 import type { GoodsReceipt, GoodsReceiptLine, ID, PagedResult } from "@/services/types";
 
 /**
- * When an admin session exists, use backend goods receipts. Otherwise fall back
- * to local mock data (avoids admin login prompts for storefront or logged-out
- * local preview), mirroring {@link HybridInventoryAdapter}.
+ * Production goods receipt adapter. Backend is the only active admin source of
+ * truth; draft/confirm are intentionally unsupported by the backend model.
  */
 export class HybridGoodsReceiptAdapter implements GoodsReceiptService {
   constructor(
     private readonly backend: BackendGoodsReceiptAdapter = new BackendGoodsReceiptAdapter(),
-    private readonly local: LocalGoodsReceiptAdapter = new LocalGoodsReceiptAdapter(),
   ) {}
 
-  private hasSession() {
-    return Boolean(getAdminSession()?.accessToken);
-  }
-
   async list(params?: GoodsReceiptListParams): Promise<PagedResult<GoodsReceipt>> {
-    if (this.hasSession()) {
-      try {
-        return await this.backend.list(params);
-      } catch {
-        // fall back
-      }
-    }
-    return this.local.list(params);
+    return this.backend.list(params);
   }
 
   async get(id: ID): Promise<GoodsReceipt | null> {
-    if (this.hasSession()) {
-      try {
-        return await this.backend.get(id);
-      } catch {
-        /* */
-      }
-    }
-    return this.local.get(id);
+    return this.backend.get(id);
   }
 
   async getLines(id: ID): Promise<GoodsReceiptLine[]> {
-    if (this.hasSession()) {
-      try {
-        return await this.backend.getLines(id);
-      } catch {
-        /* */
-      }
-    }
-    return this.local.getLines(id);
+    return this.backend.getLines(id);
   }
 
   async createDraft(input: CreateGoodsReceiptInput): Promise<GoodsReceipt> {
-    return this.local.createDraft(input);
+    return this.backend.createDraft(input);
   }
 
   async confirm(id: ID): Promise<GoodsReceipt> {
-    return this.local.confirm(id);
+    return this.backend.confirm(id);
   }
 
   async remove(id: ID): Promise<void> {
-    if (this.hasSession()) {
-      try {
-        return await this.backend.remove(id);
-      } catch (e) {
-        throw e;
-      }
-    }
-    return this.local.remove(id);
+    return this.backend.remove(id);
   }
 }

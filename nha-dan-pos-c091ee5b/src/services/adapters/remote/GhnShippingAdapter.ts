@@ -1,30 +1,25 @@
 import type { ShippingService } from "@/services/shipping/ShippingService";
-import type { StoreSettingsService } from "@/services/storeSettings/StoreSettingsService";
 import type {
   ShippingConfig,
   ShippingQuote,
   ShippingQuoteInput,
 } from "@/services/types";
-import { LocalShippingAdapter } from "../local/LocalShippingAdapter";
 
 /**
- * Backend-backed shipping adapter.
- * - `quote()` now calls our backend only.
- * - `getConfig()` / `saveConfig()` remain local for the transitional admin page.
+ * Backend-backed shipping quote via POST /api/shipping/quote.
+ * Admin zone/parcel config is {@link BackendShippingConfigAdapter} (composed in HybridShippingAdapter).
  */
 export class GhnShippingAdapter implements ShippingService {
-  private readonly local = new LocalShippingAdapter();
-
-  constructor(_storeSettings?: StoreSettingsService) {
-    /* reserved for future dynamic from-warehouse config */
-  }
-
   getConfig(): Promise<ShippingConfig> {
-    return this.local.getConfig();
+    return Promise.reject(
+      new Error("GhnShippingAdapter.getConfig is not used; shipping config is loaded via BackendShippingConfigAdapter"),
+    );
   }
 
-  saveConfig(input: ShippingConfig): Promise<ShippingConfig> {
-    return this.local.saveConfig(input);
+  saveConfig(_input: ShippingConfig): Promise<ShippingConfig> {
+    return Promise.reject(
+      new Error("GhnShippingAdapter.saveConfig is not used; shipping config is saved via BackendShippingConfigAdapter"),
+    );
   }
 
   resetBreaker(): void {

@@ -4,7 +4,7 @@
 // `src/services/index.ts`; screens are not affected.
 
 import type { ListQuery, PagedResult } from "@/services/types";
-import type { Product, ProductVariant } from "@/lib/mock-data";
+import type { Product, ProductVariant } from "@/lib/catalog-types";
 
 /** Backend-friendly list params. `filters` mirrors the typed scalars below
  *  so a future BE can accept either flat fields or `filters[...]` and behave

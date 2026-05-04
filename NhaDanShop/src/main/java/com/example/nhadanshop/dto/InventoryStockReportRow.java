@@ -8,7 +8,7 @@ import java.time.LocalDate;
  *
  * Công thức (logic trong {@link com.example.nhadanshop.service.InventoryStockService}):
  *   prodNet = tổng signed qty_delta của movement sản xuất (Slice 6) trong kỳ hoặc sau {@code from}
- *   closingStock = openingStock + totalReceived - totalSold + prodNet kỳ
+ *   closingStock = openingStock + totalReceived - totalSold + prodNet kỳ + totalAdjusted
  *
  *   openingStock  = tính ngược từ stock hiện tại, nhập sau from, bán sau from, và prodNet sau from
  *   totalReceived = tổng nhập kho (phiếu nhập) trong kỳ
@@ -35,6 +35,8 @@ public record InventoryStockReportRow(
         int totalReceived,
         /** Tổng xuất (bán) kỳ (đơn vị bán lẻ) */
         int totalSold,
+        /** Tổng điều chỉnh đã xác nhận trong kỳ (diffQty, signed) */
+        int totalAdjusted,
         /** Tồn cuối kỳ = openingStock + totalReceived - totalSold */
         int closingStock,
         /** Giá vốn tồn kho cuối kỳ */

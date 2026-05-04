@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { useService } from "@/hooks/useService";
+import { categories as categoryService, products as productService } from "@/services";
 import { DateInput } from "@/components/shared/DateInput";
 import {
   type Promotion,
@@ -21,7 +22,10 @@ interface Props {
 
 export function PromotionFormShell({ promo, onClose, onSave }: Props) {
   const [form, setForm] = useState<Promotion>(promo);
-  const { categories, products } = useStore();
+  const { data: categoryData } = useService(() => categoryService.list({ active: true }), []);
+  const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 200, active: true }), []);
+  const categories = categoryData?.items ?? [];
+  const products = productData?.items ?? [];
   const isEdit = !!promo.id;
 
   const validation = useMemo(() => validatePromotion(form), [form]);

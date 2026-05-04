@@ -2,7 +2,7 @@
  * Map backend sales quote (Slice 6C) into POS local invoice / 58mm print lines.
  */
 
-import type { Invoice, InvoiceBreakdown, InvoiceLine } from "@/lib/mock-data";
+import type { Invoice, InvoiceBreakdown, InvoiceLine } from "@/lib/pos-print-types";
 import type { POSCartLine } from "@/lib/pos-invoice";
 import type { SalesQuoteApiResult, SalesQuoteLineResponse } from "@/services/sales/salesQuoteApi";
 

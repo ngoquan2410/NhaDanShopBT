@@ -1,4 +1,4 @@
-import type { Invoice, InvoiceLine } from "@/lib/mock-data";
+import type { Invoice, InvoiceLine } from "@/lib/pos-print-types";
 import { formatVND, formatDateTime } from "@/lib/format";
 
 export type ThermalPaperMode = "pos58" | "pos80";

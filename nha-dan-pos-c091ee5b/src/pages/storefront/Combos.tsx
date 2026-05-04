@@ -1,23 +1,59 @@
 import { Link } from "react-router-dom";
-import { useStore } from "@/lib/store";
+import { useService } from "@/hooks/useService";
 import { formatVND } from "@/lib/format";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Reveal } from "@/components/storefront/Reveal";
-import { Gift, Package, ShoppingCart, Sparkles, ArrowRight } from "lucide-react";
+import { ArrowRight, Gift, Package, Sparkles } from "lucide-react";
+import { cartActions } from "@/lib/cart";
 import { toast } from "sonner";
 
-export default function StorefrontCombos() {
-  const { combos } = useStore();
-  const active = combos.filter((c) => c.active);
+type StorefrontCombo = {
+  id: string;
+  code: string;
+  name: string;
+  price: number;
+  derivedStock: number;
+  active: boolean;
+  defaultVariantId?: string;
+  categoryId?: string;
+  components: Array<{ productName: string; variantName?: string; quantity: number }>;
+};
 
-  if (active.length === 0) {
+async function loadActiveCombos(): Promise<StorefrontCombo[]> {
+  const res = await fetch("/api/combos/active", { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`Combo API chưa sẵn sàng (HTTP ${res.status})`);
+  const rows = await res.json();
+  return (Array.isArray(rows) ? rows : []).map((raw: any) => ({
+    id: String(raw.id),
+    code: String(raw.code ?? ""),
+    name: String(raw.name ?? ""),
+    price: Number(raw.sellPrice ?? 0),
+    derivedStock: Number(raw.stockQty ?? 0),
+    active: raw.active !== false,
+    defaultVariantId: raw.defaultVariantId != null ? String(raw.defaultVariantId) : undefined,
+    categoryId: raw.categoryId != null ? String(raw.categoryId) : undefined,
+    components: Array.isArray(raw.items)
+      ? raw.items.map((item: any) => ({
+          productName: String(item.productName ?? ""),
+          variantName: String(item.productCode ?? item.sellUnit ?? ""),
+          quantity: Number(item.quantity ?? 1),
+        }))
+      : [],
+  }));
+}
+
+export default function StorefrontCombos() {
+  const { data, loading, error } = useService(loadActiveCombos, []);
+  const active = (data ?? []).filter((c) => c.active);
+
+  if (loading || error || active.length === 0) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-12">
         <EmptyState
           icon={Gift}
-          title="Chưa có combo khuyến mãi"
-          description="Các combo ưu đãi sẽ được cập nhật sớm."
+          title={error ? "Combo chưa khả dụng" : "Chưa có combo khuyến mãi"}
+          description={error ? "Backend Combo API chưa trả dữ liệu cho storefront; không hiển thị combo mock như hàng thật." : "Các combo ưu đãi sẽ được cập nhật sớm."}
           action={
             <Link
               to="/products"
@@ -113,17 +149,45 @@ export default function StorefrontCombos() {
                       <p className="text-xl font-bold text-foreground">{formatVND(combo.price)}</p>
                     </div>
                     <button
+                      type="button"
+                      disabled={combo.derivedStock === 0 || !combo.defaultVariantId}
+                      title={
+                        !combo.defaultVariantId
+                          ? "Combo chưa có defaultVariant — cập nhật backend"
+                          : combo.derivedStock === 0
+                            ? "Hết hàng"
+                            : "Thêm combo vào giỏ"
+                      }
                       onClick={() => {
                         if (combo.derivedStock === 0) {
                           toast.error("Combo đã hết hàng");
                           return;
                         }
-                        toast.success(`Đã thêm combo "${combo.name}" vào giỏ`);
+                        if (!combo.defaultVariantId) {
+                          toast.error("Combo chưa cấu hình variant bán — liên hệ admin.");
+                          return;
+                        }
+                        try {
+                          cartActions.add({
+                            productId: combo.id,
+                            variantId: combo.defaultVariantId,
+                            productName: combo.name,
+                            variantName: "Combo",
+                            categoryId: combo.categoryId,
+                            qty: 1,
+                            unitPrice: combo.price,
+                            stock: combo.derivedStock,
+                            catalogSource: "backend",
+                            schemaVersion: 2,
+                          });
+                          toast.success(`Đã thêm "${combo.name}" vào giỏ`);
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : "Không thêm được vào giỏ");
+                        }
                       }}
-                      disabled={combo.derivedStock === 0}
-                      className="inline-flex items-center gap-1.5 h-10 px-4 bg-foreground text-background rounded-full text-xs font-semibold hover:bg-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed sf-shadow-cta"
+                      className="inline-flex items-center gap-1.5 h-10 px-4 rounded-full text-xs font-semibold bg-foreground text-background hover:bg-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <ShoppingCart className="h-3.5 w-3.5" /> Thêm
+                      Thêm vào giỏ
                     </button>
                   </div>
                 </div>

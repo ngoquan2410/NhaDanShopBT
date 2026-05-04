@@ -18,5 +18,7 @@ public record InventoryProjectionResponse(
          * stock, no physical batch rows on the combo variant). SINGLE only.
          */
         Integer sellableQty,
+        /** Minimum stock threshold from variant (dashboard / low-stock alerts). */
+        Integer minStockQty,
         List<InventoryProjectionBatchResponse> byBatch
 ) {}

@@ -7,7 +7,8 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { SortableTh } from "@/components/shared/SortableTh";
 import { useTableControls } from "@/hooks/useTableControls";
-import { useStore, categoryActions } from "@/lib/store";
+import { useService } from "@/hooks/useService";
+import { categories as categoryService } from "@/services";
 import type { Category } from "@/lib/mock-data";
 import { Plus, Pencil, Trash2, FolderTree, Check, Power } from "lucide-react";
 import { toast } from "sonner";
@@ -16,10 +17,14 @@ interface FormState { id?: string; name: string; description: string }
 const empty: FormState = { name: "", description: "" };
 
 export default function AdminCategories() {
-  const { categories } = useStore();
   const [search, setSearch] = useState("");
   const [form, setForm] = useState<FormState | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Category | null>(null);
+  const { data, loading, error, reload } = useService(
+    () => categoryService.list({ includeInactive: true }),
+    [],
+  );
+  const categories = data?.items ?? [];
 
   const filtered = useMemo(
     () => categories.filter(c => !search || c.name.toLowerCase().includes(search.toLowerCase())),
@@ -41,28 +46,43 @@ export default function AdminCategories() {
   const openCreate = () => setForm({ ...empty });
   const openEdit = (c: Category) => setForm({ id: c.id, name: c.name, description: c.description });
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form) return;
     if (!form.name.trim()) { toast.error("Vui lòng nhập tên danh mục"); return; }
-    if (form.id) {
-      categoryActions.update(form.id, { name: form.name.trim(), description: form.description.trim() });
-      toast.success("Đã cập nhật danh mục");
-    } else {
-      categoryActions.create({ name: form.name.trim(), description: form.description.trim() });
-      toast.success("Đã tạo danh mục mới");
+    try {
+      if (form.id) {
+        await categoryService.update(form.id, { name: form.name.trim(), description: form.description.trim() });
+        toast.success("Đã cập nhật danh mục");
+      } else {
+        await categoryService.create({ name: form.name.trim(), description: form.description.trim() });
+        toast.success("Đã tạo danh mục mới");
+      }
+      setForm(null);
+      reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không thể lưu danh mục");
     }
-    setForm(null);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!confirmDelete) return;
-    categoryActions.remove(confirmDelete.id);
-    toast.success(`Đã xóa danh mục "${confirmDelete.name}"`);
+    try {
+      await categoryService.remove(confirmDelete.id);
+      toast.success(`Đã xóa danh mục "${confirmDelete.name}"`);
+      reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không thể xóa danh mục");
+    }
   };
 
-  const handleToggle = (c: Category) => {
-    categoryActions.toggleActive(c.id);
-    toast.success(c.active ? `Đã ngưng "${c.name}"` : `Đã kích hoạt "${c.name}"`);
+  const handleToggle = async (c: Category) => {
+    try {
+      await categoryService.update(c.id, { active: !c.active });
+      toast.success(c.active ? `Đã ngưng "${c.name}"` : `Đã kích hoạt "${c.name}"`);
+      reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không thể đổi trạng thái danh mục");
+    }
   };
 
   return (
@@ -79,7 +99,10 @@ export default function AdminCategories() {
 
       <DataTableToolbar search={search} onSearchChange={setSearch} searchPlaceholder="Tìm danh mục..." />
 
-      {form && (
+      {loading && <p className="text-sm text-muted-foreground">Đang tải danh mục từ backend...</p>}
+      {error && <p className="text-sm text-danger">Không tải được danh mục: {error.message}</p>}
+
+      {form && !error && (
         <div className="bg-card rounded-lg border p-4 animate-fade-in">
           <h3 className="font-semibold text-sm mb-3">{form.id ? "Sửa danh mục" : "Tạo danh mục mới"}</h3>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -109,9 +132,9 @@ export default function AdminCategories() {
         </div>
       )}
 
-      {filtered.length === 0 ? (
+      {!loading && filtered.length === 0 ? (
         <EmptyState icon={FolderTree} title="Chưa có danh mục" description="Tạo danh mục đầu tiên để phân loại sản phẩm" />
-      ) : (
+      ) : !loading && (
         <div className="bg-card rounded-lg border overflow-hidden">
           <table className="w-full text-sm">
             <thead>

@@ -4,7 +4,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTableToolbar, FilterChip } from "@/components/shared/DataTableToolbar";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { useStore } from "@/lib/store";
+import { useService } from "@/hooks/useService";
 import { formatDate } from "@/lib/format";
 import {
   type Promotion,
@@ -19,7 +19,7 @@ import { TablePagination } from "@/components/shared/TablePagination";
 import { useTableControls } from "@/hooks/useTableControls";
 import { Plus, Tags, Calendar, Pencil, Trash2, Power } from "lucide-react";
 import { toast } from "sonner";
-import { promotionsCrud } from "@/services";
+import { categories as categoryService, products as productService, promotionsCrud } from "@/services";
 
 const TYPE_ICON_BG: Record<PromotionType, string> = {
   percent: "bg-primary-soft text-primary",
@@ -30,7 +30,6 @@ const TYPE_ICON_BG: Record<PromotionType, string> = {
 };
 
 export default function AdminPromotions() {
-  const { promotions: demoPromotions, categories, products } = useStore();
   const [promoList, setPromoList] = useState<Promotion[]>([]);
   const [apiError, setApiError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -39,6 +38,10 @@ export default function AdminPromotions() {
   const [filterType, setFilterType] = useState<PromotionType | null>(null);
   const [editing, setEditing] = useState<Promotion | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const { data: categoryData } = useService(() => categoryService.list({ active: false }), []);
+  const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 200 }), []);
+  const categories = categoryData?.items ?? [];
+  const products = productData?.items ?? [];
 
   const categoryNames = useMemo(() => Object.fromEntries(categories.map((c) => [c.id, c.name])), [categories]);
   const productNames = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p.name])), [products]);
@@ -56,14 +59,13 @@ export default function AdminPromotions() {
         if (cancel) return;
         const message = err instanceof Error ? err.message : "Không tải được khuyến mãi từ backend";
         setApiError(message);
-        // Demo/test fallback only: never used for persisted admin CRUD.
-        setPromoList(demoPromotions);
+        setPromoList([]);
       })
       .finally(() => {
         if (!cancel) setLoading(false);
       });
     return () => { cancel = true; };
-  }, [demoPromotions]);
+  }, []);
 
   const filtered = promoList.filter((p) => {
     if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;

@@ -1,8 +1,9 @@
+import { useEffect, useState } from "react";
 import { X, ClipboardCheck, Calendar, User, Lock } from "lucide-react";
 import { formatDate } from "@/lib/format";
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import type { StockAdjustment } from "@/lib/mock-data";
-import { mockAdjustmentLines } from "@/lib/mock-data";
+import type { StockAdjustment, StockAdjustmentLine } from "@/lib/mock-data";
+import { adminStockAdjustments } from "@/services";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -11,8 +12,17 @@ interface Props {
 }
 
 export function StockAdjustmentDetailDrawer({ adjustment, onClose }: Props) {
+  const [lines, setLines] = useState<StockAdjustmentLine[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!adjustment) return;
+    setError(null);
+    adminStockAdjustments.getLines(adjustment.id)
+      .then(setLines)
+      .catch((err) => setError(err instanceof Error ? err.message : "Không tải được dòng điều chỉnh"));
+  }, [adjustment]);
+
   if (!adjustment) return null;
-  const lines = mockAdjustmentLines.slice(0, Math.max(1, Math.min(adjustment.itemCount, mockAdjustmentLines.length)));
   const totalPositive = lines.filter(l => l.difference > 0).reduce((s, l) => s + l.difference, 0);
   const totalNegative = lines.filter(l => l.difference < 0).reduce((s, l) => s + l.difference, 0);
 
@@ -62,6 +72,7 @@ export function StockAdjustmentDetailDrawer({ adjustment, onClose }: Props) {
 
           <div>
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Chi tiết điều chỉnh</h3>
+            {error && <p className="text-xs text-danger mb-2">{error}</p>}
             <div className="border rounded-lg divide-y">
               {lines.map(l => (
                 <div key={l.id} className={cn("p-3 text-sm", l.difference > 0 && "bg-success-soft/30", l.difference < 0 && "bg-danger-soft/30")}>

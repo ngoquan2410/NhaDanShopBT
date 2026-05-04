@@ -12,6 +12,7 @@ public record SalesQuotePayloadDto(
         PromotionSnapshotDto promotionSnapshot,
         VoucherSnapshotDto voucherSnapshot,
         ShippingQuoteSnapshotDto shippingQuoteSnapshot,
+        LoyaltyRedemptionSnapshotDto loyaltySnapshot,
         List<SalesQuoteCapturedLineDto> lines,
         List<SalesQuoteCapturedLineDto> rewardLines
 ) {
@@ -21,6 +22,7 @@ public record SalesQuotePayloadDto(
             PromotionSnapshotDto promotionSnapshot,
             VoucherSnapshotDto voucherSnapshot,
             ShippingQuoteSnapshotDto shippingQuoteSnapshot,
+            LoyaltyRedemptionSnapshotDto loyaltySnapshot,
             List<SalesQuoteCapturedLineDto> lines,
             List<SalesQuoteCapturedLineDto> rewardLines
     ) {
@@ -28,6 +30,7 @@ public record SalesQuotePayloadDto(
                 promotionSnapshot,
                 voucherSnapshot,
                 shippingQuoteSnapshot,
+                loyaltySnapshot,
                 lines != null ? lines : List.of(),
                 rewardLines != null ? rewardLines : List.of());
     }

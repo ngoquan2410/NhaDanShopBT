@@ -8,7 +8,7 @@ import java.util.Set;
 
 public record UserRequest(
         @NotBlank @Size(max = 100) String username,
-        @NotBlank @Size(min = 6, max = 100) String password,
+        @NotBlank @Size(min = 10, max = 100) String password,
         @Size(max = 150) String fullName,
         @NotEmpty Set<String> roles  // e.g. ["ROLE_ADMIN"] or ["ROLE_USER"]
 ) {}

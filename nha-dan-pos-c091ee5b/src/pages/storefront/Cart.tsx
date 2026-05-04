@@ -70,6 +70,7 @@ export default function CartPage() {
   const shippingFee = promoShipFree ? 0 : baseShipping;
   const total = Math.max(0, subtotal - promoDiscount + shippingFee);
   const hasStockIssue = items.some((i) => i.qty > i.stock);
+  const hasInvalidBackendLine = items.some((i) => i.catalogSource !== "backend" || i.schemaVersion !== 2 || !/^\d+$/.test(String(i.productId)) || !/^\d+$/.test(String(i.variantId)));
   const freeShippingGap = Math.max(0, 200000 - subtotal);
 
   const removeItem = (id: string, name: string) => {
@@ -223,12 +224,18 @@ export default function CartPage() {
                   <span>Một số sản phẩm vượt quá tồn kho. Vui lòng điều chỉnh để tiếp tục.</span>
                 </div>
               )}
+              {hasInvalidBackendLine && (
+                <div className="mt-4 p-3 bg-danger-soft rounded-xl text-xs text-danger flex items-start gap-2">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <span>Giỏ hàng có dữ liệu cũ/không thuộc backend catalog. Vui lòng xóa giỏ và thêm lại sản phẩm.</span>
+                </div>
+              )}
 
               <Link
-                to={hasStockIssue ? "#" : "/checkout"}
-                onClick={(e) => hasStockIssue && e.preventDefault()}
+                to={hasStockIssue || hasInvalidBackendLine ? "#" : "/checkout"}
+                onClick={(e) => (hasStockIssue || hasInvalidBackendLine) && e.preventDefault()}
                 className={`mt-5 w-full flex items-center justify-center gap-2 h-12 rounded-full text-sm font-semibold transition-all ${
-                  hasStockIssue
+                  hasStockIssue || hasInvalidBackendLine
                     ? "bg-muted text-muted-foreground cursor-not-allowed"
                     : "bg-storefront-accent text-white hover:opacity-90 sf-shadow-cta"
                 }`}

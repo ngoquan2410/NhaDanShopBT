@@ -4,15 +4,16 @@ type AuthSession = {
   tokenType?: string | null;
   username?: string | null;
   fullName?: string | null;
+  roles?: string[];
+  customerId?: number | null;
+  expiresAt?: number;
 };
 
-// Minimal admin auth bridge for backend-owned management APIs. Keep this scoped
-// to admin service calls rather than treating it as the app-wide auth pattern.
-const STORAGE_KEY = "nhadan.adminAuth.session";
+const STORAGE_KEY = "nhadan.auth.session.v1";
 
 function readSession(): AuthSession | null {
   try {
-    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(STORAGE_KEY);
     return raw ? (JSON.parse(raw) as AuthSession) : null;
   } catch {
     return null;
@@ -22,10 +23,12 @@ function readSession(): AuthSession | null {
 function writeSession(session: AuthSession | null) {
   try {
     if (!session) {
-      window.sessionStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(STORAGE_KEY);
+      window.sessionStorage.removeItem("nhadan.adminAuth.session");
       return;
     }
-    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+    window.sessionStorage.removeItem("nhadan.adminAuth.session");
   } catch {
     /* ignore storage failures */
   }
@@ -38,65 +41,6 @@ async function parseJsonSafe(res: Response): Promise<any> {
 
 function errorMessage(data: any, fallbackStatus: number): string {
   return data?.detail ?? data?.message ?? data?.error ?? `HTTP ${fallbackStatus}`;
-}
-
-async function loginWithPrompts(): Promise<AuthSession> {
-  const username = window.prompt("Nhập tài khoản admin để gọi API backend:");
-  if (!username) throw new Error("Thiếu tài khoản admin để gọi API backend");
-  const password = window.prompt(`Nhập mật khẩu cho tài khoản ${username}:`);
-  if (!password) throw new Error("Thiếu mật khẩu admin để gọi API backend");
-
-  const loginRes = await fetch("/api/auth/login", {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ username, password }),
-  });
-  const loginData = await parseJsonSafe(loginRes);
-  if (!loginRes.ok) {
-    throw new Error(errorMessage(loginData, loginRes.status));
-  }
-
-  if (loginData?.totpRequired) {
-    const otp = window.prompt("Nhập mã OTP 6 số:");
-    if (!otp) throw new Error("Thiếu mã OTP để hoàn tất đăng nhập admin");
-    const otpRes = await fetch("/api/auth/verify-totp", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        preAuthToken: loginData.accessToken,
-        otp,
-      }),
-    });
-    const otpData = await parseJsonSafe(otpRes);
-    if (!otpRes.ok) {
-      throw new Error(errorMessage(otpData, otpRes.status));
-    }
-    const session: AuthSession = {
-      accessToken: otpData.accessToken,
-      refreshToken: otpData.refreshToken,
-      tokenType: otpData.tokenType,
-      username: otpData.username,
-      fullName: otpData.fullName,
-    };
-    writeSession(session);
-    return session;
-  }
-
-  const session: AuthSession = {
-    accessToken: loginData.accessToken,
-    refreshToken: loginData.refreshToken,
-    tokenType: loginData.tokenType,
-    username: loginData.username,
-    fullName: loginData.fullName,
-  };
-  writeSession(session);
-  return session;
 }
 
 async function refreshSession(session: AuthSession | null): Promise<AuthSession | null> {
@@ -120,6 +64,9 @@ async function refreshSession(session: AuthSession | null): Promise<AuthSession 
     tokenType: data.tokenType,
     username: data.username ?? session.username,
     fullName: data.fullName ?? session.fullName,
+    roles: Array.isArray(data.roles) ? data.roles : session.roles,
+    customerId: data.customerId ?? session.customerId,
+    expiresAt: Date.now() + Number(data.expiresIn ?? 900) * 1000,
   };
   writeSession(next);
   return next;
@@ -128,7 +75,7 @@ async function refreshSession(session: AuthSession | null): Promise<AuthSession 
 async function ensureSession(): Promise<AuthSession> {
   const existing = readSession();
   if (existing?.accessToken) return existing;
-  return loginWithPrompts();
+  throw new Error("Bạn cần đăng nhập tại /login để gọi API backend");
 }
 
 export async function adminFetchJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -155,7 +102,7 @@ export async function adminFetchJson<T>(path: string, init?: RequestInit): Promi
       continue;
     }
     writeSession(null);
-    session = await loginWithPrompts();
+    throw new Error("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại tại /login");
   }
 
   throw new Error("Không thể xác thực admin để gọi API backend");

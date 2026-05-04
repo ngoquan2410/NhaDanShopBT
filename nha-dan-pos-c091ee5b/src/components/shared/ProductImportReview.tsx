@@ -7,7 +7,8 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { useStore, productActions, categoryActions } from "@/lib/store";
+import { useService } from "@/hooks/useService";
+import { categories as categoryService, products as productService } from "@/services";
 import { productImportRowSellableLabel, type ProductImportRow } from "@/lib/import-types";
 
 interface DraftVariant {
@@ -137,7 +138,10 @@ function statusOf(issue: DraftIssue): "error" | "warning" | "ok" {
 
 export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props) {
   const navigate = useNavigate();
-  const { categories, products } = useStore();
+  const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 500 }), []);
+  const { data: categoryData } = useService(() => categoryService.list({ active: false }), []);
+  const products = productData?.items ?? [];
+  const categories = categoryData?.items ?? [];
   const [drafts, setDrafts] = useState<DraftProduct[]>(() => createDrafts(rows));
   const [validationTick, setValidationTick] = useState(0);
   const [search, setSearch] = useState("");
@@ -267,22 +271,22 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
     setTimeout(() => groupRefs.current[found.key]?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
 
-  const handleSaveAll = () => {
+  const handleSaveAll = async () => {
     if (stats.err > 0) { toast.error(`Còn ${stats.err} sản phẩm có lỗi.`); return; }
     if (stats.total === 0) { toast.error("Không còn sản phẩm nào để lưu."); return; }
 
     const usedCodes = new Set<string>([...existingCodes]);
     let createdProducts = 0, createdVariants = 0, createdCategories = 0;
 
-    activeDrafts.forEach((draft) => {
+    for (const draft of activeDrafts) {
       let category = categories.find((c) => c.name.trim().toLowerCase() === draft.category.trim().toLowerCase());
       if (!category) {
-        category = categoryActions.create({ name: draft.category.trim(), description: "Tạo từ import Excel" });
+        category = await categoryService.create({ name: draft.category.trim(), description: "Tạo từ import Excel" });
         createdCategories += 1;
       }
       const productCode = draft.code.trim() || generateProductCode(draft.name, draft.category, usedCodes);
       usedCodes.add(productCode);
-      const created = productActions.create({
+      const created = await productService.create({
         code: productCode, name: draft.name.trim(),
         categoryId: category.id, categoryName: category.name,
         image: "", active: draft.variants.some((v) => v.active),
@@ -290,9 +294,10 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
         variants: [],
       });
       createdProducts += 1;
-      draft.variants.forEach((variant, index) => {
+      for (let index = 0; index < draft.variants.length; index += 1) {
+        const variant = draft.variants[index];
         const variantCode = variant.code.trim() || `${productCode}-${String(index + 1).padStart(2, "0")}`;
-        productActions.addVariant(created.id, {
+        await productService.addVariant(created.id, {
           code: variantCode, name: variant.name.trim(),
           sellUnit: variant.sellUnit.trim(),
           importUnit: (variant.importUnit || variant.sellUnit).trim(),
@@ -303,8 +308,8 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
           isSellable: variant.isSellable !== false && !variant.isSellableInvalid,
         });
         createdVariants += 1;
-      });
-    });
+      }
+    }
 
     toast.success(`Đã tạo ${createdProducts} sản phẩm · ${createdVariants} phân loại${createdCategories ? ` · ${createdCategories} danh mục mới` : ""}.`);
     onSaved();

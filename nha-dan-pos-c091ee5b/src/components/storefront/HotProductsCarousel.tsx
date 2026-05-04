@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ProductCard } from "./ProductCard";
-import type { products as ProductList } from "@/lib/mock-data";
+import type { StorefrontProduct } from "@/services/catalog/publicCatalog";
 import { cn } from "@/lib/utils";
 
-type Product = (typeof ProductList)[number];
+type Product = StorefrontProduct;
 
 export function HotProductsCarousel({ items }: { items: Product[] }) {
   const [emblaRef, emblaApi] = useEmblaCarousel({
@@ -13,7 +13,7 @@ export function HotProductsCarousel({ items }: { items: Product[] }) {
     align: "start",
     slidesToScroll: 1,
     containScroll: "trimSnaps",
-    duration: 28,
+    duration: 18,
     dragFree: false,
     skipSnaps: false,
   });
@@ -46,7 +46,7 @@ export function HotProductsCarousel({ items }: { items: Product[] }) {
     const id = window.setInterval(() => {
       if (document.hidden || isHover) return;
       emblaApi.scrollNext();
-    }, 4500);
+    }, 2500);
     return () => window.clearInterval(id);
   }, [emblaApi, isHover]);
 

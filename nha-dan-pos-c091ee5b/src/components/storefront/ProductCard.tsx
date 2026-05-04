@@ -3,11 +3,11 @@ import { Package, ShoppingCart, Heart } from "lucide-react";
 import { formatVND } from "@/lib/format";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { toast } from "sonner";
-import type { products } from "@/lib/mock-data";
 import { resolveProductImage } from "@/lib/product-image";
 import { cartActions } from "@/lib/cart";
+import type { StorefrontProduct } from "@/services/catalog/publicCatalog";
 
-type Product = (typeof products)[number];
+type Product = StorefrontProduct;
 
 function getStockStatus(stock: number, minStock: number) {
   if (stock === 0) return "out-of-stock" as const;
@@ -43,6 +43,8 @@ export function ProductCard({ product, compact = false }: { product: Product; co
       qty: 1,
       unitPrice: dv.sellPrice,
       stock: dv.stock,
+      catalogSource: "backend",
+      schemaVersion: 2,
     });
     toast.success(`Đã thêm ${product.name} vào giỏ`);
   };
@@ -50,6 +52,7 @@ export function ProductCard({ product, compact = false }: { product: Product; co
   return (
     <Link
       to={`/products/${product.id}`}
+      data-testid="storefront-product-card"
       className="group relative flex flex-col bg-storefront-surface rounded-2xl border border-border/60 overflow-hidden sf-shadow hover:sf-shadow-hover hover:-translate-y-0.5 hover:border-primary/30 transition-all duration-300"
     >
       {/* Image */}
@@ -91,9 +94,11 @@ export function ProductCard({ product, compact = false }: { product: Product; co
 
         {/* Quick add (bottom CTA bar) */}
         <button
+          type="button"
+          data-testid="storefront-add-cart"
           onClick={handleAdd}
           disabled={dv.stock === 0}
-          className="absolute bottom-0 inset-x-0 h-9 bg-foreground text-background text-xs font-semibold flex items-center justify-center gap-1.5 translate-y-full group-hover:translate-y-0 transition-transform duration-300 disabled:opacity-50"
+          className="absolute bottom-0 inset-x-0 h-9 bg-foreground text-background text-xs font-semibold flex items-center justify-center gap-1.5 translate-y-0 transition-transform duration-300 disabled:opacity-50"
         >
           <ShoppingCart className="h-3.5 w-3.5" /> Thêm vào giỏ
         </button>

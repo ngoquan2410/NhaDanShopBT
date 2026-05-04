@@ -6,9 +6,7 @@ import type {
 } from "@/services/types";
 
 /**
- * Transitional wrapper:
- * - quote path now delegates straight to the backend-backed carrier adapter
- * - config CRUD still delegates to the local adapter for admin compatibility
+ * Hybrid shipping: quote path uses the carrier adapter; admin zone/parcel CRUD uses the config adapter.
  */
 export class HybridShippingAdapter implements ShippingService {
   constructor(

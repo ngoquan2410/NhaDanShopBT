@@ -1,6 +1,8 @@
 package com.example.nhadanshop.repository;
 
 import com.example.nhadanshop.entity.PendingOrder;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -15,6 +17,8 @@ public interface PendingOrderRepository extends JpaRepository<PendingOrder, Long
 
     /** Admin: lấy tất cả đơn, mới nhất trước */
     List<PendingOrder> findAllByOrderByCreatedAtDesc();
+
+    Page<PendingOrder> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
     /** Scheduler: tìm đơn PENDING đã quá hạn để tự hủy */
     List<PendingOrder> findByStatusAndExpiresAtBefore(PendingOrder.Status status, LocalDateTime now);

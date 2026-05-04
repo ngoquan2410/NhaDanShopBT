@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { mockAdjustmentLines } from "@/lib/mock-data";
+import { adminFetchJson } from "@/services/auth/adminApi";
+import { inventory } from "@/services";
+import type { InventoryProjection } from "@/services/types";
 import {
   ArrowLeft, Save, Check, Trash2, Search, Plus, AlertTriangle, FileText
 } from "lucide-react";
@@ -13,10 +15,24 @@ import { toast } from "sonner";
 export default function AdminStockAdjustmentCreate() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<'draft' | 'confirmed'>('draft');
-  const [lines, setLines] = useState(mockAdjustmentLines);
+  const [lines, setLines] = useState<Array<{
+    id: string;
+    variantId: string;
+    variantCode: string;
+    productName: string;
+    variantName: string;
+    systemQty: number;
+    actualQty: number;
+    difference: number;
+    note: string;
+  }>>([]);
   const [reason, setReason] = useState('Kiểm kho định kỳ');
   const [note, setNote] = useState('Kiểm kho tháng 4/2025');
   const [search, setSearch] = useState('');
+  const [suggestions, setSuggestions] = useState<InventoryProjection[]>([]);
+  const [lookup, setLookup] = useState<InventoryProjection[]>([]);
+  const projectionsCacheRef = useRef<InventoryProjection[] | null>(null);
+  const searchDebounceRef = useRef<number>(0);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -30,9 +46,30 @@ export default function AdminStockAdjustmentCreate() {
     toast.success("Đã lưu nháp phiếu điều chỉnh");
   };
 
-  const handleConfirm = () => {
-    setStatus('confirmed');
-    toast.success("Đã xác nhận phiếu — tồn kho đã được cập nhật");
+  const handleConfirm = async () => {
+    try {
+      const created = await adminFetchJson<{ id: number }>("/api/stock-adjustments", {
+        method: "POST",
+        body: JSON.stringify({
+          reason: reason === "Kiểm kho định kỳ" ? "STOCKTAKE" : reason === "Hàng hỏng" ? "DAMAGED" : "OTHER",
+          note,
+          items: lines.map((line) => ({
+            variantId: Number(line.variantId),
+            actualQty: line.actualQty,
+            note: line.note || null,
+          })),
+        }),
+      });
+      await adminFetchJson(`/api/stock-adjustments/${created.id}/confirm`, {
+        method: "PUT",
+      });
+      setStatus('confirmed');
+      toast.success("Đã xác nhận phiếu — tồn kho đã được cập nhật");
+      navigate('/admin/stock-adjustments');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không thể tạo phiếu điều chỉnh");
+      throw err;
+    }
   };
 
   const handleDelete = () => {
@@ -40,20 +77,89 @@ export default function AdminStockAdjustmentCreate() {
     navigate('/admin/stock-adjustments');
   };
 
-  const addLine = () => {
+  useEffect(() => {
+    if (status !== "draft") return;
+    const q = search.trim();
+    window.clearTimeout(searchDebounceRef.current);
+    if (!q) {
+      setSuggestions([]);
+      return;
+    }
+    searchDebounceRef.current = window.setTimeout(() => {
+      void (async () => {
+        let all = projectionsCacheRef.current;
+        if (!all) {
+          try {
+            all = await inventory.listInventoryProjections();
+            projectionsCacheRef.current = all;
+            setLookup(all);
+          } catch {
+            setSuggestions([]);
+            return;
+          }
+        }
+        const ql = q.toLowerCase();
+        const matches = all.filter(
+          (p) =>
+            String(p.variantCode ?? "").toLowerCase().includes(ql) ||
+            String(p.productName ?? "").toLowerCase().includes(ql) ||
+            String(p.variantName ?? "").toLowerCase().includes(ql) ||
+            String(p.productCode ?? "").toLowerCase().includes(ql),
+        ).slice(0, 12);
+        setSuggestions(matches);
+      })();
+    }, 220);
+    return () => window.clearTimeout(searchDebounceRef.current);
+  }, [search, status]);
+
+  const addProjectionLine = (projection: InventoryProjection) => {
+    if (lines.some((l) => l.variantId === projection.variantId)) {
+      toast.error("Phân loại đã có trong phiếu");
+      return;
+    }
+    setLines((prev) => [
+      ...prev,
+      {
+        id: `m-${projection.variantId}`,
+        variantId: projection.variantId,
+        variantCode: projection.variantCode ?? "-",
+        productName: projection.productName ?? "",
+        variantName: projection.variantName ?? "Mặc định",
+        systemQty: projection.onHand,
+        actualQty: projection.onHand,
+        difference: 0,
+        note: "",
+      },
+    ]);
+    setSearch("");
+    setSuggestions([]);
+    toast.success(`Đã thêm "${projection.productName ?? projection.variantCode}" vào phiếu`);
+  };
+
+  const addLine = async () => {
     if (!search.trim()) return;
-    setLines(prev => [...prev, {
-      id: `m-${Date.now()}`,
-      variantCode: search.toUpperCase(),
-      productName: search,
-      variantName: 'Mặc định',
-      systemQty: 0,
-      actualQty: 0,
-      difference: 0,
-      note: '',
-    }]);
-    setSearch('');
-    toast.success(`Đã thêm "${search}" vào phiếu`);
+    if (suggestions.length > 0) {
+      addProjectionLine(suggestions[0]);
+      return;
+    }
+    let projections = lookup;
+    if (projections.length === 0) {
+      projections = await inventory.listInventoryProjections();
+      setLookup(projections);
+      projectionsCacheRef.current = projections;
+    }
+    const q = search.trim().toLowerCase();
+    const projection = projections.find((p) =>
+      String(p.variantCode ?? "").toLowerCase().includes(q) ||
+      String(p.productName ?? "").toLowerCase().includes(q) ||
+      String(p.variantName ?? "").toLowerCase().includes(q) ||
+      String(p.productCode ?? "").toLowerCase().includes(q),
+    );
+    if (!projection) {
+      toast.error("Không tìm thấy phân loại trong backend inventory");
+      return;
+    }
+    addProjectionLine(projection);
   };
 
   const totalPositive = lines.filter(l => l.difference > 0).reduce((s, l) => s + l.difference, 0);
@@ -79,7 +185,12 @@ export default function AdminStockAdjustmentCreate() {
                 <button onClick={handleSaveDraft} className="px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted">
                   <FileText className="h-3.5 w-3.5 inline mr-1" /> Lưu nháp
                 </button>
-                <button onClick={() => setShowConfirm(true)} className="px-3 py-1.5 text-xs font-medium bg-success text-success-foreground rounded-md hover:bg-success/90">
+                <button
+                  type="button"
+                  data-testid="stock-adj-confirm-open"
+                  onClick={() => setShowConfirm(true)}
+                  className="px-3 py-1.5 text-xs font-medium bg-success text-success-foreground rounded-md hover:bg-success/90"
+                >
                   <Check className="h-3.5 w-3.5 inline mr-1" /> Xác nhận
                 </button>
               </>
@@ -123,18 +234,45 @@ export default function AdminStockAdjustmentCreate() {
 
       {/* Add line */}
       {status === 'draft' && (
-        <div className="flex items-center gap-2 mt-3">
+        <div className="flex items-start gap-2 mt-3">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addLine()}
-              placeholder="Tìm phân loại / mã vạch để thêm... (Enter)"
+              onKeyDown={e => {
+                if (e.key === "Escape") setSuggestions([]);
+                if (e.key === 'Enter') void addLine();
+              }}
+              autoComplete="off"
+              data-testid="stock-adj-product-search"
+              placeholder="Tìm phân loại / mã / tên sản phẩm… (gợi ý khi gõ)"
               className="w-full h-8 pl-9 pr-3 text-sm bg-card border rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
             />
+            {suggestions.length > 0 && (
+              <ul
+                data-testid="stock-adj-search-suggestions"
+                className="absolute z-40 mt-1 w-full max-h-56 overflow-auto rounded-md border bg-card text-xs shadow-md"
+              >
+                {suggestions.map((p) => (
+                  <li key={String(p.variantId)}>
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-2 hover:bg-muted/80 border-b last:border-0 border-border/50"
+                      onClick={() => addProjectionLine(p)}
+                    >
+                      <span className="font-medium">{p.productName ?? "—"}</span>
+                      <span className="text-muted-foreground"> · {p.variantName ?? p.variantCode ?? ""}</span>
+                      {p.variantCode ? (
+                        <span className="block font-mono text-[11px] text-muted-foreground">{p.variantCode}</span>
+                      ) : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          <button onClick={addLine} disabled={!search.trim()} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted disabled:opacity-50">
+          <button type="button" onClick={() => void addLine()} disabled={!search.trim()} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted disabled:opacity-50 shrink-0">
             <Plus className="h-3.5 w-3.5" /> Thêm
           </button>
         </div>
@@ -183,7 +321,7 @@ export default function AdminStockAdjustmentCreate() {
                 <td className="px-3 py-2.5 text-center font-medium">{l.systemQty}</td>
                 <td className="px-3 py-2.5 text-center">
                   {status === 'draft' ? (
-                    <input type="number" value={l.actualQty} onChange={e => setLines(prev => prev.map(x => x.id === l.id ? { ...x, actualQty: +e.target.value, difference: +e.target.value - x.systemQty } : x))} className="w-16 h-7 text-center text-xs border rounded bg-background" />
+                    <input type="number" data-testid="stock-adj-line-actual-qty" value={l.actualQty} onChange={e => setLines(prev => prev.map(x => x.id === l.id ? { ...x, actualQty: +e.target.value, difference: +e.target.value - x.systemQty } : x))} className="w-16 h-7 text-center text-xs border rounded bg-background" />
                   ) : (
                     <span className="font-medium">{l.actualQty}</span>
                   )}
@@ -215,7 +353,7 @@ export default function AdminStockAdjustmentCreate() {
       {status === 'draft' && (
         <div className="fixed bottom-0 left-0 right-0 p-3 bg-card border-t lg:hidden z-30 flex gap-2">
           <button onClick={handleSaveDraft} className="flex-1 py-2 text-sm font-medium border rounded-md hover:bg-muted">Lưu nháp</button>
-          <button onClick={() => setShowConfirm(true)} className="flex-1 py-2 text-sm font-semibold bg-success text-success-foreground rounded-md">Xác nhận</button>
+          <button type="button" data-testid="stock-adj-confirm-open" onClick={() => setShowConfirm(true)} className="flex-1 py-2 text-sm font-semibold bg-success text-success-foreground rounded-md">Xác nhận</button>
         </div>
       )}
 

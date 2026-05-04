@@ -20,6 +20,8 @@ export interface PosScanDto {
   batchActiveForSale: boolean;
   sellable: boolean | null;
   blockReason: string | null;
+  /** Variant aggregate stock from backend; null for batch-only payloads. */
+  variantStockQty: number | null;
 }
 
 function scanPath(code: string): string {

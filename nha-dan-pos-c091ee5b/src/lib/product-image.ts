@@ -1,12 +1,10 @@
-import type { Product, ProductVariant } from "./mock-data";
-
 /**
  * Source-of-truth resolver:
  *  - if a variant override exists -> use it
  *  - else fall back to product.image
  *  - else empty string (consumer renders placeholder)
  */
-export function resolveProductImage(product: Pick<Product, "image" | "images">, variant?: Pick<ProductVariant, "image"> | null): string {
+export function resolveProductImage(product: { image?: string; images?: string[] }, variant?: { image?: string } | null): string {
   if (variant?.image && variant.image.trim()) return variant.image;
   if (product.image && product.image.trim()) return product.image;
   if (product.images && product.images.length > 0) return product.images[0];

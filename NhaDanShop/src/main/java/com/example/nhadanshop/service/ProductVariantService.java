@@ -59,7 +59,10 @@ public class ProductVariantService {
     /**
      * Lookup variant theo mã — dùng khi barcode scan.
      * Tìm theo variant_code trước, nếu không có thì fallback tìm theo product.code (default variant).
+     * {@code noRollbackFor}: missing code is a normal outcome for POS scan callers that map it to a blocked response;
+     * without this, a joined outer transaction (e.g. {@link PosScanService#scan}) becomes rollback-only.
      */
+    @Transactional(readOnly = true, noRollbackFor = EntityNotFoundException.class)
     public ProductVariantResponse getVariantByCode(String code) {
         // POS / bán hàng: chỉ mã còn bán, sellable, SP active
         var byVariantCode = variantRepo.findByVariantCodeIgnoreCase(code.trim());

@@ -21,70 +21,31 @@ interface CartState {
 }
 
 function loadInitial(): CartState {
-  if (typeof window === "undefined") return seed();
+  if (typeof window === "undefined") return { items: [] };
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return seed();
+    if (!raw) return { items: [] };
     const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.items)) return seed();
-    return { items: parsed.items };
+    if (!parsed || !Array.isArray(parsed.items)) return { items: [] };
+    const valid = parsed.items.filter(isBackendCartLine);
+    if (valid.length !== parsed.items.length) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ items: valid }));
+    }
+    return { items: valid };
   } catch {
-    return seed();
+    return { items: [] };
   }
 }
 
-// Seed with a few real catalog entries so the storefront has something to
-// demo when a fresh visitor lands on /cart. IDs match src/lib/mock-data.ts.
-function seed(): CartState {
-  return {
-    items: [
-      {
-        id: "ci-seed-1",
-        productId: "1",
-        variantId: "v1",
-        productCode: "SP001",
-        variantCode: "SP001-01",
-        productName: "Mì Hảo Hảo",
-        variantName: "Tôm chua cay",
-        categoryId: "1",
-        categoryName: "Thực phẩm khô",
-        qty: 10,
-        unitPrice: 5000,
-        lineSubtotal: 50000,
-        stock: 245,
-      },
-      {
-        id: "ci-seed-2",
-        productId: "2",
-        variantId: "v4",
-        productCode: "SP002",
-        variantCode: "SP002-01",
-        productName: "Coca-Cola",
-        variantName: "Lon 330ml",
-        categoryId: "2",
-        categoryName: "Đồ uống",
-        qty: 6,
-        unitPrice: 10000,
-        lineSubtotal: 60000,
-        stock: 180,
-      },
-      {
-        id: "ci-seed-3",
-        productId: "3",
-        variantId: "v7",
-        productCode: "SP003",
-        variantCode: "SP003-02",
-        productName: "Sữa Vinamilk 100%",
-        variantName: "Hộp 1L",
-        categoryId: "4",
-        categoryName: "Sữa & Chế phẩm",
-        qty: 2,
-        unitPrice: 32000,
-        lineSubtotal: 64000,
-        stock: 8,
-      },
-    ],
-  };
+export function isBackendCartLine(line: Partial<CartItem>): line is CartItem {
+  return line.catalogSource === "backend"
+    && line.schemaVersion === 2
+    && typeof line.productId === "string"
+    && /^\d+$/.test(line.productId)
+    && typeof line.variantId === "string"
+    && /^\d+$/.test(line.variantId)
+    && Number.isFinite(line.qty)
+    && line.qty > 0;
 }
 
 let state: CartState = loadInitial();
@@ -123,6 +84,9 @@ export function getCartSnapshot(): CartItem[] {
 
 export const cartActions = {
   add(input: Omit<CartItem, "id" | "lineSubtotal">) {
+    if (!isBackendCartLine({ ...input, id: "check", lineSubtotal: 0 })) {
+      throw new Error("Cart chỉ chấp nhận sản phẩm từ backend catalog");
+    }
     setState((s) => {
       const existing = s.items.find(
         (i) => i.productId === input.productId && i.variantId === input.variantId,

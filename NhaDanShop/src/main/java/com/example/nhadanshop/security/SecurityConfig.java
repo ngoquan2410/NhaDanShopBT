@@ -31,7 +31,7 @@ public class SecurityConfig {
 
     // Đọc từ application.properties: cors.allowed-origins=http://localhost:5173,http://13.251.16.99
     // Nếu không set → dùng default localhost
-    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173}")
+    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:5174,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:3000}")
     private String allowedOriginsRaw;
 
     @Bean
@@ -81,13 +81,18 @@ public class SecurityConfig {
                         // Actuator health check - MUST be public for CI/CD and monitoring
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         // Auth public
-                        .requestMatchers("/api/auth/login", "/api/auth/verify-totp", "/api/auth/refresh", "/api/auth/signup").permitAll()
+                        .requestMatchers("/api/auth/login", "/api/auth/verify-totp", "/api/auth/refresh", "/api/auth/signup",
+                                "/api/auth/logout", "/api/auth/forgot-password", "/api/auth/reset-password").permitAll()
                         .requestMatchers("/api/auth/**").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/loyalty/settings").permitAll()
+                        .requestMatchers("/api/account/**").authenticated()
+                        .requestMatchers("/api/customers/**").hasRole("ADMIN")
                         // Image
                         .requestMatchers(HttpMethod.GET, "/api/images/status").permitAll()
                         .requestMatchers("/api/images/**").hasRole("ADMIN")
                         // Store public
                         .requestMatchers(HttpMethod.GET, "/api/products/**", "/api/categories/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/combos/active").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/vouchers/active").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/promotions/active").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/promotions/evaluate", "/api/promotions/pick-best").permitAll()
@@ -99,6 +104,8 @@ public class SecurityConfig {
                                 "/api/address-autocomplete",
                                 "/api/address-place-detail")
                         .permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/shipping/settings").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/shipping/settings").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/shipping/quote").permitAll()
                         // Public temporarily for current checkout/pending-payment compatibility.
                         // A later slice should split this from the fuller admin settings surface.
@@ -117,10 +124,12 @@ public class SecurityConfig {
                         // Receipts
                         .requestMatchers(HttpMethod.GET, "/api/receipts/**").authenticated()
                         .requestMatchers("/api/receipts/**").hasRole("ADMIN")
-                        // Invoices
+                        // Invoices — list/read for authenticated (admin UI + customer/session parity);
+                        // mutate (create POS/hủy): admin-only.
                         .requestMatchers(HttpMethod.GET, "/api/invoices/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/sales/quote").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/invoices/**").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/invoices/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/invoices/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/invoices/**").hasRole("ADMIN")
                         // POS traceability scan (Slice 6B): authenticated same as invoice create/read surface
                         .requestMatchers(HttpMethod.GET, "/api/pos/scan/**").authenticated()

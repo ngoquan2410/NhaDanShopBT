@@ -125,6 +125,7 @@ public class InventoryProjectionService {
                 reserved,
                 available,
                 sellableQty,
+                variant.getMinStockQty(),
                 byBatch
         );
     }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
-import { supabase } from "@/integrations/supabase/client";
+import { adminFetchJson } from "@/services/auth/adminApi";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,29 +14,30 @@ import {
 import { formatVND } from "@/lib/format";
 import { CheckCircle2, XCircle, RefreshCw, Search } from "lucide-react";
 
+/** Backend GhnQuoteLog JSON (camelCase). */
 interface LogRow {
-  id: string;
-  created_at: string;
-  province_name: string | null;
-  district_name: string | null;
-  ward_name: string | null;
-  weight_grams: number | null;
+  id: number;
+  createdAt: string;
+  provinceName: string | null;
+  districtName: string | null;
+  wardName: string | null;
+  weightGrams: number | null;
   subtotal: number | null;
   ok: boolean;
   fee: number | null;
-  eta_min: number | null;
-  eta_max: number | null;
-  service_id: number | null;
+  etaMin: number | null;
+  etaMax: number | null;
+  serviceId: number | null;
   reason: string | null;
   message: string | null;
-  latency_ms: number | null;
-  order_code: string | null;
+  latencyMs: number | null;
+  orderCode: string | null;
 }
 
 const PAGE_SIZE = 50;
 
 type StatusFilter = "all" | "ok" | "fail";
-type ReasonFilter = "all" | "timeout" | "no_config" | "address_unmapped" | "ghn_error" | "no_service";
+type ReasonFilter = "all" | "timeout" | "no_config" | "address_unmapped" | "ghn_error" | "no_service" | "incomplete" | "unavailable" | "quote_failed";
 
 const REASON_OPTIONS: { value: ReasonFilter; label: string }[] = [
   { value: "all", label: "Tất cả lý do" },
@@ -45,6 +46,9 @@ const REASON_OPTIONS: { value: ReasonFilter; label: string }[] = [
   { value: "address_unmapped", label: "Địa chỉ không khớp" },
   { value: "ghn_error", label: "Lỗi GHN" },
   { value: "no_service", label: "Không có dịch vụ" },
+  { value: "incomplete", label: "Thiếu địa chỉ" },
+  { value: "unavailable", label: "Không báo giá được" },
+  { value: "quote_failed", label: "quote_failed" },
 ];
 
 interface SavedView {
@@ -71,13 +75,16 @@ export default function GhnQuoteLogsPage() {
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("ghn_quote_logs")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(PAGE_SIZE);
-    if (!error && data) setRows(data as LogRow[]);
-    setLoading(false);
+    try {
+      const data = await adminFetchJson<{ content?: LogRow[] }>(
+        `/api/admin/ghn-quote-logs?page=0&size=${PAGE_SIZE}&sort=createdAt,desc`,
+      );
+      setRows(Array.isArray(data.content) ? data.content : []);
+    } catch {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -92,8 +99,8 @@ export default function GhnQuoteLogsPage() {
       if (reasonFilter !== "all" && r.reason !== reasonFilter) return false;
       if (!q) return true;
       const hay = [
-        r.province_name, r.district_name, r.ward_name,
-        r.order_code, r.reason, r.message,
+        r.provinceName, r.districtName, r.wardName,
+        r.orderCode, r.reason, r.message,
       ].filter(Boolean).join(" ").toLowerCase();
       return hay.includes(q);
     });
@@ -103,7 +110,7 @@ export default function GhnQuoteLogsPage() {
     const total = rows.length;
     const ok = rows.filter((r) => r.ok).length;
     const avgLatency = total
-      ? Math.round(rows.reduce((s, r) => s + (r.latency_ms ?? 0), 0) / total)
+      ? Math.round(rows.reduce((s, r) => s + (r.latencyMs ?? 0), 0) / total)
       : 0;
     return { total, ok, fail: total - ok, avgLatency };
   }, [rows]);
@@ -119,7 +126,7 @@ export default function GhnQuoteLogsPage() {
     <div className="space-y-4">
       <PageHeader
         title="Nhật ký báo giá GHN"
-        description="Mỗi lần Checkout hỏi phí GHN sẽ được ghi lại đây để debug và đối soát"
+        description="Ghi lại từ API backend (ShippingQuote) — không dùng Supabase"
         actions={
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
@@ -129,7 +136,7 @@ export default function GhnQuoteLogsPage() {
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="Tổng request (50 gần nhất)" value={String(stats.total)} />
+        <StatCard label={`Tổng (${PAGE_SIZE} gần nhất)`} value={String(stats.total)} />
         <StatCard label="Thành công" value={String(stats.ok)} tone="success" />
         <StatCard label="Thất bại" value={String(stats.fail)} tone={stats.fail > 0 ? "danger" : "muted"} />
         <StatCard label="Độ trễ TB" value={`${stats.avgLatency} ms`} />
@@ -215,7 +222,7 @@ export default function GhnQuoteLogsPage() {
                   filtered.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell className="font-mono text-xs whitespace-nowrap">
-                        {format(new Date(r.created_at), "dd/MM HH:mm:ss")}
+                        {format(new Date(r.createdAt), "dd/MM HH:mm:ss")}
                       </TableCell>
                       <TableCell>
                         {r.ok ? (
@@ -231,22 +238,22 @@ export default function GhnQuoteLogsPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-xs max-w-[260px] truncate">
-                        {[r.ward_name, r.district_name, r.province_name].filter(Boolean).join(", ") || "—"}
+                        {[r.wardName, r.districtName, r.provinceName].filter(Boolean).join(", ") || "—"}
                       </TableCell>
-                      <TableCell className="text-right text-xs">{r.weight_grams ?? "—"}</TableCell>
+                      <TableCell className="text-right text-xs">{r.weightGrams ?? "—"}</TableCell>
                       <TableCell className="text-right text-xs font-semibold">
                         {r.fee != null ? formatVND(r.fee) : "—"}
                       </TableCell>
                       <TableCell className="text-right text-xs text-muted-foreground">
-                        {r.latency_ms != null ? `${r.latency_ms}ms` : "—"}
+                        {r.latencyMs != null ? `${r.latencyMs}ms` : "—"}
                       </TableCell>
                       <TableCell className="text-xs">
-                        {r.order_code ? (
+                        {r.orderCode ? (
                           <Link
-                            to={`/admin/pending-orders?code=${encodeURIComponent(r.order_code)}`}
+                            to={`/admin/pending-orders?code=${encodeURIComponent(r.orderCode)}`}
                             className="text-primary hover:underline font-mono"
                           >
-                            {r.order_code}
+                            {r.orderCode}
                           </Link>
                         ) : r.reason ? (
                           <div className="space-y-0.5">

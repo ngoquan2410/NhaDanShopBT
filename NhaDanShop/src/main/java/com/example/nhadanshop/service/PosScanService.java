@@ -8,7 +8,6 @@ import com.example.nhadanshop.repository.ProductBatchRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -16,7 +15,6 @@ import java.time.LocalDate;
 
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class PosScanService {
 
     private static final String PREFIX = "BATCH:";
@@ -25,7 +23,11 @@ public class PosScanService {
     private final ProductVariantService variantService;
     private final Clock businessClock;
 
-    @Transactional
+    /**
+     * No class-level transaction: a variant lookup that throws {@link EntityNotFoundException} must not join an
+     * outer read/write transaction (would mark it rollback-only and yield HTTP 500 after the exception is caught).
+     * Batch path uses {@link ProductBatchRepository} which runs in its own persistence context per call.
+     */
     public PosScanResponse scan(String rawCode) {
         String code = rawCode == null ? "" : rawCode.replace("\r", "").replace("\n", "").trim();
         if (code.isBlank()) {
@@ -58,7 +60,8 @@ public class PosScanService {
                     null,
                     true,
                     va && vs,
-                    null
+                    null,
+                    v.stockQty()
             );
         } catch (EntityNotFoundException ex) {
             return blockedVariant(code, "NOT_FOUND", ex.getMessage());
@@ -131,7 +134,8 @@ public class PosScanService {
                 batch.getStatus(),
                 batchActiveForSale,
                 batchActiveForSale,
-                blockReason
+                blockReason,
+                null
         );
     }
 
@@ -154,7 +158,8 @@ public class PosScanService {
                 null,
                 false,
                 false,
-                reasonKey + ": " + message
+                reasonKey + ": " + message,
+                null
         );
     }
 
@@ -177,7 +182,8 @@ public class PosScanService {
                 null,
                 false,
                 false,
-                reasonKey + ": " + message
+                reasonKey + ": " + message,
+                null
         );
     }
 }

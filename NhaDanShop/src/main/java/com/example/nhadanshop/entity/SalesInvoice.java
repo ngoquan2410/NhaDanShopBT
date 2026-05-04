@@ -57,6 +57,12 @@ public class SalesInvoice {
     @Column(name = "discount_amount", nullable = false, precision = 18, scale = 2)
     private BigDecimal discountAmount = BigDecimal.ZERO;
 
+    @Column(name = "loyalty_discount_amount", nullable = false, precision = 18, scale = 2)
+    private BigDecimal loyaltyDiscountAmount = BigDecimal.ZERO;
+
+    @Column(name = "loyalty_redeemed_points", nullable = false)
+    private Long loyaltyRedeemedPoints = 0L;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "source_type", nullable = false, length = 30)
     private SourceType sourceType = SourceType.POS;
@@ -122,6 +128,9 @@ public class SalesInvoice {
         if (createdAt  == null) createdAt  = now;
         if (updatedAt  == null) updatedAt  = now;
         if (totalAmount == null) totalAmount = BigDecimal.ZERO;
+        if (discountAmount == null) discountAmount = BigDecimal.ZERO;
+        if (loyaltyDiscountAmount == null) loyaltyDiscountAmount = BigDecimal.ZERO;
+        if (loyaltyRedeemedPoints == null) loyaltyRedeemedPoints = 0L;
         if (status == null) status = Status.COMPLETED;
         if (sourceType == null) sourceType = SourceType.POS;
         if (vatPercent == null) vatPercent = BigDecimal.ZERO;

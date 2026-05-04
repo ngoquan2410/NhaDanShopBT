@@ -1,9 +1,9 @@
-import { products, categories } from "@/lib/mock-data";
 import { ProductCard } from "@/components/storefront/ProductCard";
 import { Reveal } from "@/components/storefront/Reveal";
 import { Package, Search, SlidersHorizontal, X } from "lucide-react";
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
+import { listPublicCategories, listPublicProducts, type StorefrontCategory, type StorefrontProduct } from "@/services/catalog/publicCatalog";
 
 type SortKey = "newest" | "price-asc" | "price-desc" | "name";
 
@@ -11,7 +11,24 @@ export default function StorefrontProducts() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
-  const activeCategories = categories.filter((c) => c.active);
+  const [products, setProducts] = useState<StorefrontProduct[]>([]);
+  const [activeCategories, setActiveCategories] = useState<StorefrontCategory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([listPublicProducts(), listPublicCategories()])
+      .then(([p, c]) => {
+        if (!alive) return;
+        setProducts(p);
+        setActiveCategories(c);
+        setError(null);
+      })
+      .catch((e) => alive && setError(e instanceof Error ? e.message : "Không tải được catalog backend"))
+      .finally(() => alive && setLoading(false));
+    return () => { alive = false; };
+  }, []);
 
   const filtered = useMemo(() => {
     let list = products.filter((p) => p.active);
@@ -26,7 +43,7 @@ export default function StorefrontProducts() {
       return 0;
     });
     return list;
-  }, [selectedCategory, search, sort]);
+  }, [products, selectedCategory, search, sort]);
 
   return (
     <div className="bg-storefront-bg min-h-screen">
@@ -44,6 +61,8 @@ export default function StorefrontProducts() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-6">
+        {loading && <div className="mb-4 text-sm text-muted-foreground">Đang tải sản phẩm backend...</div>}
+        {error && <div className="mb-4 text-sm text-danger">{error}</div>}
         {/* Toolbar */}
         <div className="flex flex-col md:flex-row md:items-center gap-3 mb-5">
           <div className="relative flex-1 max-w-lg">

@@ -4,7 +4,7 @@ import type {
   ProductService,
 } from "@/services/products/ProductService";
 import type { PagedResult } from "@/services/types";
-import type { Product, ProductVariant } from "@/lib/mock-data";
+import type { Product, ProductVariant } from "@/lib/catalog-types";
 
 const API = "/api/products";
 

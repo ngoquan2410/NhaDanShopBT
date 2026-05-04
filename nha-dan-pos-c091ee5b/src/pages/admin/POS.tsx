@@ -4,8 +4,6 @@ import { QuantityStepper } from "@/components/shared/QuantityStepper";
 import { SearchableCombobox } from "@/components/shared/SearchableCombobox";
 import { CustomerFormDrawer } from "@/components/shared/CustomerFormDrawer";
 import { formatVND } from "@/lib/format";
-import { products } from "@/lib/mock-data";
-import { useStore, invoiceActions } from "@/lib/store";
 import {
   Search, Barcode, Camera, Keyboard, ShoppingCart, Receipt,
   AlertTriangle, Printer, X, Check, CheckCircle2, ScanLine,
@@ -16,16 +14,17 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Printable58Invoice } from "@/components/shared/Printable58Invoice";
 import { triggerPrint } from "@/lib/print";
-import type { Invoice, InvoiceLine } from "@/lib/mock-data";
-import { resolveScannedCode, normalizeScanCode } from "@/lib/pos-scan";
+import type { Invoice, InvoiceLine } from "@/lib/pos-print-types";
+import { normalizeScanCode } from "@/lib/scan-code";
 import { CameraScanner } from "@/components/pos/CameraScanner";
 import { PosQrDialog, type PosQrPaymentType } from "@/components/pos/PosQrDialog";
 import { computeInvoice, type POSCartLine } from "@/lib/pos-invoice";
 import { buildBackendPosPrintSnapshot } from "@/lib/pos-quote-receipt";
 import { formatPromotionSummary, PROMOTION_TYPE_LABELS, type Promotion } from "@/lib/promotions";
-import { promotions as promotionEvaluationService, promotionsCrud, shipping } from "@/services";
+import { adminCustomers, products as productService, promotions as promotionEvaluationService, promotionsCrud, shipping } from "@/services";
+import { useService } from "@/hooks/useService";
 import type { CartContext, EvaluatedPromotion, ShippingConfig, ShippingZoneRule } from "@/services/types";
-import { fetchPosScan } from "@/services/pos/posScanApi";
+import { fetchPosScan, type PosScanDto } from "@/services/pos/posScanApi";
 import { adminFetchJson, getAdminSession } from "@/services/auth/adminApi";
 import { postSalesQuoteAsPos } from "@/services/sales/salesQuoteApi";
 
@@ -40,7 +39,10 @@ type BackendSalesInvoiceResponse = {
 type ScanMode = "hid" | "camera" | "manual";
 
 export default function AdminPOS() {
-  const { customers, products: storeProducts } = useStore();
+  const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 200 }), []);
+  const { data: customerData, reload: reloadCustomers } = useService(() => adminCustomers.list(), []);
+  const storeProducts = productData?.items ?? [];
+  const customers = customerData ?? [];
   const [lines, setLines] = useState<POSCartLine[]>([]);
   const [scanMode, setScanMode] = useState<ScanMode>("hid");
   const [barcodeInput, setBarcodeInput] = useState("");
@@ -271,7 +273,7 @@ export default function AdminPOS() {
     }
   };
 
-  const addProductByVariant = (productId: string, productName: string, variant: typeof products[0]["variants"][0]) => {
+  const addProductByVariant = (productId: string, productName: string, variant: typeof storeProducts[number]["variants"][number]) => {
     if (variant.stock === 0) {
       toast.error(`${productName} đã hết hàng`);
       return;
@@ -345,6 +347,63 @@ export default function AdminPOS() {
     });
   };
 
+  const addVariantLineFromBackendScan = (scan: PosScanDto) => {
+    if (scan.productId == null || scan.variantId == null) {
+      toast.error(scan.blockReason || "Scan thiếu product/variant từ backend");
+      setScanFlash("err");
+      setTimeout(() => setScanFlash(null), 700);
+      return;
+    }
+    const stock = Math.max(0, Number(scan.variantStockQty ?? 0));
+    if (stock <= 0) {
+      toast.error(`${scan.productName ?? "Sản phẩm"} đã hết hàng`);
+      setScanFlash("err");
+      setTimeout(() => setScanFlash(null), 700);
+      return;
+    }
+    const vCode = (scan.variantCode || "").trim();
+    if (!vCode) {
+      toast.error("Thiếu mã variant từ backend");
+      setScanFlash("err");
+      setTimeout(() => setScanFlash(null), 700);
+      return;
+    }
+    const productId = String(scan.productId);
+    const variantId = String(scan.variantId);
+    const productName = String(scan.productName ?? "");
+    const variantName = String(scan.variantName ?? "");
+    const unitPrice = numFromApi(scan.price);
+
+    setLines((prev) => {
+      const existing = prev.find((l) => !l.batchId && l.variantId === variantId && !l.reward);
+      if (existing) {
+        const nextQty = existing.quantity + 1;
+        if (nextQty > existing.stock) {
+          toast.error("Không đủ tồn kho để thêm");
+          return prev;
+        }
+        return prev.map((l) => (l.id === existing.id ? { ...l, quantity: nextQty } : l));
+      }
+      return [
+        ...prev,
+        {
+          id: `${Date.now()}-${vCode}`,
+          productId,
+          variantId,
+          productName,
+          variantName,
+          variantCode: vCode,
+          unitPrice,
+          quantity: 1,
+          stock,
+        },
+      ];
+    });
+    toast.success(`Đã thêm ${productName} — ${variantName}`);
+    setScanFlash("ok");
+    setTimeout(() => setScanFlash(null), 500);
+  };
+
   const handleScannedCode = async (rawCode: string) => {
     const code = normalizeScanCode(rawCode);
     if (!code) return;
@@ -392,29 +451,7 @@ export default function AdminPOS() {
           setTimeout(() => setScanFlash(null), 700);
           return;
         }
-        const vCode = (scan.variantCode || "").trim();
-        if (!vCode) {
-          toast.error("Thiếu mã variant từ backend");
-          return;
-        }
-        let found: ReturnType<typeof resolveScannedCode> = null;
-        for (const p of storeProducts.length ? storeProducts : products) {
-          const v = p.variants.find((x) => x.code.toLowerCase() === vCode.toLowerCase());
-          if (v) {
-            found = { product: p, variant: v };
-            break;
-          }
-        }
-        if (!found) {
-          toast.error(`Không map được variant '${vCode}' vào danh mục POS — hãy đồng bộ sản phẩm (admin).`);
-          setScanFlash("err");
-          setTimeout(() => setScanFlash(null), 700);
-          return;
-        }
-        addProductByVariant(found.product.id, found.product.name, found.variant);
-        toast.success(`Đã thêm ${found.product.name} — ${found.variant.name}`);
-        setScanFlash("ok");
-        setTimeout(() => setScanFlash(null), 500);
+        addVariantLineFromBackendScan(scan);
         return;
       }
 
@@ -422,23 +459,14 @@ export default function AdminPOS() {
       setScanFlash("err");
       setTimeout(() => setScanFlash(null), 700);
     } catch (e) {
-      if (looksBatch) {
-        toast.error(e instanceof Error ? e.message : "Lỗi scan lô (backend)");
-        setScanFlash("err");
-        setTimeout(() => setScanFlash(null), 700);
-        return;
-      }
-      const found = resolveScannedCode(code);
-      if (found) {
-        addProductByVariant(found.product.id, found.product.name, found.variant);
-        toast.success(`Đã thêm ${found.product.name} — ${found.variant.name} (offline)`);
-        setScanFlash("ok");
-        setTimeout(() => setScanFlash(null), 500);
-      } else {
-        toast.error(`Không tìm thấy mã sản phẩm: ${code}`);
-        setScanFlash("err");
-        setTimeout(() => setScanFlash(null), 700);
-      }
+      const msg = e instanceof Error ? e.message : "Không kết nối được máy chủ quét mã";
+      toast.error(
+        looksBatch
+          ? msg || "Lỗi scan lô (backend)"
+          : `Không quét được mã từ backend — không thêm vào giỏ. ${msg} Kiểm tra mạng, đăng nhập admin, hoặc thử quét lại.`,
+      );
+      setScanFlash("err");
+      setTimeout(() => setScanFlash(null), 700);
     }
   };
   const handleBarcodeSubmit = () => { void handleScannedCode(barcodeInput); setBarcodeInput(""); };
@@ -449,8 +477,7 @@ export default function AdminPOS() {
   const removeLine = (id: string) => setLines((prev) => prev.filter((l) => l.id !== id));
 
   const catalogVariantSellPrice = (productId: string, variantId?: string): number | null => {
-    const pools = storeProducts.length ? storeProducts : products;
-    const p = pools.find((x) => x.id === productId);
+    const p = storeProducts.find((x) => x.id === productId);
     if (!p) return null;
     if (variantId) {
       const v = p.variants.find((x) => x.id === variantId);
@@ -584,8 +611,7 @@ export default function AdminPOS() {
           selectedShippingZone,
           note: note.trim() || undefined,
         });
-        const stored = invoiceActions.create(snap.invoiceForStore);
-        setLastPrintableInvoice(stored);
+        setLastPrintableInvoice({ id: `be-${created.invoiceNo}`, ...snap.invoiceForStore });
         setLastPrintableLines(snap.lines);
         setLastInvoice({ number: created.invoiceNo, total: paid });
         toast.success(`Đã tạo hóa đơn ${created.invoiceNo} (backend quote + lô)`);
@@ -681,8 +707,7 @@ export default function AdminPOS() {
           selectedShippingZone,
           note: note.trim() || undefined,
         });
-        const stored = invoiceActions.create(snap.invoiceForStore);
-        setLastPrintableInvoice(stored);
+        setLastPrintableInvoice({ id: `be-${created.invoiceNo}`, ...snap.invoiceForStore });
         setLastPrintableLines(snap.lines);
         setLastInvoice({ number: created.invoiceNo, total: paid });
         toast.success(`Đã tạo hóa đơn ${created.invoiceNo} (backend quote)`);
@@ -694,23 +719,7 @@ export default function AdminPOS() {
       return;
     }
 
-    const number = `HD-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(Math.floor(Math.random() * 999) + 1).padStart(3, "0")}`;
-    invoiceActions.create({
-      number,
-      date: new Date().toISOString(),
-      customerId: selectedCustomer || "",
-      customerName: customers.find((c) => c.id === selectedCustomer)?.name || "Khách lẻ",
-      total: totals.total,
-      paymentType,
-      status: "active",
-      createdBy: "admin",
-      itemCount: totalItems,
-      breakdown,
-      lines: snapshotLines,
-      note,
-    });
-    setLastInvoice({ number, total: totals.total });
-    toast.success(`Đã tạo hóa đơn ${number}`);
+    toast.error("Không tạo hóa đơn cục bộ trong production. Vui lòng đăng nhập backend admin.");
   };
 
   const handleNewInvoice = () => {
@@ -775,7 +784,7 @@ export default function AdminPOS() {
       ? printableLines
       : [pos58Empty];
 
-  const filteredProducts = products.filter((p) =>
+  const filteredProducts = storeProducts.filter((p) =>
     p.active && (!search || p.name.toLowerCase().includes(search.toLowerCase()) || p.code.toLowerCase().includes(search.toLowerCase()))
   );
 
@@ -1309,7 +1318,11 @@ export default function AdminPOS() {
       {(lines.length > 0 || lastInvoice) && (
         <Printable58Invoice invoice={pos58Invoice} lines={pos58Lines} />
       )}
-      <CustomerFormDrawer open={customerDrawerOpen} onClose={() => setCustomerDrawerOpen(false)} />
+      <CustomerFormDrawer
+        open={customerDrawerOpen}
+        onClose={() => setCustomerDrawerOpen(false)}
+        onSave={async (input) => { await adminCustomers.save(input); reloadCustomers(); }}
+      />
       {paymentType !== "cash" && (
         <PosQrDialog
           open={qrDialogOpen}

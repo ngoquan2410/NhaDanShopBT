@@ -4,10 +4,12 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTableToolbar, FilterChip } from "@/components/shared/DataTableToolbar";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { stockAdjustments, type StockAdjustment } from "@/lib/mock-data";
+import type { StockAdjustment } from "@/lib/mock-data";
 import { StockAdjustmentDetailDrawer } from "@/components/shared/StockAdjustmentDetailDrawer";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { useTableControls } from "@/hooks/useTableControls";
+import { useService } from "@/hooks/useService";
+import { adminStockAdjustments } from "@/services";
 import { formatDate } from "@/lib/format";
 import { Plus, ClipboardCheck, Eye, Pencil, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,6 +18,9 @@ export default function AdminStockAdjustments() {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string | null>(null);
   const [detail, setDetail] = useState<StockAdjustment | null>(null);
+  const { data, loading, error } = useService(() => adminStockAdjustments.list(), []);
+  const stockAdjustments = data?.items ?? [];
+  const apiTotal = data?.total ?? 0;
 
   const filtered = useMemo(() => stockAdjustments.filter(a => {
     if (search && !a.code.toLowerCase().includes(search.toLowerCase()) && !a.reason.toLowerCase().includes(search.toLowerCase())) return false;
@@ -35,7 +40,7 @@ export default function AdminStockAdjustments() {
     <div className="space-y-4 admin-dense">
       <PageHeader
         title="Kiểm kho / Điều chỉnh"
-        description={`${stockAdjustments.length} phiếu`}
+        description={`${apiTotal || stockAdjustments.length} phiếu`}
         actions={
           <Link to="/admin/stock-adjustments/create" className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover">
             <Plus className="h-3.5 w-3.5" /> Tạo phiếu điều chỉnh
@@ -54,9 +59,14 @@ export default function AdminStockAdjustments() {
         </>}
       />
 
-      {filtered.length === 0 ? (
+      {loading && <p className="text-sm text-muted-foreground">Đang tải phiếu điều chỉnh từ backend...</p>}
+      {error && <p className="text-sm text-danger">Không tải được phiếu điều chỉnh: {error.message}</p>}
+
+      {!loading && stockAdjustments.length === 0 ? (
         <EmptyState icon={ClipboardCheck} title="Chưa có phiếu điều chỉnh" description="Tạo phiếu kiểm kho đầu tiên" />
-      ) : (
+      ) : !loading && filtered.length === 0 ? (
+        <EmptyState icon={ClipboardCheck} title="Không có phiếu khớp bộ lọc" description="Đổi trạng thái hoặc xóa ô tìm kiếm — trên máy chủ vẫn có dữ liệu." />
+      ) : !loading && (
         <>
           <div className="hidden md:block bg-card rounded-lg border overflow-hidden">
             <table className="w-full text-sm">

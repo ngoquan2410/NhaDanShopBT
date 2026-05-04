@@ -1,6 +1,7 @@
 package com.example.nhadanshop.controller;
 
 import com.example.nhadanshop.dto.*;
+import com.example.nhadanshop.repository.UserRepository;
 import com.example.nhadanshop.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ import java.util.stream.Collectors;
 public class AuthController {
 
     private final AuthService authService;
+    private final UserRepository userRepository;
 
     /**
      * POST /api/auth/signup
@@ -74,6 +76,26 @@ public class AuthController {
     }
 
     /**
+     * POST /api/auth/forgot-password
+     * Gửi email đặt lại mật khẩu (yêu cầu SMTP + user có email trên Customer).
+     */
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Void> forgotPassword(@Valid @RequestBody ForgotPasswordRequest req) {
+        authService.requestPasswordReset(req.username());
+        return ResponseEntity.accepted().build();
+    }
+
+    /**
+     * POST /api/auth/reset-password
+     * Đặt lại mật khẩu bằng token từ email.
+     */
+    @PostMapping("/reset-password")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest req) {
+        authService.resetPasswordWithToken(req.token(), req.newPassword());
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * POST /api/auth/logout-all
      * Revoke tất cả refresh tokens của user (đăng xuất mọi thiết bị).
      */
@@ -92,10 +114,14 @@ public class AuthController {
         Set<String> roles = auth.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
                 .collect(Collectors.toSet());
-        return ResponseEntity.ok(Map.of(
-                "username", auth.getName(),
-                "roles", roles
-        ));
+        Long customerId = userRepository.findByUsername(auth.getName())
+                .map(u -> u.getCustomer() != null ? u.getCustomer().getId() : null)
+                .orElse(null);
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("username", auth.getName());
+        body.put("roles", roles);
+        body.put("customerId", customerId);
+        return ResponseEntity.ok(body);
     }
 
     /**

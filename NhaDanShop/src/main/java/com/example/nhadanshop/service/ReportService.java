@@ -22,6 +22,7 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 @Service
@@ -52,6 +53,34 @@ public class ReportService {
                 netRevenue,
                 nullSafe(totalCost),
                 netProfit,
+                totalInvoices,
+                marginPct,
+                totalVat);
+    }
+
+    /**
+     * Lợi nhuận lọc theo productIds — chỉ dòng merchandise có {@code SalesInvoiceItem.product.id} thuộc tập chỉ định.
+     */
+    public ProfitReportResponse getProfitReportForProducts(LocalDate from, LocalDate to, Collection<Long> productIds) {
+        if (productIds == null || productIds.isEmpty()) {
+            return getProfitReport(from, to);
+        }
+        List<Long> distinct = productIds.stream().distinct().toList();
+        LocalDateTime fromDt = from.atStartOfDay();
+        LocalDateTime toDt = to.atTime(LocalTime.MAX);
+
+        BigDecimal merchandiseNetRevenue = invoiceRepo.sumLineNetRevenueBetweenForProductIds(fromDt, toDt, distinct);
+        BigDecimal totalCost = invoiceRepo.sumCostBetweenForProductIds(fromDt, toDt, distinct);
+        long totalInvoices = invoiceRepo.countDistinctInvoicesBetweenForProductIds(fromDt, toDt, distinct);
+        BigDecimal lineNetProfitSum = invoiceRepo.sumProfitBetweenForProductIds(fromDt, toDt, distinct);
+        BigDecimal totalVat = sumVatFromPricingSnapshots(
+                invoiceRepo.findDistinctPricingSnapshotsBetweenForProductIds(fromDt, toDt, distinct));
+        BigDecimal marginPct = ProfitReportResponse.marginPct(merchandiseNetRevenue, lineNetProfitSum);
+
+        return new ProfitReportResponse(from, to,
+                merchandiseNetRevenue,
+                nullSafe(totalCost),
+                lineNetProfitSum,
                 totalInvoices,
                 marginPct,
                 totalVat);

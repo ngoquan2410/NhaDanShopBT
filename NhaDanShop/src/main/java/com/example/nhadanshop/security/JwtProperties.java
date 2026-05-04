@@ -14,6 +14,6 @@ public class JwtProperties {
     private String secret = "changeme_256bit_secret_key_here!";
     /** Access token TTL tính bằng phút */
     private long accessTokenExpiryMinutes = 30;
-    /** Refresh token TTL tính bằng ngày */
-    private long refreshTokenExpiryDays = 7;
+    /** Refresh token TTL tính bằng phút */
+    private long refreshTokenExpiryMinutes = 15;
 }

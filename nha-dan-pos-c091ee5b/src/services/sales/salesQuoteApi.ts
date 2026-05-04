@@ -26,6 +26,16 @@ export type SalesQuoteRequestPayload = {
   shippingAddress?: ShippingAddress | null;
   manualDiscount?: number | null;
   vatPercent?: number | null;
+  requestedRedeemPoints?: number | null;
+};
+
+export type LoyaltySnapshotFromQuote = {
+  customerId: number;
+  requestedPoints: number;
+  redeemedPoints: number;
+  discountAmount: number;
+  availablePointsBefore: number;
+  policy?: string | null;
 };
 
 export type SalesQuoteLineResponse = {
@@ -57,6 +67,7 @@ export type SalesQuoteApiResult = {
   pricingBreakdownSnapshot: PricingBreakdownSnapshot;
   shippingQuoteSnapshot: ShippingQuoteSnapshot | null;
   voucherSnapshot: VoucherSnapshotFromQuote | null;
+  loyaltySnapshot: LoyaltySnapshotFromQuote | null;
 };
 
 function normalizePricing(v: Record<string, unknown>): PricingBreakdownSnapshot {
@@ -73,6 +84,8 @@ function normalizePricing(v: Record<string, unknown>): PricingBreakdownSnapshot 
   const vatAmount = Number(v.vatAmount ?? 0);
   const total = Number(v.total ?? 0);
   const commercialAllocationVersion = v.commercialAllocationVersion == null ? undefined : Number(v.commercialAllocationVersion);
+  const loyaltyDiscount = v.loyaltyDiscount == null ? undefined : Number(v.loyaltyDiscount);
+  const loyaltyRedeemedPoints = v.loyaltyRedeemedPoints == null ? undefined : Number(v.loyaltyRedeemedPoints);
   return {
     subtotal,
     manualDiscount,
@@ -82,12 +95,27 @@ function normalizePricing(v: Record<string, unknown>): PricingBreakdownSnapshot 
     shippingDiscount,
     itemNetRevenue,
     shippingNetRevenue,
+    loyaltyDiscount,
+    loyaltyRedeemedPoints,
     vatBase,
     vatPercent,
     vatAmount,
     vat: vatAmount,
     total,
     commercialAllocationVersion,
+  };
+}
+
+function mapLoyaltySnapshot(v: unknown): LoyaltySnapshotFromQuote | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  return {
+    customerId: Number(o.customerId ?? 0),
+    requestedPoints: Number(o.requestedPoints ?? 0),
+    redeemedPoints: Number(o.redeemedPoints ?? 0),
+    discountAmount: Number(o.discountAmount ?? 0),
+    availablePointsBefore: Number(o.availablePointsBefore ?? 0),
+    policy: o.policy != null ? String(o.policy) : undefined,
   };
 }
 
@@ -120,13 +148,16 @@ function mapQuoteResponse(j: Record<string, unknown>): SalesQuoteApiResult {
     ),
     shippingQuoteSnapshot: (j.shippingQuoteSnapshot as ShippingQuoteSnapshot) ?? null,
     voucherSnapshot: mapVoucherSnapshot(j.voucherSnapshot),
+    loyaltySnapshot: mapLoyaltySnapshot(j.loyaltySnapshot),
   };
 }
 
 export async function postSalesQuote(req: SalesQuoteRequestPayload): Promise<SalesQuoteApiResult> {
+  let accessToken: string | undefined;
+  try { accessToken = JSON.parse(window.localStorage.getItem("nhadan.auth.session.v1") || "{}")?.accessToken; } catch { /* ignore */ }
   const res = await fetch("/api/sales/quote", {
     method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: { Accept: "application/json", "Content-Type": "application/json", ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
     body: JSON.stringify(req),
   });
   if (!res.ok) {

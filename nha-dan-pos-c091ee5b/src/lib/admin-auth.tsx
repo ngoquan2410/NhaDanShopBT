@@ -1,7 +1,3 @@
-// Lightweight auth context for the ADMIN area only.
-// - Uses Supabase auth (Lovable Cloud) — separate from the storefront's mock auth.
-// - Tracks the current session + whether the signed-in user has the 'admin' role.
-// - Exposes signIn / signUp / signOut. Storefront auth is untouched.
 import {
   createContext,
   useCallback,
@@ -11,102 +7,161 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
+import { cartActions } from "@/lib/cart";
+
+export const AUTH_SESSION_KEY = "nhadan.auth.session.v1";
+
+export interface AuthSession {
+  accessToken: string;
+  refreshToken: string | null;
+  tokenType?: string | null;
+  expiresAt: number;
+  username: string;
+  fullName?: string | null;
+  roles: string[];
+  customerId?: number | null;
+  /** From last login/refresh — TOTP state for UI */
+  totpEnabled?: boolean;
+}
 
 interface AdminAuthState {
-  session: Session | null;
-  user: User | null;
+  session: AuthSession | null;
+  user: { username: string; fullName?: string | null; customerId?: number | null } | null;
   isAdmin: boolean;
+  isUser: boolean;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error?: string }>;
-  signUp: (email: string, password: string) => Promise<{ error?: string }>;
+  signIn: (username: string, password: string) => Promise<{ error?: string; totpRequired?: boolean; preAuthToken?: string }>;
+  verifyTotp: (preAuthToken: string, otp: string) => Promise<{ error?: string }>;
+  signUp: (username: string, password: string, fullName?: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   refreshRole: () => Promise<void>;
+  refreshSession: () => Promise<AuthSession | null>;
 }
 
 const Ctx = createContext<AdminAuthState | null>(null);
 
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [session, setSessionState] = useState<AuthSession | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const checkRole = useCallback(async (userId: string | undefined) => {
-    if (!userId) {
-      setIsAdmin(false);
-      return;
-    }
-    const { data, error } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", userId)
-      .eq("role", "admin")
-      .maybeSingle();
-    if (error) {
-      console.warn("role check failed", error);
-      setIsAdmin(false);
-      return;
-    }
-    setIsAdmin(!!data);
+  const persist = useCallback((next: AuthSession | null) => {
+    setSessionState(next);
+    try {
+      if (next) window.localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(next));
+      else window.localStorage.removeItem(AUTH_SESSION_KEY);
+      window.sessionStorage.removeItem("nhadan.adminAuth.session");
+    } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
-    // 1) Subscribe FIRST (Supabase best practice: avoid missed events).
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
-      setSession(sess);
-      // Defer Supabase calls out of the callback to avoid deadlocks.
-      setTimeout(() => {
-        void checkRole(sess?.user?.id);
-      }, 0);
-    });
-
-    // 2) Then load the current session.
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      void checkRole(data.session?.user?.id).finally(() => setLoading(false));
-    });
-
-    return () => sub.subscription.unsubscribe();
-  }, [checkRole]);
-
-  const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return error ? { error: error.message } : {};
+    try {
+      const raw = window.localStorage.getItem(AUTH_SESSION_KEY);
+      setSessionState(raw ? JSON.parse(raw) as AuthSession : null);
+      window.sessionStorage.removeItem("nhadan.adminAuth.session");
+    } catch { setSessionState(null); }
+    setLoading(false);
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string) => {
-    // emailRedirectTo is required so Supabase knows where to send confirm link
-    // even when auto-confirm is on (covers the case it ever gets disabled).
-    const redirectUrl = `${window.location.origin}/admin/login`;
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo: redirectUrl },
-    });
-    return error ? { error: error.message } : {};
-  }, []);
+  const normalize = useCallback((data: any): AuthSession => ({
+    accessToken: data.accessToken,
+    refreshToken: data.refreshToken ?? null,
+    tokenType: data.tokenType ?? "Bearer",
+    expiresAt: Date.now() + Number(data.expiresIn ?? 900) * 1000,
+    username: data.username,
+    fullName: data.fullName ?? null,
+    roles: Array.isArray(data.roles) ? data.roles : Array.from(data.roles ?? []),
+    customerId: data.customerId ?? null,
+    totpEnabled: Boolean(data.totpEnabled),
+  }), []);
+
+  const parse = async (res: Response) => {
+    const text = await res.text();
+    return text ? JSON.parse(text) : {};
+  };
+
+  const signIn = useCallback(async (username: string, password: string) => {
+    const res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ username, password }) });
+    const data = await parse(res);
+    if (!res.ok) return { error: data?.detail ?? data?.message ?? `HTTP ${res.status}` };
+    if (data?.totpRequired) return { totpRequired: true, preAuthToken: data.accessToken };
+    persist(normalize(data));
+    return {};
+  }, [normalize, persist]);
+
+  const verifyTotp = useCallback(async (preAuthToken: string, otp: string) => {
+    const res = await fetch("/api/auth/verify-totp", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ preAuthToken, otp }) });
+    const data = await parse(res);
+    if (!res.ok) return { error: data?.detail ?? data?.message ?? `HTTP ${res.status}` };
+    persist(normalize(data));
+    return {};
+  }, [normalize, persist]);
+
+  const signUp = useCallback(async (username: string, password: string, fullName?: string) => {
+    const res = await fetch("/api/auth/signup", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ username, password, fullName }) });
+    const data = await parse(res);
+    if (!res.ok) return { error: data?.detail ?? data?.message ?? `HTTP ${res.status}` };
+    persist(normalize(data));
+    return {};
+  }, [normalize, persist]);
+
+  const refreshSession = useCallback(async () => {
+    if (!session?.refreshToken) return null;
+    const res = await fetch("/api/auth/refresh", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ refreshToken: session.refreshToken }) });
+    const data = await parse(res);
+    if (!res.ok) { persist(null); return null; }
+    const next = normalize(data);
+    persist(next);
+    return next;
+  }, [normalize, persist, session?.refreshToken]);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
-  }, []);
+    const accessToken = session?.accessToken;
+    const refreshToken = session?.refreshToken;
+    try {
+      if (refreshToken) {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        };
+        if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+        await fetch("/api/auth/logout", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ refreshToken }),
+        }).catch(() => undefined);
+      }
+    } finally {
+      try {
+        cartActions.clear();
+      } catch {
+        /* ignore */
+      }
+      persist(null);
+    }
+  }, [persist, session?.accessToken, session?.refreshToken]);
 
   const refreshRole = useCallback(async () => {
-    await checkRole(session?.user?.id);
-  }, [checkRole, session?.user?.id]);
+    if (session?.refreshToken) await refreshSession();
+  }, [refreshSession, session?.refreshToken]);
+
+  const isAdmin = !!session?.roles?.includes("ROLE_ADMIN");
+  const isUser = !!session?.roles?.includes("ROLE_USER");
 
   const value = useMemo<AdminAuthState>(
     () => ({
       session,
-      user: session?.user ?? null,
+      user: session ? { username: session.username, fullName: session.fullName, customerId: session.customerId } : null,
       isAdmin,
+      isUser,
       loading,
       signIn,
+      verifyTotp,
       signUp,
       signOut,
       refreshRole,
+      refreshSession,
     }),
-    [session, isAdmin, loading, signIn, signUp, signOut, refreshRole],
+    [session, isAdmin, isUser, loading, signIn, verifyTotp, signUp, signOut, refreshRole, refreshSession],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -117,3 +172,6 @@ export function useAdminAuth() {
   if (!v) throw new Error("useAdminAuth must be used inside AdminAuthProvider");
   return v;
 }
+
+export const useAuth = useAdminAuth;
+

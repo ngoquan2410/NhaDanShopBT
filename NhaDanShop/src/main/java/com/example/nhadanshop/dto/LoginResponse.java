@@ -14,6 +14,21 @@ public record LoginResponse(
         String username,
         String fullName,
         Set<String> roles,
+        Long customerId,
         boolean totpEnabled,    // user đã bật TOTP chưa
         boolean totpRequired    // login này có yêu cầu nhập TOTP không (true = cần bước 2)
-) {}
+) {
+    public LoginResponse(
+            String accessToken,
+            String refreshToken,
+            String tokenType,
+            long expiresIn,
+            String username,
+            String fullName,
+            Set<String> roles,
+            boolean totpEnabled,
+            boolean totpRequired
+    ) {
+        this(accessToken, refreshToken, tokenType, expiresIn, username, fullName, roles, null, totpEnabled, totpRequired);
+    }
+}

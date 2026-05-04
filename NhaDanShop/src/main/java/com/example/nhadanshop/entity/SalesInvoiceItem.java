@@ -92,6 +92,9 @@ public class SalesInvoiceItem {
     @Column(name = "allocated_voucher_discount", precision = 18, scale = 2)
     private BigDecimal allocatedVoucherDiscount;
 
+    @Column(name = "allocated_loyalty_discount", precision = 18, scale = 2)
+    private BigDecimal allocatedLoyaltyDiscount;
+
     @Column(name = "allocated_merchandise_discount", precision = 18, scale = 2)
     private BigDecimal allocatedMerchandiseDiscount;
 

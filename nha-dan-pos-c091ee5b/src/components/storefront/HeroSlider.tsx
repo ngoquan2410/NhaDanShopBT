@@ -4,9 +4,9 @@ import { Link } from "react-router-dom";
 import { ArrowRight, ChevronLeft, ChevronRight, Package, ShoppingBag, Sparkles } from "lucide-react";
 import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { products as ProductList } from "@/lib/mock-data";
+import type { StorefrontProduct } from "@/services/catalog/publicCatalog";
 
-type Product = (typeof ProductList)[number];
+type Product = StorefrontProduct;
 
 const BADGES = [
   { label: "Top #1 · Chủ đạo", cls: "bg-storefront-gold text-white" },

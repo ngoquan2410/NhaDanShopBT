@@ -5,8 +5,6 @@ import { Badge } from "@/components/ui/badge";
 import type { Invoice, InvoiceLine } from "@/lib/mock-data";
 import { Printable58Invoice } from "@/components/shared/Printable58Invoice";
 import { triggerPrint } from "@/lib/print";
-import { useStore } from "@/lib/store";
-import { PROMOTION_TYPE_LABELS, formatPromotionSummary, formatScope, type Promotion } from "@/lib/promotions";
 
 interface Props {
   invoice: Invoice | null;
@@ -25,8 +23,6 @@ function getMockLines(inv: Invoice): InvoiceLine[] {
 }
 
 export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
-  const { promotions, categories, products } = useStore();
-
   if (!invoice) return null;
 
   // Use snapshot when present (POS-generated). Fallback to mock for legacy.
@@ -54,10 +50,6 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
   };
 
   // Resolve full promotion record by name (best-effort) for richer detail panel.
-  const promo: Promotion | undefined = b.promoName
-    ? promotions.find((p) => p.name === b.promoName)
-    : undefined;
-
   const voucherDiscount = b.voucherDiscount ?? 0;
   const hasManual = b.manualDiscount > 0;
   const hasPromoDiscount = b.promoDiscount > 0;
@@ -83,13 +75,8 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
   }
 
   // Promotion rule text + scope text
-  const ruleText = promo ? formatPromotionSummary(promo) : (b.promoName ? "Khuyến mãi áp dụng từ POS" : "");
-  const scopeText = promo
-    ? formatScope(promo, {
-        categoryNames: Object.fromEntries(categories.map((c) => [c.id, c.name])),
-        productNames: Object.fromEntries(products.map((p) => [p.id, p.name])),
-      })
-    : "";
+  const ruleText = b.promoName ? "Khuyến mãi áp dụng từ snapshot hóa đơn backend" : "";
+  const scopeText = "";
 
   const handlePrint58 = () => triggerPrint(`hóa đơn ${invoice.number} (POS58)`, "pos58", { targetId: "print-root-invoice-pos58" });
 
@@ -162,16 +149,7 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
                     Chi tiết khuyến mãi
                   </h3>
                   <div className="flex items-center gap-1.5">
-                    {promo && (
-                      <Badge variant="outline" className="text-[10px] h-5">
-                        {PROMOTION_TYPE_LABELS[promo.type]}
-                      </Badge>
-                    )}
-                    {promo ? (
-                      <Badge variant={promo.active ? "default" : "secondary"} className="text-[10px] h-5">
-                        {promo.active ? "Đang chạy" : "Tạm dừng"}
-                      </Badge>
-                    ) : b.promoName ? (
+                    {b.promoName ? (
                       <Badge variant="secondary" className="text-[10px] h-5">Đã áp dụng</Badge>
                     ) : null}
                   </div>

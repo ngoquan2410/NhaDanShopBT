@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,6 +18,9 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
 
     /** Tất cả variants của 1 SP, default lên trước */
     List<ProductVariant> findByProductIdOrderByIsDefaultDescVariantCodeAsc(Long productId);
+
+    /** Batch load variants for many products (order not guaranteed; sort per-product in service). */
+    List<ProductVariant> findByProductIdIn(Collection<Long> productIds);
 
     /** Active variants of one product, same ordering as the full list (default first, then code). */
     List<ProductVariant> findByProductIdAndActiveTrueOrderByIsDefaultDescVariantCodeAsc(Long productId);

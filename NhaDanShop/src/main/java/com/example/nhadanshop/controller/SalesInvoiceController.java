@@ -35,6 +35,8 @@ public class SalesInvoiceController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String q,
             @PageableDefault(size = 20) Pageable pageable) {
 
         if (customerId != null) {
@@ -44,7 +46,16 @@ public class SalesInvoiceController {
             return invoiceService.listInvoicesByDateRange(
                     from.atStartOfDay(), to.atTime(LocalTime.MAX), pageable);
         }
-        return invoiceService.listInvoices(pageable);
+        com.example.nhadanshop.entity.SalesInvoice.Status invoiceStatus = null;
+        if (status != null && !status.isBlank()) {
+            String s = status.trim().toLowerCase();
+            if ("active".equals(s) || "completed".equals(s)) {
+                invoiceStatus = com.example.nhadanshop.entity.SalesInvoice.Status.COMPLETED;
+            } else if ("cancelled".equals(s) || "canceled".equals(s)) {
+                invoiceStatus = com.example.nhadanshop.entity.SalesInvoice.Status.CANCELLED;
+            }
+        }
+        return invoiceService.listInvoices(pageable, invoiceStatus, q);
     }
 
     @GetMapping("/{id}")

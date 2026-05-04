@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { useService } from "@/hooks/useService";
+import { products as productService } from "@/services";
 
 interface Props {
   value?: string;
@@ -11,7 +12,8 @@ interface Props {
 }
 
 export function ProductPicker({ value, valueName, onChange, error, placeholder = "Chọn sản phẩm..." }: Props) {
-  const { products } = useStore();
+  const { data } = useService(() => productService.list({ page: 1, pageSize: 200, active: true }), []);
+  const products = data?.items ?? [];
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 

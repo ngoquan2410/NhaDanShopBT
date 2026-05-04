@@ -61,6 +61,9 @@ class Slice6bPosTraceabilityIntegrationTest {
     @MockBean
     private InvoiceNumberGenerator invoiceNumberGenerator;
 
+    @MockBean
+    private CustomerLoyaltyService customerLoyaltyService;
+
     @Autowired
     private InvoiceService invoiceService;
     @Autowired

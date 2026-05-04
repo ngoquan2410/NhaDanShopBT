@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { FormDrawer, Field } from "./FormDrawer";
-import { supplierActions } from "@/lib/store";
 import type { Supplier } from "@/lib/mock-data";
 import { toast } from "sonner";
 import { validatePhone, validateEmail, validateRequired, normalizePhone } from "@/lib/validation";
@@ -10,6 +9,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   supplier?: Supplier | null;
+  onSave: (input: Partial<Supplier> & Pick<Supplier, "name">) => Promise<void>;
 }
 
 const inputCls = "w-full h-9 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring";
@@ -35,18 +35,17 @@ export function SupplierFormDrawer({ open, onClose, supplier }: Props) {
   const isValid = !errors.name && !errors.phone && !errors.email;
   const showErr = (k: keyof typeof errors) => touched[k] && errors[k];
 
-  const submit = () => {
+  const submit = async () => {
     setTouched({ name: true, phone: true, email: true });
     if (!isValid) { toast.error("Vui lòng kiểm tra lại thông tin"); return; }
-    const payload = { ...form, phone: normalizePhone(form.phone), email: form.email.trim(), note: form.note || undefined };
-    if (supplier) {
-      supplierActions.update(supplier.id, payload);
-      toast.success("Đã cập nhật nhà cung cấp");
-    } else {
-      supplierActions.create(payload);
-      toast.success("Đã thêm nhà cung cấp");
+    try {
+      const payload = { ...form, id: supplier?.id, code: supplier?.code, phone: normalizePhone(form.phone), email: form.email.trim(), note: form.note || undefined };
+      await onSave(payload);
+      toast.success(supplier ? "Đã cập nhật nhà cung cấp" : "Đã thêm nhà cung cấp");
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không thể lưu nhà cung cấp");
     }
-    onClose();
   };
 
   return (

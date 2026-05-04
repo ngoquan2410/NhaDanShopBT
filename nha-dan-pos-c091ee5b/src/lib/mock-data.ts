@@ -64,6 +64,8 @@ export interface Combo {
   active: boolean;
   components: ComboItem[];
   derivedStock: number;
+  /** Backend default variant for cart/quote (combo product). */
+  defaultVariantId?: string;
 }
 
 export interface Customer {
@@ -164,6 +166,12 @@ export interface Invoice {
   sourceType?: 'pos' | 'online_pending' | 'manual';
   /** Pending order this invoice was created from (if any). */
   pendingOrderId?: string;
+  /** Σ merchandise gross profit from backend allocation when present. */
+  itemGrossProfit?: number | null;
+  /** Full invoice profit from backend (`DtoMapper`): may include shipping net when modeled. */
+  totalProfit?: number | null;
+  /** When false, hide hard-delete UI (backend forbids destructive delete on completed invoices). */
+  allowPhysicalDelete?: boolean;
 }
 
 export interface PendingOrder {
@@ -301,7 +309,8 @@ export interface ProfitRow {
   revenue: number;
   cost: number;
   profit: number;
-  margin: number;
+  /** Backend profit margin (%), e.g. 12.3 — omit when zero-state (no denominator / no invoices). */
+  margin?: number;
   invoiceCount: number;
 }
 

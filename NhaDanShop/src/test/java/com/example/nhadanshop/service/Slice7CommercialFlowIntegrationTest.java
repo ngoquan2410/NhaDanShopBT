@@ -71,6 +71,7 @@ import static org.mockito.Mockito.when;
         InvoiceService.class,
         SalesQuoteService.class,
         PromotionEvaluationService.class,
+        ShippingSettingsService.class,
         ShippingQuoteService.class,
         GhnShippingService.class,
         ProductBatchService.class,
@@ -82,8 +83,18 @@ import static org.mockito.Mockito.when;
 })
 class Slice7CommercialFlowIntegrationTest {
 
+    /** Must overlap {@link TestCfg#businessClock()} fixed instant (2026-04-29 Asia/Ho_Chi_Minh). */
+    private static final LocalDateTime S7_PROMO_WINDOW_START = LocalDateTime.of(2026, 4, 1, 0, 0);
+    private static final LocalDateTime S7_PROMO_WINDOW_END = LocalDateTime.of(2026, 6, 1, 23, 59);
+
     @MockBean
     private InvoiceNumberGenerator invoiceNumberGenerator;
+
+    @MockBean
+    private CustomerLoyaltyService customerLoyaltyService;
+
+    @MockBean
+    private AccountService accountService;
 
     @Autowired
     private PendingOrderService pendingOrderService;
@@ -263,8 +274,8 @@ class Slice7CommercialFlowIntegrationTest {
         promo.setType("FIXED_DISCOUNT");
         promo.setDiscountValue(new BigDecimal("10000"));
         promo.setMinOrderValue(BigDecimal.ZERO);
-        promo.setStartDate(LocalDateTime.now().minusDays(1));
-        promo.setEndDate(LocalDateTime.now().plusDays(30));
+        promo.setStartDate(S7_PROMO_WINDOW_START);
+        promo.setEndDate(S7_PROMO_WINDOW_END);
         promo.setActive(true);
         promo.setAppliesTo("ALL");
         promo = promotionRepository.save(promo);
@@ -529,8 +540,8 @@ class Slice7CommercialFlowIntegrationTest {
         promo.setType("BUY_X_GET_Y");
         promo.setDiscountValue(BigDecimal.ZERO);
         promo.setMinOrderValue(BigDecimal.ZERO);
-        promo.setStartDate(LocalDateTime.now().minusDays(1));
-        promo.setEndDate(LocalDateTime.now().plusDays(30));
+        promo.setStartDate(S7_PROMO_WINDOW_START);
+        promo.setEndDate(S7_PROMO_WINDOW_END);
         promo.setActive(true);
         promo.setAppliesTo("ALL");
         promo.setBuyQty(buyQty);

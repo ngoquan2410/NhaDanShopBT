@@ -8,7 +8,7 @@ import java.util.Set;
 /** Dùng cho PATCH update user – password và roles optional */
 public record UserUpdateRequest(
         @Size(max = 150) String fullName,
-        @Size(min = 6, max = 100) String password,
+        @Size(min = 10, max = 100) String password,
         Boolean isActive,
         Set<String> roles
 ) {}

@@ -16,6 +16,13 @@ import { Search, Plus, Package, MoreHorizontal, Upload, Pencil, Trash2, Power, E
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 function getStockSignal(product: Product) {
   const hasOutOfStock = product.variants.some(v => v.stock === 0);
@@ -54,8 +61,7 @@ export default function AdminProducts() {
     [filterCategory],
   );
 
-  // Categories now come from CategoryService — same store under the hood, but
-  // the screen no longer reaches into useStore() directly.
+  // Categories now come from CategoryService; this screen uses only backend-backed services.
   const { data: categoriesData } = useService(
     () => categoryService.list({ active: true }),
     [],
@@ -131,24 +137,36 @@ export default function AdminProducts() {
             className="w-full h-8 pl-9 pr-3 text-sm bg-card rounded-md border focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
-        <div className="flex gap-2 overflow-x-auto">
-          <button onClick={() => setFilterCategory(null)} className={cn("shrink-0 px-2.5 py-1 text-xs font-medium rounded-md border", !filterCategory ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted")}>
-            Tất cả
-          </button>
-          {(() => {
-            const seen = new Set<string>();
-            return categories.filter(c => {
-              if (!c.active) return false;
-              const key = c.name.trim().toLowerCase();
-              if (seen.has(key)) return false;
-              seen.add(key);
-              return true;
-            }).map(cat => (
-              <button key={cat.id} onClick={() => setFilterCategory(cat.id)} className={cn("shrink-0 px-2.5 py-1 text-xs font-medium rounded-md border", filterCategory === cat.id ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted")}>
-                {cat.name}
-              </button>
-            ));
-          })()}
+        <div className="w-full sm:w-56 shrink-0">
+          <Select
+            value={filterCategory ?? "__all"}
+            onValueChange={(v) => setFilterCategory(v === "__all" ? null : v)}
+          >
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder="Danh mục" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all" className="text-xs">
+                Tất cả danh mục
+              </SelectItem>
+              {(() => {
+                const seen = new Set<string>();
+                return categories
+                  .filter((c) => {
+                    if (!c.active) return false;
+                    const key = c.name.trim().toLowerCase();
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                  })
+                  .map((cat) => (
+                    <SelectItem key={cat.id} value={cat.id} className="text-xs">
+                      {cat.name}
+                    </SelectItem>
+                  ));
+              })()}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

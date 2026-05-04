@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertCircle, AlertTriangle, ArrowLeft, Check, ChevronRight, FileSpreadsheet,
   FileText, Package, Plus, Printer, RefreshCw, Save, Search, Trash2, Upload, X,
@@ -14,11 +14,11 @@ import { importStaging } from "@/lib/import-staging";
 import { draftActions } from "@/lib/drafts";
 import { formatVND } from "@/lib/format";
 import { receiptImportRowSellableLabel, type ImportSeverity, type ReceiptImportOutcome, type ReceiptImportRow } from "@/lib/import-types";
-import { categoryActions, useStore } from "@/lib/store";
-import { products as seedProducts, type Product, type ProductVariant } from "@/lib/mock-data";
+import type { Product, ProductVariant } from "@/lib/catalog-types";
 import { cn } from "@/lib/utils";
 import { getAdminSession } from "@/services/auth/adminApi";
-import { products as productService } from "@/services";
+import { adminSuppliers, categories as categoryService, products as productService } from "@/services";
+import { useService } from "@/hooks/useService";
 import {
   createInventoryReceipt,
   type InventoryReceiptCreateItem,
@@ -56,6 +56,8 @@ interface ReceiptLineDraft {
   isSellableInvalid?: boolean;
   importParserWarnings?: string[];
 }
+
+let validationCatalog: Product[] = [];
 
 interface LineIssue { errors: string[]; warnings: string[]; }
 type StatusFilter = "all" | "error" | "warning" | "ok" | "edited";
@@ -102,7 +104,7 @@ function convertImportedRow(row: ReceiptImportRow, _receiptDate: string, index: 
 }
 
 function inferOutcome(line: ReceiptLineDraft): { outcome: ReceiptImportOutcome; message?: string } {
-  const product = seedProducts.find((p) => p.code.toUpperCase() === line.productCode.trim().toUpperCase());
+  const product = validationCatalog.find((p) => p.code.toUpperCase() === line.productCode.trim().toUpperCase());
   if (!product) return { outcome: "create-product-and-variant", message: `Tạo SP mới ${line.productCode || "(?)"}.` };
   if (!line.variantCode.trim()) {
     const v = product.variants.find((x) => x.isDefault) ?? product.variants[0];
@@ -130,7 +132,7 @@ function validateImportedLine(line: ReceiptLineDraft): LineIssue {
   if (line.expiryMode === "date" && !line.expiryDate) warnings.push("Chưa có HSD.");
   if (line.expiryMode === "days" && line.expiryDays <= 0) errors.push("Số ngày HSD phải > 0.");
 
-  const product = seedProducts.find((p) => p.code.toUpperCase() === line.productCode.trim().toUpperCase());
+  const product = validationCatalog.find((p) => p.code.toUpperCase() === line.productCode.trim().toUpperCase());
   if (!product) {
     if (!line.category.trim()) errors.push("SP mới phải có danh mục.");
     if (!line.productName.trim()) errors.push("SP mới phải có tên.");
@@ -141,7 +143,7 @@ function validateImportedLine(line: ReceiptLineDraft): LineIssue {
     }
   }
   if (line.sellPrice > 0 && line.unitCost > 0 && line.sellPrice < line.unitCost) warnings.push("Giá bán < giá nhập.");
-  const known = seedProducts.flatMap((p) => p.variants).find((v) => v.code === line.variantCode);
+  const known = validationCatalog.flatMap((p) => p.variants).find((v) => v.code === line.variantCode);
   if (known && line.unitCost > known.costPrice * 2) warnings.push(`Giá nhập cao bất thường (gần nhất ${formatVND(known.costPrice)}).`);
   if (line.isSellableInvalid) errors.push("Cột bán hàng (P) không hợp lệ.");
   if (!line.variantCode.trim()) warnings.push("Variant trống — sẽ dùng default.");
@@ -162,10 +164,14 @@ function revalidateLines(lines: ReceiptLineDraft[]): ReceiptLineDraft[] {
 
 export default function AdminGoodsReceiptCreate() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [params] = useSearchParams();
   const draftId = params.get("draft");
   const isImportMode = params.get("mode") === "import";
-  const { suppliers, categories } = useStore();
+  const { data: supplierRows, reload: reloadSuppliers } = useService(() => adminSuppliers.list(), []);
+  const { data: categoryData, reload: reloadCategories } = useService(() => categoryService.list({ active: false }), []);
+  const suppliers = supplierRows ?? [];
+  const categories = categoryData?.items ?? [];
   const [lines, setLines] = useState<ReceiptLineDraft[]>(initialLines);
   const [supplier, setSupplier] = useState("");
   const [shippingFee, setShippingFee] = useState(50000);
@@ -366,7 +372,11 @@ export default function AdminGoodsReceiptCreate() {
       if (!getAdminSession()?.accessToken) return;
       try {
         const pg = await productService.list({ pageSize: 500 });
-        if (!cancel) setBackendCatalog(pg.items);
+        if (!cancel) {
+          validationCatalog = pg.items;
+          setBackendCatalog(pg.items);
+          setLines((prev) => revalidateLines(prev));
+        }
       } catch {
         /* ignore */
       }
@@ -377,13 +387,7 @@ export default function AdminGoodsReceiptCreate() {
   }, []);
 
   const catalogProducts = useMemo(() => {
-    const map = new Map<string, Product>();
-    for (const p of backendCatalog) map.set(p.code.toUpperCase(), p);
-    for (const p of seedProducts) {
-      const k = p.code.toUpperCase();
-      if (!map.has(k)) map.set(k, p);
-    }
-    return Array.from(map.values());
+    return backendCatalog;
   }, [backendCatalog]);
 
   function findCatalogVariant(line: ReceiptLineDraft): { product: Product; variant: ProductVariant } | null {
@@ -466,82 +470,76 @@ export default function AdminGoodsReceiptCreate() {
     }
 
     void (async () => {
-      setBarcodeItems([]);
-
-      if (getAdminSession()?.accessToken) {
-        const items = buildReceiptItems();
-        if (!items) return;
-        const supplierIdNum = supplier ? Number(supplier) : NaN;
-        if (!Number.isFinite(supplierIdNum)) {
-          toast.error("supplierId không hợp lệ — cần NCC có id số từ backend.");
-          return;
-        }
-        const now = new Date();
-        const t = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-        const receiptDateTime = `${receiptDate}T${t}`;
-
-        try {
-          const created = await createInventoryReceipt({
-            supplierId: supplierIdNum,
-            supplierName: suppliers.find((s) => s.id === supplier)?.name ?? null,
-            note: note.trim() || null,
-            shippingFee,
-            vatPercent: vat,
-            items,
-            comboItems: [],
-            receiptDate: receiptDateTime,
-          });
-          setSavedReceiptId(created.id);
-          setSavedNumber(created.receiptNo);
-          if (currentDraftId) {
-            draftActions.remove(currentDraftId);
-            setCurrentDraftId(null);
-            setDraftNumber(null);
-          }
-          toast.success(`Đã lưu phiếu nhập ${created.receiptNo} (backend).`);
-
-          try {
-            const batches = await fetchBatchesByReceiptId(created.id);
-            const nextLabels: BarcodeItem[] = [];
-            for (let i = 0; i < lines.length; i += 1) {
-              const line = lines[i];
-              const beItem = created.items[i];
-              if (!beItem) continue;
-              const batch = matchBatchForLine(line, beItem, batches);
-              if (!batch?.id) {
-                toast.warning(`Không map được lô backend cho dòng ${line.productCode} — bỏ qua tem lô.`);
-                continue;
-              }
-              nextLabels.push({
-                productName: line.productName,
-                variantName: line.variantName,
-                code: `BATCH:${batch.id}`,
-                price: line.sellPrice,
-                lot: batch.batchCode,
-                expiryDate: (batch.expiryDate ?? effectiveExpiryIso(line) ?? "").slice(0, 10),
-                defaultQty: lineRetailQty(line),
-              });
-            }
-            setBarcodeItems(nextLabels);
-          } catch (e) {
-            toast.error(e instanceof Error ? e.message : "Đã lưu phiếu nhưng không tải được danh sách lô để in tem.");
-          }
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Lưu phiếu nhập backend thất bại");
-        }
+      if (!getAdminSession()?.accessToken) {
+        toast.error(
+          "Không có phiên admin hợp lệ — không thể lưu phiếu nhập lên máy chủ (JWT hết hạn hoặc chưa đăng nhập).",
+        );
+        navigate(`/login?next=${encodeURIComponent(location.pathname + location.search)}`);
         return;
       }
 
-      const number = `PN-${receiptDate.replace(/-/g, "")}-${String(Math.floor(Math.random() * 900) + 100)}`;
-      setSavedReceiptId(null);
-      setSavedNumber(number);
       setBarcodeItems([]);
-      if (currentDraftId) {
-        draftActions.remove(currentDraftId);
-        setCurrentDraftId(null);
-        setDraftNumber(null);
+
+      const items = buildReceiptItems();
+      if (!items) return;
+      const supplierIdNum = supplier ? Number(supplier) : NaN;
+      if (!Number.isFinite(supplierIdNum)) {
+        toast.error("supplierId không hợp lệ — cần NCC có id số từ backend.");
+        return;
       }
-      toast.success(`Đã lưu phiếu nhập ${number} (offline — in tem lô cần backend).`);
+      const now = new Date();
+      const t = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+      const receiptDateTime = `${receiptDate}T${t}`;
+
+      try {
+        const created = await createInventoryReceipt({
+          supplierId: supplierIdNum,
+          supplierName: suppliers.find((s) => s.id === supplier)?.name ?? null,
+          note: note.trim() || null,
+          shippingFee,
+          vatPercent: vat,
+          items,
+          comboItems: [],
+          receiptDate: receiptDateTime,
+        });
+        setSavedReceiptId(created.id);
+        setSavedNumber(created.receiptNo);
+        if (currentDraftId) {
+          draftActions.remove(currentDraftId);
+          setCurrentDraftId(null);
+          setDraftNumber(null);
+        }
+        toast.success(`Đã lưu phiếu nhập ${created.receiptNo} (backend).`);
+
+        try {
+          const batches = await fetchBatchesByReceiptId(created.id);
+          const nextLabels: BarcodeItem[] = [];
+          for (let i = 0; i < lines.length; i += 1) {
+            const line = lines[i];
+            const beItem = created.items[i];
+            if (!beItem) continue;
+            const batch = matchBatchForLine(line, beItem, batches);
+            if (!batch?.id) {
+              toast.warning(`Không map được lô backend cho dòng ${line.productCode} — bỏ qua tem lô.`);
+              continue;
+            }
+            nextLabels.push({
+              productName: line.productName,
+              variantName: line.variantName,
+              code: `BATCH:${batch.id}`,
+              price: line.sellPrice,
+              lot: batch.batchCode,
+              expiryDate: (batch.expiryDate ?? effectiveExpiryIso(line) ?? "").slice(0, 10),
+              defaultQty: lineRetailQty(line),
+            });
+          }
+          setBarcodeItems(nextLabels);
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Đã lưu phiếu nhưng không tải được danh sách lô để in tem.");
+        }
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Lưu phiếu nhập backend thất bại");
+      }
     })();
   };
 
@@ -716,7 +714,13 @@ export default function AdminGoodsReceiptCreate() {
                     onChange={(v) => syncLine(line.id, { category: v })}
                     placeholder="Danh mục"
                     options={categoryOptions}
-                    onCreateNew={(q) => { const name = q.trim(); if (!name) return; categoryActions.create({ name, description: "Tạo từ phiếu nhập" }); syncLine(line.id, { category: name }); toast.success(`Đã tạo "${name}".`); }}
+                    onCreateNew={(q) => {
+                      const name = q.trim();
+                      if (!name) return;
+                      categoryService.create({ name, description: "Tạo từ phiếu nhập" })
+                        .then(() => { reloadCategories(); syncLine(line.id, { category: name }); toast.success(`Đã tạo "${name}".`); })
+                        .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể tạo danh mục"));
+                    }}
                     createLabel="Tạo danh mục mới"
                   />
                   <div className="grid grid-cols-3 gap-1.5">
@@ -781,7 +785,7 @@ export default function AdminGoodsReceiptCreate() {
                   const issue = lineIssues.get(line.id) ?? { errors: [], warnings: [] };
                   const hasError = issue.errors.length > 0;
                   const hasWarning = !hasError && issue.warnings.length > 0;
-                  const productExists = seedProducts.some((p) => p.code.toUpperCase() === line.productCode.toUpperCase());
+                  const productExists = validationCatalog.some((p) => p.code.toUpperCase() === line.productCode.toUpperCase());
                   return (
                     <tr
                       key={line.id}
@@ -816,9 +820,9 @@ export default function AdminGoodsReceiptCreate() {
                           onCreateNew={(q) => {
                             const name = q.trim();
                             if (!name) return;
-                            categoryActions.create({ name, description: "Tạo từ phiếu nhập" });
-                            syncLine(line.id, { category: name });
-                            toast.success(`Đã tạo danh mục "${name}".`);
+                            categoryService.create({ name, description: "Tạo từ phiếu nhập" })
+                              .then(() => { reloadCategories(); syncLine(line.id, { category: name }); toast.success(`Đã tạo danh mục "${name}".`); })
+                              .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể tạo danh mục"));
                           }}
                           createLabel="Tạo danh mục mới"
                         />
@@ -967,7 +971,12 @@ export default function AdminGoodsReceiptCreate() {
       </div>
 
       <ReceiptImportPreviewDialog open={importOpen} onClose={() => setImportOpen(false)} />
-      <SupplierFormDrawer open={supplierDrawerOpen} onClose={() => setSupplierDrawerOpen(false)} supplier={undefined} />
+      <SupplierFormDrawer
+        open={supplierDrawerOpen}
+        onClose={() => setSupplierDrawerOpen(false)}
+        supplier={undefined}
+        onSave={async (input) => { await adminSuppliers.save({ ...input, name: input.name || supplierSeedName }); reloadSuppliers(); }}
+      />
       <BarcodePrintDialog
         open={barcodeOpen}
         onClose={() => setBarcodeOpen(false)}

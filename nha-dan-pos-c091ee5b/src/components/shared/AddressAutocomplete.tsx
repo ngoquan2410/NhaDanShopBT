@@ -40,7 +40,7 @@ export type AutocompleteState =
   | "error"
   | "fallback";
 
-export type FallbackReason = "quota_exceeded" | "network_error" | "rate_limited";
+export type FallbackReason = "quota_exceeded" | "network_error" | "rate_limited" | "provider_disabled";
 
 interface Props {
   /** Called when the user picks a suggestion. Provides the best-effort mapping
@@ -67,9 +67,9 @@ const localAcCache = new Map<string, Prediction[]>();
 const localDetailCache = new Map<string, GoongResolvedAddress>();
 
 // Dedupe in-flight identical autocomplete queries across rapid retypes / remounts.
-const inflightAc = new Map<string, Promise<Prediction[] | "quota" | "error">>();
+const inflightAc = new Map<string, Promise<Prediction[] | "quota" | "error" | "provider_disabled">>();
 // Dedupe in-flight detail lookups (StrictMode double-mount, accidental double-click).
-const inflightDetail = new Map<string, Promise<GoongResolvedAddress | "quota" | "error">>();
+const inflightDetail = new Map<string, Promise<GoongResolvedAddress | "quota" | "error" | "provider_disabled">>();
 
 function readSessionFallback(): FallbackReason | null {
   try {
@@ -245,9 +245,10 @@ export function AddressAutocomplete({
     // Dedupe identical in-flight requests
     let promise = inflightAc.get(key);
     if (!promise) {
-      promise = (async (): Promise<Prediction[] | "quota" | "error"> => {
+      promise = (async (): Promise<Prediction[] | "quota" | "error" | "provider_disabled"> => {
         try {
           const data = await fetchAddressAutocomplete(q, { dryRun });
+          if (data?.providerUnavailable) return "provider_disabled";
           if (data?.quotaExceeded) return "quota";
           const preds: Prediction[] = (data?.predictions ?? []).slice(0, 5);
           localAcCache.set(key, preds);
@@ -264,6 +265,7 @@ export function AddressAutocomplete({
     const result = await promise;
     if (ctrl.signal.aborted) return;
     if (result === "error") return enterFallback("network_error");
+    if (result === "provider_disabled") return enterFallback("provider_disabled");
     if (result === "quota") return enterFallback("quota_exceeded");
     setPredictions(result);
     setState(result.length ? "idle" : "noresult");
@@ -293,9 +295,10 @@ export function AddressAutocomplete({
     // (e.g. StrictMode double-invoke or rapid double-click), reuse it.
     let promise = inflightDetail.get(p.place_id);
     if (!promise) {
-      promise = (async (): Promise<GoongResolvedAddress | "quota" | "error"> => {
+      promise = (async (): Promise<GoongResolvedAddress | "quota" | "error" | "provider_disabled"> => {
         try {
           const data = await fetchAddressPlaceDetail(p.place_id, { dryRun });
+          if (data?.providerUnavailable) return "provider_disabled";
           if (data?.quotaExceeded) return "quota";
           const r = data?.result;
           const compound = (r?.compound ?? {}) as CompoundShape;
@@ -329,6 +332,7 @@ export function AddressAutocomplete({
 
     const result = await promise;
     if (result === "error") { enterFallback("network_error"); return; }
+    if (result === "provider_disabled") { enterFallback("provider_disabled"); return; }
     if (result === "quota") { enterFallback("quota_exceeded"); return; }
     onResolved(result);
     setState("idle");

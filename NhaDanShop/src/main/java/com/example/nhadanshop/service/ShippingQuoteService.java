@@ -3,7 +3,10 @@ package com.example.nhadanshop.service;
 import com.example.nhadanshop.dto.ShippingAddressDto;
 import com.example.nhadanshop.dto.ShippingQuoteRequest;
 import com.example.nhadanshop.dto.ShippingQuoteResponse;
+import com.example.nhadanshop.entity.GhnQuoteLog;
+import com.example.nhadanshop.repository.GhnQuoteLogRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -11,25 +14,22 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ShippingQuoteService {
 
-    private static final ShippingConfig DEFAULT_CONFIG = new ShippingConfig(
-            List.of(
-                    new ZoneRule("Z1", 18000, 200000, new EtaDays(1, 2), List.of("01", "79")),
-                    new ZoneRule("Z2", 28000, 350000, new EtaDays(2, 3), List.of("74", "75", "77", "80", "27", "33", "30", "26", "72", "31")),
-                    new ZoneRule("Z3", 38000, 500000, new EtaDays(3, 5), List.of("*"))
-            ),
-            new ParcelDefaults(10, 10, 10, 500, "none", null)
-    );
-
     private final GhnShippingService ghnShippingService;
+    private final ShippingSettingsService shippingSettingsService;
+    private final GhnQuoteLogRepository ghnQuoteLogRepository;
 
     public ShippingQuoteResponse quote(ShippingQuoteRequest request) {
+        long wallStartNs = System.nanoTime();
+        ShippingSettingsService.ResolvedShippingQuoteConfig cfg = shippingSettingsService.resolveForQuote();
         ShippingAddressDto address = request.address();
+        ShippingQuoteResponse result;
         if (isBlank(address.provinceCode()) || isBlank(address.districtCode()) || isBlank(address.wardCode())) {
-            return new ShippingQuoteResponse(
+            result = new ShippingQuoteResponse(
                     "incomplete",
                     null,
                     null,
@@ -40,77 +40,128 @@ public class ShippingQuoteService {
                     null,
                     null,
                     null,
-                    null
+                    Instant.now().toString()
             );
+        } else {
+            int weight = request.weightGrams() != null ? request.weightGrams() : cfg.parcelDefaults().weightGrams();
+            int length = request.parcel() != null && request.parcel().length() != null
+                    ? request.parcel().length()
+                    : cfg.parcelDefaults().length();
+            int width = request.parcel() != null && request.parcel().width() != null
+                    ? request.parcel().width()
+                    : cfg.parcelDefaults().width();
+            int height = request.parcel() != null && request.parcel().height() != null
+                    ? request.parcel().height()
+                    : cfg.parcelDefaults().height();
+            BigDecimal insuranceValue = request.declaredValue() != null
+                    ? request.declaredValue()
+                    : deriveInsuranceValue(request.subtotal(), cfg);
+
+            try {
+                GhnShippingService.CarrierQuote carrierQuote = ghnShippingService.quote(
+                        address,
+                        weight,
+                        length,
+                        width,
+                        height,
+                        insuranceValue
+                );
+                BigDecimal fee = applyFreeShip(carrierQuote.fee(), request.subtotal(), address.provinceCode(), cfg);
+                result = new ShippingQuoteResponse(
+                        "quoted",
+                        "carrier_api",
+                        null,
+                        fee,
+                        new ShippingQuoteResponse.EtaDaysDto(carrierQuote.etaDays().min(), carrierQuote.etaDays().max()),
+                        null,
+                        isFreeShip(request.subtotal(), address.provinceCode(), cfg),
+                        null,
+                        null,
+                        carrierQuote.latencyMs(),
+                        Instant.now().toString()
+                );
+            } catch (GhnShippingService.CarrierFailure failure) {
+                ShippingQuoteResponse fallback = fallbackQuote(request, failure.reason(), failure.latencyMs(), cfg);
+                if (fallback != null) {
+                    result = fallback;
+                } else {
+                    result = new ShippingQuoteResponse(
+                            "unavailable",
+                            null,
+                            null,
+                            null,
+                            null,
+                            failure.getMessage(),
+                            null,
+                            null,
+                            null,
+                            failure.latencyMs(),
+                            Instant.now().toString()
+                    );
+                }
+            }
         }
 
-        int weight = request.weightGrams() != null ? request.weightGrams() : DEFAULT_CONFIG.parcelDefaults().weightGrams();
-        int length = request.parcel() != null && request.parcel().length() != null
-                ? request.parcel().length()
-                : DEFAULT_CONFIG.parcelDefaults().length();
-        int width = request.parcel() != null && request.parcel().width() != null
-                ? request.parcel().width()
-                : DEFAULT_CONFIG.parcelDefaults().width();
-        int height = request.parcel() != null && request.parcel().height() != null
-                ? request.parcel().height()
-                : DEFAULT_CONFIG.parcelDefaults().height();
-        BigDecimal insuranceValue = request.declaredValue() != null
-                ? request.declaredValue()
-                : deriveInsuranceValue(request.subtotal());
+        persistGhnQuoteLog(request, result, wallStartNs);
+        return result;
+    }
 
+    private void persistGhnQuoteLog(ShippingQuoteRequest request, ShippingQuoteResponse out, long wallStartNs) {
         try {
-            GhnShippingService.CarrierQuote carrierQuote = ghnShippingService.quote(
-                    address,
-                    weight,
-                    length,
-                    width,
-                    height,
-                    insuranceValue
-            );
-            BigDecimal fee = applyFreeShip(carrierQuote.fee(), request.subtotal(), address.provinceCode());
-            return new ShippingQuoteResponse(
-                    "quoted",
-                    "carrier_api",
-                    null,
-                    fee,
-                    new ShippingQuoteResponse.EtaDaysDto(carrierQuote.etaDays().min(), carrierQuote.etaDays().max()),
-                    null,
-                    isFreeShip(request.subtotal(), address.provinceCode()),
-                    null,
-                    null,
-                    carrierQuote.latencyMs(),
-                    Instant.now().toString()
-            );
-        } catch (GhnShippingService.CarrierFailure failure) {
-            ShippingQuoteResponse fallback = fallbackQuote(request, failure.reason(), failure.latencyMs());
-            if (fallback != null) {
-                return fallback;
+            ShippingAddressDto a = request.address();
+            GhnQuoteLog row = new GhnQuoteLog();
+            row.setProvinceName(a.provinceName());
+            row.setDistrictName(a.districtName());
+            row.setWardName(a.wardName());
+            row.setWeightGrams(request.weightGrams());
+            row.setSubtotal(request.subtotal());
+            row.setOrderCode(request.orderCode());
+            boolean ok = "quoted".equals(out.status());
+            row.setOk(ok);
+            row.setFee(out.fee());
+            if (out.etaDays() != null) {
+                row.setEtaMin(out.etaDays().min());
+                row.setEtaMax(out.etaDays().max());
             }
-            return new ShippingQuoteResponse(
-                    "unavailable",
-                    null,
-                    null,
-                    null,
-                    null,
-                    failure.getMessage(),
-                    null,
-                    null,
-                    null,
-                    failure.latencyMs(),
-                    Instant.now().toString()
-            );
+            if (!ok) {
+                if (out.fallbackReason() != null) {
+                    row.setReason(truncate(out.fallbackReason(), 64));
+                } else if ("incomplete".equals(out.status())) {
+                    row.setReason("incomplete");
+                } else if ("unavailable".equals(out.status())) {
+                    row.setReason("unavailable");
+                } else {
+                    row.setReason("quote_failed");
+                }
+                row.setMessage(truncate(out.reasonIfUnavailable(), 4000));
+            }
+            long lat = out.latencyMs() != null ? out.latencyMs() : (System.nanoTime() - wallStartNs) / 1_000_000L;
+            row.setLatencyMs(lat);
+            ghnQuoteLogRepository.save(row);
+        } catch (Exception ex) {
+            log.warn("Failed to persist GHN quote log", ex);
         }
     }
 
-    private ShippingQuoteResponse fallbackQuote(ShippingQuoteRequest request, String reason, long latencyMs) {
-        ZoneRule rule = pickZone(request.address().provinceCode());
+    private static String truncate(String s, int max) {
+        if (s == null) return null;
+        return s.length() <= max ? s : s.substring(0, max);
+    }
+
+    private ShippingQuoteResponse fallbackQuote(
+            ShippingQuoteRequest request,
+            String reason,
+            long latencyMs,
+            ShippingSettingsService.ResolvedShippingQuoteConfig cfg
+    ) {
+        ShippingSettingsService.ResolvedZoneRule rule = pickZone(request.address().provinceCode(), cfg.zoneRules());
         if (rule == null) {
             return null;
         }
-        int weight = request.weightGrams() != null ? request.weightGrams() : DEFAULT_CONFIG.parcelDefaults().weightGrams();
+        int weight = request.weightGrams() != null ? request.weightGrams() : cfg.parcelDefaults().weightGrams();
         int surcharge = Math.max(0, (int) Math.ceil((weight - 1000) / 500.0)) * 3000;
         BigDecimal fee = BigDecimal.valueOf(rule.baseFee() + surcharge);
-        boolean freeShipApplied = isFreeShip(request.subtotal(), request.address().provinceCode());
+        boolean freeShipApplied = isFreeShip(request.subtotal(), request.address().provinceCode(), cfg);
         if (freeShipApplied) {
             fee = BigDecimal.ZERO;
         }
@@ -147,36 +198,45 @@ public class ShippingQuoteService {
         builder.append(label);
     }
 
-    private BigDecimal deriveInsuranceValue(BigDecimal subtotal) {
-        String mode = DEFAULT_CONFIG.parcelDefaults().declaredValueMode();
+    private BigDecimal deriveInsuranceValue(
+            BigDecimal subtotal,
+            ShippingSettingsService.ResolvedShippingQuoteConfig cfg
+    ) {
+        ShippingSettingsService.ResolvedParcelDefaults p = cfg.parcelDefaults();
+        String mode = p.declaredValueMode();
         if ("subtotal".equals(mode)) {
             return subtotal.min(BigDecimal.valueOf(5_000_000L));
         }
-        if ("fixed".equals(mode) && DEFAULT_CONFIG.parcelDefaults().declaredValueFixed() != null) {
-            return DEFAULT_CONFIG.parcelDefaults().declaredValueFixed().min(BigDecimal.valueOf(5_000_000L));
+        if ("fixed".equals(mode) && p.declaredValueFixed() != null) {
+            return p.declaredValueFixed().min(BigDecimal.valueOf(5_000_000L));
         }
         return BigDecimal.ZERO;
     }
 
-    private BigDecimal applyFreeShip(BigDecimal fee, BigDecimal subtotal, String provinceCode) {
-        return isFreeShip(subtotal, provinceCode) ? BigDecimal.ZERO : fee.setScale(0, RoundingMode.HALF_UP);
+    private BigDecimal applyFreeShip(BigDecimal fee, BigDecimal subtotal, String provinceCode,
+            ShippingSettingsService.ResolvedShippingQuoteConfig cfg) {
+        return isFreeShip(subtotal, provinceCode, cfg) ? BigDecimal.ZERO : fee.setScale(0, RoundingMode.HALF_UP);
     }
 
-    private boolean isFreeShip(BigDecimal subtotal, String provinceCode) {
-        ZoneRule zone = pickZone(provinceCode);
+    private boolean isFreeShip(BigDecimal subtotal, String provinceCode,
+            ShippingSettingsService.ResolvedShippingQuoteConfig cfg) {
+        ShippingSettingsService.ResolvedZoneRule zone = pickZone(provinceCode, cfg.zoneRules());
         return zone != null && zone.freeShipThreshold() != null
                 && subtotal.compareTo(BigDecimal.valueOf(zone.freeShipThreshold())) >= 0;
     }
 
-    private ZoneRule pickZone(String provinceCode) {
-        ZoneRule direct = DEFAULT_CONFIG.zoneRules().stream()
+    private ShippingSettingsService.ResolvedZoneRule pickZone(
+            String provinceCode,
+            List<ShippingSettingsService.ResolvedZoneRule> zoneRules
+    ) {
+        ShippingSettingsService.ResolvedZoneRule direct = zoneRules.stream()
                 .filter(rule -> rule.provinceCodes().contains(provinceCode))
                 .findFirst()
                 .orElse(null);
         if (direct != null) {
             return direct;
         }
-        return DEFAULT_CONFIG.zoneRules().stream()
+        return zoneRules.stream()
                 .filter(rule -> rule.provinceCodes().contains("*"))
                 .findFirst()
                 .orElse(null);
@@ -185,9 +245,4 @@ public class ShippingQuoteService {
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
     }
-
-    private record ShippingConfig(List<ZoneRule> zoneRules, ParcelDefaults parcelDefaults) {}
-    private record ZoneRule(String zoneCode, int baseFee, Integer freeShipThreshold, EtaDays etaDays, List<String> provinceCodes) {}
-    private record EtaDays(int min, int max) {}
-    private record ParcelDefaults(int length, int width, int height, int weightGrams, String declaredValueMode, BigDecimal declaredValueFixed) {}
 }

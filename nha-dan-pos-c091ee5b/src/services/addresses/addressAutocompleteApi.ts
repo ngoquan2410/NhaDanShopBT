@@ -14,10 +14,13 @@ export interface AddressAutocompleteResponse {
   predictions?: AddressAutocompletePrediction[];
   dryRun?: boolean;
   cached?: boolean;
+  /** Goong / autocomplete upstream not configured (HTTP 503 from BE) */
+  providerUnavailable?: boolean;
 }
 
 export interface AddressPlaceDetailResponse {
   quotaExceeded?: boolean;
+  providerUnavailable?: boolean;
   result?: {
     place_id?: string;
     formatted_address?: string;
@@ -39,7 +42,7 @@ export interface AddressPlaceDetailResponse {
   cached?: boolean;
 }
 
-async function requestJson<T>(url: string): Promise<T> {
+async function getJson(url: string): Promise<{ res: Response; data: Record<string, unknown> }> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -51,11 +54,8 @@ async function requestJson<T>(url: string): Promise<T> {
       signal: controller.signal,
     });
     const text = await res.text();
-    const data = text ? JSON.parse(text) : {};
-    if (!res.ok && !data?.quotaExceeded) {
-      throw new Error(data?.message ?? data?.error ?? `HTTP ${res.status}`);
-    }
-    return data as T;
+    const data = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    return { res, data };
   } finally {
     window.clearTimeout(timer);
   }
@@ -70,7 +70,16 @@ export async function fetchAddressAutocomplete(
   if (opts?.dryRun) {
     url.searchParams.set("dryRun", "true");
   }
-  return requestJson<AddressAutocompleteResponse>(url.toString());
+  const { res, data } = await getJson(url.toString());
+  if (res.status === 503) {
+    return { providerUnavailable: true, quotaExceeded: false, predictions: [] };
+  }
+  if (!res.ok && !data?.quotaExceeded) {
+    throw new Error(
+      (data?.message as string) ?? (data?.error as string) ?? (data?.detail as string) ?? `HTTP ${res.status}`,
+    );
+  }
+  return data as unknown as AddressAutocompleteResponse;
 }
 
 export async function fetchAddressPlaceDetail(
@@ -82,5 +91,14 @@ export async function fetchAddressPlaceDetail(
   if (opts?.dryRun) {
     url.searchParams.set("dryRun", "true");
   }
-  return requestJson<AddressPlaceDetailResponse>(url.toString());
+  const { res, data } = await getJson(url.toString());
+  if (res.status === 503) {
+    return { providerUnavailable: true, quotaExceeded: false, result: null };
+  }
+  if (!res.ok && !data?.quotaExceeded) {
+    throw new Error(
+      (data?.message as string) ?? (data?.error as string) ?? (data?.detail as string) ?? `HTTP ${res.status}`,
+    );
+  }
+  return data as unknown as AddressPlaceDetailResponse;
 }

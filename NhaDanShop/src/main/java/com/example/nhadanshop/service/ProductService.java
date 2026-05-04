@@ -6,20 +6,26 @@ import com.example.nhadanshop.dto.ProductResponse;
 import com.example.nhadanshop.entity.Category;
 import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.entity.ProductImportUnit;
+import com.example.nhadanshop.entity.ProductVariant;
 import com.example.nhadanshop.repository.CategoryRepository;
 import com.example.nhadanshop.repository.ProductImportUnitRepository;
 import com.example.nhadanshop.repository.ProductRepository;
+import com.example.nhadanshop.repository.ProductVariantRepository;
 import com.example.nhadanshop.repository.PromotionRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -32,14 +38,12 @@ public class ProductService {
     private final CategoryRepository categoryRepository;
     private final PromotionRepository promotionRepository;
     private final ProductImportUnitRepository importUnitRepository;
+    private final ProductVariantRepository variantRepository;
     @org.springframework.context.annotation.Lazy
     private final ProductVariantService variantService;
 
     public List<ProductResponse> findAll() {
-        return productRepository.findByActiveTrue()
-                .stream()
-                .map(DtoMapper::toResponse)
-                .toList();
+        return toResponsesWithVariants(productRepository.findByActiveTrue());
     }
 
     public Page<ProductResponse> search(
@@ -54,23 +58,29 @@ public class ProductService {
                 pType = Product.ProductType.valueOf(productTypeStr.trim().toUpperCase());
             } catch (IllegalArgumentException ignored) { /* all types */ }
         }
-        return productRepository
-                .searchProducts(
-                        search != null && !search.isBlank() ? search.trim() : null,
-                        categoryId,
-                        includeInactive,
-                        pType,
-                        pageable)
-                .map(DtoMapper::toResponse);
+        Page<Product> page = productRepository.searchProducts(
+                search != null && !search.isBlank() ? search.trim() : null,
+                categoryId,
+                includeInactive,
+                pType,
+                pageable);
+        List<ProductResponse> content = toResponsesWithVariants(page.getContent());
+        return new PageImpl<>(content, page.getPageable(), page.getTotalElements());
     }
 
     public Page<ProductResponse> findByCategory(Long categoryId, Pageable pageable) {
-        return productRepository.findByCategoryIdAndActiveTrue(categoryId, pageable)
-                .map(DtoMapper::toResponse);
+        Page<Product> page = productRepository.findByCategoryIdAndActiveTrue(categoryId, pageable);
+        List<ProductResponse> content = toResponsesWithVariants(page.getContent());
+        return new PageImpl<>(content, page.getPageable(), page.getTotalElements());
     }
 
     public ProductResponse findById(Long id) {
-        return DtoMapper.toResponse(findEntityById(id));
+        Product p = findEntityById(id);
+        if (p.getProductType() == Product.ProductType.SINGLE) {
+            List<ProductVariant> vv = variantRepository.findByProductIdOrderByIsDefaultDescVariantCodeAsc(id);
+            return DtoMapper.toResponse(p, vv);
+        }
+        return DtoMapper.toResponse(p);
     }
 
     @Transactional
@@ -160,7 +170,12 @@ public class ProductService {
             }
         }
 
-        return DtoMapper.toResponse(productRepository.findById(saved.getId()).orElse(saved));
+        Product base = productRepository.findById(saved.getId()).orElseThrow();
+        if (pType == Product.ProductType.SINGLE) {
+            List<ProductVariant> variantRows = variantRepository.findByProductIdOrderByIsDefaultDescVariantCodeAsc(base.getId());
+            return DtoMapper.toResponse(base, variantRows);
+        }
+        return DtoMapper.toResponse(base);
     }
 
     @Transactional
@@ -343,6 +358,37 @@ public class ProductService {
     private Product findEntityById(Long id) {
         return productRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy sản phẩm ID: " + id));
+    }
+
+    /**
+     * Public list/detail DTOs must include variant rows for SINGLE products (lazy bag is often empty on
+     * detached/listed entities). COMBO responses stay without variants.
+     */
+    private List<ProductResponse> toResponsesWithVariants(List<Product> products) {
+        if (products.isEmpty()) {
+            return List.of();
+        }
+        List<Long> ids = products.stream().map(Product::getId).toList();
+        List<ProductVariant> allVariants = variantRepository.findByProductIdIn(ids);
+        Map<Long, List<ProductVariant>> byProductId = new HashMap<>();
+        for (ProductVariant v : allVariants) {
+            Long pid = v.getProduct().getId();
+            byProductId.computeIfAbsent(pid, k -> new ArrayList<>()).add(v);
+        }
+        Comparator<ProductVariant> variantOrder = Comparator
+                .comparing((ProductVariant v) -> Boolean.TRUE.equals(v.getIsDefault()))
+                .reversed()
+                .thenComparing(v -> v.getVariantCode() != null ? v.getVariantCode() : "", String.CASE_INSENSITIVE_ORDER);
+        for (List<ProductVariant> list : byProductId.values()) {
+            list.sort(variantOrder);
+        }
+        return products.stream().map(p -> {
+            if (p.getProductType() == Product.ProductType.COMBO) {
+                return DtoMapper.toResponse(p);
+            }
+            List<ProductVariant> vv = byProductId.getOrDefault(p.getId(), List.of());
+            return DtoMapper.toResponse(p, vv);
+        }).toList();
     }
 }
 

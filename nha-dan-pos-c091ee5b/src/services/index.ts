@@ -26,23 +26,23 @@ import { BackendPaymentEventAdapter } from "./adapters/backend/BackendPaymentEve
 import { BackendProductionAdminAdapter } from "./adapters/backend/BackendProductionAdminAdapter";
 import { BackendPromotionEvaluationAdapter } from "./adapters/backend/BackendPromotionEvaluationAdapter";
 import { BackendPromotionCrudAdapter } from "./adapters/backend/BackendPromotionCrudAdapter";
+import { BackendCustomerAdapter } from "./adapters/backend/BackendCustomerAdapter";
+import { BackendVoucherAdapter } from "./adapters/backend/BackendVoucherAdapter";
+import { BackendPaymentAdapter } from "./adapters/backend/BackendPaymentAdapter";
 import { LocalAddressAdapter } from "./adapters/local/LocalAddressAdapter";
 import { RemoteAddressAdapter } from "./adapters/remote/RemoteAddressAdapter";
 import { HybridAddressAdapter } from "./adapters/remote/HybridAddressAdapter";
-import { LocalShippingAdapter } from "./adapters/local/LocalShippingAdapter";
+import { BackendShippingConfigAdapter } from "./adapters/backend/BackendShippingConfigAdapter";
 import { GhnShippingAdapter } from "./adapters/remote/GhnShippingAdapter";
 import { HybridShippingAdapter } from "./adapters/remote/HybridShippingAdapter";
 import { CloudPendingOrderAdapter } from "./adapters/cloud/CloudPendingOrderAdapter";
-import { LocalCustomerAdapter } from "./adapters/local/LocalCustomerAdapter";
-import { LocalVoucherAdapter } from "./adapters/local/LocalVoucherAdapter";
 import { LocalInvoiceAdapter } from "./adapters/local/LocalInvoiceAdapter";
+import { BackendInvoiceAdapter } from "./adapters/backend/BackendInvoiceAdapter";
+import { shouldUseLocalInvoiceAdapterForAdmin } from "./adapters/backend/invoiceAdapterResolution";
 import { HybridProductAdapter } from "./adapters/HybridProductAdapter";
 import { HybridCategoryAdapter } from "./adapters/HybridCategoryAdapter";
-import { LocalInventoryAdapter } from "./adapters/local/LocalInventoryAdapter";
 import { HybridInventoryAdapter } from "./adapters/HybridInventoryAdapter";
-import { LocalGoodsReceiptAdapter } from "./adapters/local/LocalGoodsReceiptAdapter";
 import { HybridGoodsReceiptAdapter } from "./adapters/HybridGoodsReceiptAdapter";
-import { LocalPaymentAdapter } from "./adapters/local/LocalPaymentAdapter";
 
 export const storeSettings: StoreSettingsService = new BackendStoreSettingsAdapter();
 export const vietQr: VietQrService = new BackendVietQrAdapter();
@@ -51,22 +51,32 @@ export const addresses: AddressService = new HybridAddressAdapter(
   new LocalAddressAdapter(),
 );
 export const shipping: ShippingService = new HybridShippingAdapter(
-  new GhnShippingAdapter(storeSettings),
-  new LocalShippingAdapter(),
+  new GhnShippingAdapter(),
+  new BackendShippingConfigAdapter(),
 );
 export const pendingOrders: PendingOrderService = new CloudPendingOrderAdapter();
 export const promotions: PromotionEvaluationService = new BackendPromotionEvaluationAdapter();
-export const customers: CustomerService = new LocalCustomerAdapter();
-export const vouchers: VoucherService = new LocalVoucherAdapter();
-export const invoices: InvoiceService = new LocalInvoiceAdapter();
+export const customers: CustomerService = new BackendCustomerAdapter();
+export const vouchers: VoucherService = new BackendVoucherAdapter();
+export const invoices: InvoiceService = shouldUseLocalInvoiceAdapterForAdmin(import.meta.env)
+  ? new LocalInvoiceAdapter()
+  : new BackendInvoiceAdapter();
 export const paymentEvents: PaymentEventService = new BackendPaymentEventAdapter();
 export const products: ProductService = new HybridProductAdapter();
 export const inventory: InventoryService = new HybridInventoryAdapter();
 export const goodsReceipts: GoodsReceiptService = new HybridGoodsReceiptAdapter();
 export const promotionsCrud: PromotionCrudService = new BackendPromotionCrudAdapter();
-export const payments: PaymentService = new LocalPaymentAdapter();
+export const payments: PaymentService = new BackendPaymentAdapter();
 export const categories: CategoryService = new HybridCategoryAdapter();
 export const production: ProductionAdminService = new BackendProductionAdminAdapter();
+export {
+  adminCombos,
+  adminCustomers,
+  adminReports,
+  adminStockAdjustments,
+  adminSuppliers,
+  adminUsers,
+} from "./adminBackend";
 
 export { postSalesQuote, postSalesQuoteAsPos } from "./sales/salesQuoteApi";
 export type { SalesQuoteApiResult, SalesQuoteRequestPayload } from "./sales/salesQuoteApi";

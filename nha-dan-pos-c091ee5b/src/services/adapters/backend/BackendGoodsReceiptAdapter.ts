@@ -36,6 +36,7 @@ type BeReceiptItem = {
   variantCode: string;
   variantName: string;
   sellUnit: string;
+  variantSellPrice?: number | string | null;
 };
 
 type BeReceipt = {
@@ -91,6 +92,10 @@ function mapLine(b: BeReceiptItem): GoodsReceiptLine {
     shippingAlloc: b.shippingAllocated * (retail > 0 ? retail : 1),
     vatAlloc: b.vatAllocated * (retail > 0 ? retail : 1),
     finalUnitCost: b.finalCostWithVat ?? b.finalCost,
+    variantSellPrice:
+      b.variantSellPrice != null && b.variantSellPrice !== ""
+        ? Number(b.variantSellPrice)
+        : undefined,
   };
 }
 

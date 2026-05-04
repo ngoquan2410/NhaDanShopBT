@@ -25,5 +25,21 @@ public record SalesQuoteRequest(
          */
         @Valid ShippingAddressDto shippingAddress,
         BigDecimal manualDiscount,
-        BigDecimal vatPercent
-) {}
+        BigDecimal vatPercent,
+        Long requestedRedeemPoints
+) {
+    public SalesQuoteRequest(
+            String source,
+            String customerId,
+            List<SalesQuoteLineRequest> lines,
+            Long promotionId,
+            String voucherCode,
+            ShippingQuoteSnapshotDto shippingQuoteSnapshot,
+            ShippingAddressDto shippingAddress,
+            BigDecimal manualDiscount,
+            BigDecimal vatPercent
+    ) {
+        this(source, customerId, lines, promotionId, voucherCode, shippingQuoteSnapshot,
+                shippingAddress, manualDiscount, vatPercent, null);
+    }
+}

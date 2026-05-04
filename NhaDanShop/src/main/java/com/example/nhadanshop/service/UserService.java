@@ -15,6 +15,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import com.example.nhadanshop.security.PasswordPolicy;
+
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.Set;
@@ -42,6 +44,8 @@ public class UserService {
             throw new IllegalStateException("Username '" + req.username() + "' đã tồn tại");
         }
 
+        PasswordPolicy.validate(req.password(), req.username());
+
         User user = new User();
         user.setUsername(req.username());
         user.setPassword(passwordEncoder.encode(req.password()));
@@ -60,6 +64,7 @@ public class UserService {
 
         if (req.fullName() != null) user.setFullName(req.fullName());
         if (req.password() != null && !req.password().isBlank()) {
+            PasswordPolicy.validate(req.password(), user.getUsername());
             user.setPassword(passwordEncoder.encode(req.password()));
         }
         if (req.isActive() != null) user.setActive(req.isActive());

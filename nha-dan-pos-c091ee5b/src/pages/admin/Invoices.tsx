@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTableToolbar, FilterChip } from "@/components/shared/DataTableToolbar";
@@ -18,14 +18,19 @@ import { Receipt, Printer, XCircle, Trash2, Eye, ShieldAlert, TrendingUp } from 
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-const today = '2025-04-15';
+/** Merchandise-oriented profit from backend when present (`itemGrossProfit` preferred). */
+function displayMerchProfit(inv: Invoice): number | null {
+  if (inv.status === "cancelled") return null;
+  const raw = inv.itemGrossProfit ?? inv.totalProfit;
+  if (raw == null || Number.isNaN(raw)) return null;
+  return Math.round(Number(raw));
+}
 
-// Deterministic mock margin per invoice — keeps numbers stable per id.
-function profitFor(inv: Invoice) {
-  if (inv.status === 'cancelled') return 0;
-  const seed = inv.number.split('').reduce((s, c) => s + c.charCodeAt(0), 0);
-  const margin = 0.18 + ((seed % 15) / 100);
-  return Math.round(inv.total * margin);
+function canPhysicallyDeleteInvoice(inv: Invoice): boolean {
+  if (inv.allowPhysicalDelete === false) return false;
+  if (inv.allowPhysicalDelete === true) return true;
+  const day = new Date().toISOString().slice(0, 10);
+  return inv.date.startsWith(day);
 }
 
 type SortKey = "number" | "date" | "customer" | "total" | "profit" | "status";
@@ -65,19 +70,19 @@ export default function AdminInvoices() {
     data: filtered,
     pageSize: 20,
     initialSort: { key: "date", dir: "desc" },
-    sortAccessors: {
+      sortAccessors: {
       number: (i) => i.number,
       date: (i) => new Date(i.date),
       customer: (i) => i.customerName,
       total: (i) => i.total,
-      profit: (i) => profitFor(i),
+      profit: (i) => displayMerchProfit(i) ?? -1,
       status: (i) => i.status,
     },
     resetToken: `${search}|${filterStatus}|${period.preset}|${period.from}|${period.to}`,
   });
 
-  const totalProfit = filtered.reduce((s, i) => s + profitFor(i), 0);
-  const canDeleteInvoice = (inv: Invoice) => inv.date.startsWith(today);
+  const knownProfits = filtered.map(displayMerchProfit).filter((p): p is number => p != null);
+  const totalProfitDisplay = knownProfits.length > 0 ? knownProfits.reduce((a, b) => a + b, 0) : null;
 
   const handleCancel = async () => {
     if (!cancelTarget) return;
@@ -115,7 +120,8 @@ export default function AdminInvoices() {
         actions={
           <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-success-soft text-success rounded-md">
             <TrendingUp className="h-3.5 w-3.5" />
-            Lợi nhuận hiển thị: <strong>{formatVND(totalProfit)}</strong>
+            Lợi nhuận (hàng hóa, từ máy chủ khi có):{" "}
+            <strong>{totalProfitDisplay != null ? formatVND(totalProfitDisplay) : "—"}</strong>
           </div>
         }
       />
@@ -160,8 +166,8 @@ export default function AdminInvoices() {
               </thead>
               <tbody>
                 {rows.map(inv => {
-                  const profit = profitFor(inv);
-                  const margin = inv.total ? profit / inv.total : 0;
+                  const profit = displayMerchProfit(inv);
+                  const margin = inv.total && profit != null ? profit / inv.total : 0;
                   return (
                   <tr key={inv.id} className={cn("border-b last:border-0 hover:bg-muted/30 transition-colors", inv.status === 'cancelled' && "opacity-60")}>
                     <td className="px-3 py-2.5 font-mono text-xs font-medium">
@@ -173,6 +179,8 @@ export default function AdminInvoices() {
                     <td className="px-3 py-2.5 text-right font-medium">{formatVND(inv.total)}</td>
                     <td className="px-3 py-2.5 text-right">
                       {inv.status === 'cancelled' ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : profit == null ? (
                         <span className="text-xs text-muted-foreground">—</span>
                       ) : (
                         <div className="flex flex-col items-end leading-tight">
@@ -192,10 +200,18 @@ export default function AdminInvoices() {
                         ) : (
                           <span className="p-1 inline-flex w-[26px]" />
                         )}
-                        {canDeleteInvoice(inv) ? (
+                        {canPhysicallyDeleteInvoice(inv) ? (
                           <button onClick={() => setDeleteTarget(inv.id)} className="p-1 text-muted-foreground hover:text-danger rounded hover:bg-muted" title="Xóa"><Trash2 className="h-3.5 w-3.5" /></button>
                         ) : (
-                          <button disabled title="Chỉ được xóa hóa đơn trong ngày tạo" className="p-1 text-muted-foreground/40 cursor-not-allowed">
+                          <button
+                            disabled
+                            title={
+                              inv.allowPhysicalDelete === false
+                                ? "Hóa đơn backend không cho xóa vật lý — dùng Hủy hóa đơn"
+                                : "Chỉ được xóa hóa đơn trong ngày tạo (cục bộ)"
+                            }
+                            className="p-1 text-muted-foreground/40 cursor-not-allowed"
+                          >
                             <ShieldAlert className="h-3.5 w-3.5" />
                           </button>
                         )}
@@ -209,7 +225,7 @@ export default function AdminInvoices() {
 
           <div className="md:hidden space-y-2">
             {rows.map(inv => {
-              const profit = profitFor(inv);
+              const profit = displayMerchProfit(inv);
               return (
               <div key={inv.id} className={cn("bg-card rounded-lg border p-3", inv.status === 'cancelled' && "opacity-60")}>
                 <button onClick={() => setDetailInvoice(inv)} className="w-full text-left">
@@ -224,7 +240,7 @@ export default function AdminInvoices() {
                     <StatusBadge status={inv.paymentType} />
                     <div className="text-right">
                       <p className="font-bold text-sm">{formatVND(inv.total)}</p>
-                      {inv.status !== 'cancelled' && (
+                      {inv.status !== "cancelled" && profit != null && (
                         <p className="text-[11px] text-success">LN: {formatVND(profit)}</p>
                       )}
                     </div>
@@ -237,8 +253,13 @@ export default function AdminInvoices() {
                     <button onClick={() => setCancelTarget(inv.id)} className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs border border-danger/30 text-danger rounded"><XCircle className="h-3 w-3" /> Hủy</button>
                   )}
                 </div>
-                {!canDeleteInvoice(inv) && inv.status === 'active' && (
-                  <p className="text-[10px] text-muted-foreground mt-1.5 flex items-center gap-1"><ShieldAlert className="h-3 w-3" /> Chỉ xóa được trong ngày tạo</p>
+                {!canPhysicallyDeleteInvoice(inv) && inv.status === "active" && (
+                  <p className="text-[10px] text-muted-foreground mt-1.5 flex items-center gap-1">
+                    <ShieldAlert className="h-3 w-3" />
+                    {inv.allowPhysicalDelete === false
+                      ? "Không xóa vật lý hóa đơn máy chủ — dùng Hủy"
+                      : "Chỉ xóa được trong ngày tạo (cục bộ)"}
+                  </p>
                 )}
               </div>
             );})}

@@ -15,6 +15,8 @@ import {
   MapPin, Gift, Tag, Truck, Receipt,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
+import { dispatchAdminBadgesRefresh } from "@/lib/adminBadges";
 
 type TabId = "all" | PendingOrderStatus;
 
@@ -55,6 +57,7 @@ function timeRemaining(expiresAt?: string) {
 }
 
 export default function AdminPendingOrders() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>("all");
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
@@ -125,7 +128,15 @@ export default function AdminPendingOrders() {
       const updated = await pendingOrdersService.confirm(confirmTarget);
       if (detailOrder?.id === confirmTarget) setDetailOrder(updated);
       reload();
-      toast.success(`Đã xác nhận thanh toán ${o.code}. Hóa đơn đã được tạo theo luồng backend.`);
+      const invNo = updated.confirmedInvoiceNo!;
+      toast.success(`Đã xác nhận ${o.code}. Hóa đơn ${invNo} đã được tạo trên máy chủ.`, {
+        duration: 12_000,
+        action: {
+          label: "Hóa đơn",
+          onClick: () => navigate(`/admin/invoices?q=${encodeURIComponent(invNo)}`),
+        },
+      });
+      dispatchAdminBadgesRefresh();
     } catch (e: any) {
       toast.error(e?.message ?? "Không thể tạo hóa đơn");
     }
@@ -140,6 +151,7 @@ export default function AdminPendingOrders() {
     reload();
     toast.success(`Đã hủy đơn ${o?.code ?? ""}`);
     setCancelTarget(null);
+    dispatchAdminBadgesRefresh();
   };
 
   const isPendingLike = (s: PendingOrderStatus) =>
@@ -339,12 +351,16 @@ function PendingOrderDetail({ order, onClose, onConfirm, onCancel }: {
   onCancel: () => void;
 }) {
   const isPendingLike = order.status === "pending_payment" || order.status === "waiting_confirm";
-  const pb = order.pricingBreakdownSnapshot;
+  const pb = order.pricingBreakdownSnapshot ?? {
+    subtotal: 0, manualDiscount: 0, promotionDiscount: 0, voucherDiscount: 0,
+    shippingFee: 0, shippingDiscount: 0, vatBase: 0, vatPercent: 0, vatAmount: 0, vat: 0, total: 0,
+  };
   const addr = order.shippingAddress;
   const promo = order.promotionSnapshot;
   const voucher = order.voucherSnapshot;
   const gifts = order.giftLinesSnapshot ?? [];
   const ship = order.shippingQuoteSnapshot;
+  const lines = order.lines ?? [];
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -396,9 +412,9 @@ function PendingOrderDetail({ order, onClose, onConfirm, onCancel }: {
           </Section>
 
           {/* Lines */}
-          <Section title={`Sản phẩm (${order.lines.length})`} icon={Receipt}>
+          <Section title={`Sản phẩm (${lines.length})`} icon={Receipt}>
             <div className="border rounded-lg divide-y">
-              {order.lines.map((it) => (
+              {lines.map((it) => (
                 <div key={it.id} className="p-3 flex items-center justify-between text-sm">
                   <div className="min-w-0">
                     <p className="font-medium truncate">
@@ -436,7 +452,7 @@ function PendingOrderDetail({ order, onClose, onConfirm, onCancel }: {
                     <span className="font-medium">−{formatVND(promo.shippingDiscountAmount)}</span>
                   </div>
                 )}
-                {promo.affectedLines.length > 0 && (
+                {promo.affectedLines && promo.affectedLines.length > 0 && (
                   <div className="pt-1.5 mt-1.5 border-t border-info/20 space-y-1">
                     {promo.affectedLines.map((l, i) => (
                       <p key={i} className="text-xs text-muted-foreground">

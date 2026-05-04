@@ -38,6 +38,10 @@ public class SalesQuoteService {
     private final ShippingQuoteService shippingQuoteService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final UserRepository userRepository;
+    private final AccountService accountService;
+    private final CustomerLoyaltyService loyaltyService;
+    private final ProductComboRepository comboItemRepo;
 
     public SalesQuoteResponse quote(SalesQuoteRequest req) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -81,8 +85,54 @@ public class SalesQuoteService {
             if (!product.getActive()) {
                 throw new IllegalArgumentException("San pham '" + product.getName() + "' da ngung kinh doanh");
             }
+
             if (product.isCombo()) {
-                throw new IllegalArgumentException("Quote combo — su dung catalog combo rieng / Slice sau.");
+                ProductVariant variant = variantService.resolveVariant(line.variantId(), product.getId(), true);
+                variantRepo.findById(variant.getId()).orElseThrow();
+                if (!Boolean.TRUE.equals(variant.getActive())) {
+                    throw new IllegalArgumentException("Variant '" + variant.getVariantCode() + "' khong hoat dong");
+                }
+                if (!Boolean.TRUE.equals(variant.getIsSellable())) {
+                    throw new IllegalArgumentException("Variant '" + variant.getVariantCode() + "' khong ban duoc");
+                }
+                if (line.batchId() != null) {
+                    throw new IllegalArgumentException("Combo quote khong ho tro batchId");
+                }
+                List<ProductComboItem> comboItems = comboItemRepo.findByComboProduct(product);
+                if (comboItems.isEmpty()) {
+                    throw new IllegalStateException("Combo '" + product.getName() + "' chua co thanh phan");
+                }
+                int comboQty = line.quantity();
+                for (ProductComboItem ci : comboItems) {
+                    ProductVariant compVariant = variantService.resolveVariant(null, ci.getProduct().getId(), false);
+                    int required = ci.getQuantity() * comboQty;
+                    if (compVariant.getStockQty() < required) {
+                        throw new IllegalArgumentException(
+                                        "Combo '" + product.getName() + "': thanh phan '" + ci.getProduct().getName()
+                                        + "' khong du hang. Can: " + required + ", ton: " + compVariant.getStockQty());
+                    }
+                }
+                BigDecimal lineDisc = line.discountPercent() != null ? line.discountPercent() : BigDecimal.ZERO;
+                if ("storefront".equals(src) && lineDisc.compareTo(BigDecimal.ZERO) > 0) {
+                    throw new IllegalArgumentException("Cua hang web khong duoc giam gia theo dong tren quote");
+                }
+                BigDecimal factor = BigDecimal.ONE.subtract(
+                        lineDisc.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP));
+                BigDecimal sell = variant.getSellPrice();
+                BigDecimal snappedUnit = sell.multiply(factor).setScale(0, RoundingMode.HALF_UP);
+                BigDecimal lineSubtotal = snappedUnit.multiply(BigDecimal.valueOf(line.quantity()));
+                Long categoryId = product.getCategory() != null ? product.getCategory().getId() : null;
+                BigDecimal lineGrossCatalog =
+                        sell.multiply(BigDecimal.valueOf(line.quantity())).setScale(0, RoundingMode.HALF_UP);
+
+                merchandiseSubtotal = merchandiseSubtotal.add(lineSubtotal);
+                capturedBillableBare.add(new SalesQuoteCapturedLineDto(
+                        product.getId(), variant.getId(), line.quantity(),
+                        snappedUnit, lineSubtotal, lineDisc, line.batchId(), false, sell, null));
+                billableRows.add(new CommercialPricingEngine.BillableAllocationRow(
+                        product.getId(), categoryId, lineGrossCatalog, lineSubtotal));
+                promoLines.add(new CommercialPricingEngine.PromoPricingLine(product, lineSubtotal));
+                continue;
             }
 
             ProductVariant variant = variantService.resolveVariant(line.variantId(), product.getId(), true);
@@ -186,6 +236,45 @@ public class SalesQuoteService {
 
         BigDecimal vatPct = req.vatPercent() != null ? req.vatPercent() : BigDecimal.ZERO;
 
+        CommercialPricingEngine.QuoteCommercialResult preLoyaltyCommercial =
+                CommercialPricingEngine.computeMerchandiseQuoteAllocation(
+                        merchandiseSubtotal,
+                        manual,
+                        promo,
+                        promoLines,
+                        billableRows,
+                        rawVoucherDiscount,
+                        shipFee,
+                        actualPromoShippingDiscount,
+                        actualVoucherShippingDiscount,
+                        vatPct
+                );
+
+        LoyaltyRedemptionSnapshotDto loyaltySnapshot = null;
+        BigDecimal loyaltyDiscount = BigDecimal.ZERO;
+        long loyaltyRedeemedPoints = 0L;
+        Long requestedRedeemPoints = req.requestedRedeemPoints();
+        if (requestedRedeemPoints != null && requestedRedeemPoints > 0) {
+            if (anonymous) {
+                throw new IllegalArgumentException("Khách vãng lai không thể đổi điểm");
+            }
+            User user = userRepository.findByUsername(auth.getName())
+                    .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy user đổi điểm"));
+            Customer linkedCustomer = user.getCustomer() != null ? user.getCustomer() : accountService.ensureLinkedCustomer(user.getUsername());
+            Long requestCustomerId = parseNullableLong(req.customerId());
+            if (requestCustomerId != null && !requestCustomerId.equals(linkedCustomer.getId())) {
+                throw new IllegalArgumentException("Không thể đổi điểm của khách hàng khác");
+            }
+            loyaltySnapshot = loyaltyService.capRedemption(linkedCustomer, requestedRedeemPoints,
+                    preLoyaltyCommercial.breakdown().itemNetRevenue());
+            loyaltyDiscount = loyaltySnapshot != null && loyaltySnapshot.discountAmount() != null
+                    ? loyaltySnapshot.discountAmount()
+                    : BigDecimal.ZERO;
+            loyaltyRedeemedPoints = loyaltySnapshot != null && loyaltySnapshot.redeemedPoints() != null
+                    ? loyaltySnapshot.redeemedPoints()
+                    : 0L;
+        }
+
         CommercialPricingEngine.QuoteCommercialResult quoteCommercial =
                 CommercialPricingEngine.computeMerchandiseQuoteAllocation(
                         merchandiseSubtotal,
@@ -194,6 +283,8 @@ public class SalesQuoteService {
                         promoLines,
                         billableRows,
                         rawVoucherDiscount,
+                        loyaltyDiscount,
+                        loyaltyRedeemedPoints,
                         shipFee,
                         actualPromoShippingDiscount,
                         actualVoucherShippingDiscount,
@@ -248,6 +339,7 @@ public class SalesQuoteService {
                 promotionSnapshot,
                 voucherSnapshot,
                 shipSnap,
+                loyaltySnapshot,
                 capturedBillable,
                 capturedRewards
         );
@@ -282,8 +374,14 @@ public class SalesQuoteService {
                 promotionSnapshot,
                 voucherSnapshot,
                 shipSnap,
-                breakdown
+                breakdown,
+                loyaltySnapshot
         );
+    }
+
+    private Long parseNullableLong(String value) {
+        if (value == null || value.isBlank()) return null;
+        try { return Long.parseLong(value); } catch (NumberFormatException ex) { return null; }
     }
 
     private void assertQuoteSupportedPromotionType(Promotion promo) {

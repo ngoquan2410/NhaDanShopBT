@@ -46,7 +46,10 @@ public class ProductionRecipeService {
         } else {
             bucket = "NON_ARCHIVED";
         }
-        return recipeRepo.searchByBucket(bucket, outputVariantId, q, pageable).map(this::map);
+        if (q == null) {
+            return recipeRepo.searchByBucketWithoutText(bucket, outputVariantId, pageable).map(this::map);
+        }
+        return recipeRepo.searchByBucketWithText(bucket, outputVariantId, q, pageable).map(this::map);
     }
 
     @Transactional(readOnly = true)

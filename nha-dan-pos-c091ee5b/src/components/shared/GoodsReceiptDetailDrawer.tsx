@@ -3,7 +3,6 @@ import { X, Printer, FileInput, Calendar, Truck, Barcode } from "lucide-react";
 import { formatVND, formatDate } from "@/lib/format";
 import { BlockedActionBanner } from "@/components/shared/BlockedActionBanner";
 import type { GoodsReceipt, GoodsReceiptLine } from "@/services/types";
-import { products as allProducts } from "@/lib/mock-data";
 import { Printable58Receipt } from "@/components/shared/Printable58Receipt";
 import { BarcodePrintDialog } from "@/components/shared/BarcodePrintDialog";
 import { triggerPrint } from "@/lib/print";
@@ -76,15 +75,6 @@ function buildCostRows(receipt: GoodsReceipt, lines: GoodsReceiptLine[]): CostRo
       finalLineCost,
     };
   });
-}
-
-/** Look up retail sell price (per sell-unit) for a variant code from product catalog. */
-function lookupSellPrice(variantCode: string): number | undefined {
-  for (const p of allProducts) {
-    const v = p.variants.find((x) => x.code === variantCode);
-    if (v) return v.sellPrice;
-  }
-  return undefined;
 }
 
 export function GoodsReceiptDetailDrawer({ receipt, onClose }: Props) {
@@ -213,7 +203,7 @@ export function GoodsReceiptDetailDrawer({ receipt, onClose }: Props) {
         onClose={() => setBarcodeOpen(false)}
         title={`In mã vạch — ${receipt.number}`}
         items={lines.map((l) => {
-          const sellPrice = lookupSellPrice(l.variantCode);
+          const sellPrice = l.variantSellPrice;
           return {
             productName: l.productName,
             variantName: l.variantName,

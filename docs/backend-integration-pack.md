@@ -48,6 +48,7 @@ This addendum documents the completed local backend state after ProductBatch sta
 - Slice 7 FREE_SHIPPING truth: promotion FREE_SHIPPING and voucher `free_shipping` affect only `shippingDiscount`, capped at `shippingFee`; shipping fee/discount/net revenue and future actual shipping cost remain invoice-level buckets and are not allocated into product/category revenue/profit.
 - Promotion preview integration truth: backend `PromotionEvaluationService` owns real preview via `POST /api/promotions/evaluate` and `POST /api/promotions/pick-best`; these endpoints are public/stateless and do not create quote/order/invoice/payment/inventory rows. Admin promotion mutations remain ADMIN-only in `SecurityConfig`.
 - POS promotion truth: `nha-dan-pos-c091ee5b/src/pages/admin/POS.tsx` loads real promotion rows from backend `promotionsCrud.list(...)` and uses backend `promotions.evaluateAll(...)` for eligibility; it no longer uses local store promotion IDs or `applyPromotionToCart` as real eligibility/source of truth. Checkout preview handles `pickBest` failure by clearing `bestPromo`; submit remains backend quote-backed.
+- **Admin invoices list (`Hóa Đơn`, 2026-04-30):** The production admin invoice service is **`BackendInvoiceAdapter`** (`services/index.ts`) calling `GET /api/invoices`, `GET /api/invoices/{id}`, and **`PATCH /api/invoices/{id}/cancel`** with unified JWT. Physical **`DELETE`** is not used for completed invoices (matches backend rejection — use cancel). Pending-order **`POST /api/pending-orders/{id}/confirm`** returns `invoice` in `PendingOrderConfirmResponse`; FE surfaces `confirmedInvoiceNo` + toast action to **`/admin/invoices`**. List/detail map `SalesInvoiceResponse` into admin `Invoice` view model (`invoiceApiMapping.ts`) including **`itemGrossProfit`/`totalProfit`** when present (`LocalInvoiceAdapter` remains **`MODE==="test"`** or **`VITE_ADMIN_INVOICE_LOCAL_DEMO===true`** only).
 
 Older sections below may contain historical/transitional wording; use this addendum as the current local baseline until the full pack is rewritten carefully.
 
@@ -122,7 +123,7 @@ Current POS barcode flow usually scans a product or variant barcode. Invoice cre
 - Goods receipt labels encode `BATCH:{batchId}` from confirmed backend batch identity.
 - Production output labels encode `BATCH:{outputBatchId}` from the created output batch.
 - Legacy no-`batchId` invoice lines still use FEFO fallback.
-- Slice 7 is implemented. Slice 8 is planned for unified backend JWT auth, backend-backed storefront/account, and Customer-owned loyalty earn/redeem; payment sessions remain future/deferred.
+- Slice 7 is implemented. Slice 8 (unified backend JWT auth, backend-backed storefront/account, Customer-owned loyalty earn/redeem) is **PASS / verified (2026-04-30)** for backend + gates + Postgres/Vite proxy smoke per `docs/backend-integration-pack.md` Slice 10 item 10; the next planned FE integration cleanup is "Remove Lovable/Local Mock From Active FE Screens" before Slice 9 reporting, and standalone payment-session hardening remains future/deferred unless noted elsewhere in this doc.
 - No `raw_materials` table or class is added.
 
 ### Slice 6B implementation status (2026-04-28)
@@ -149,7 +150,7 @@ Current POS barcode flow usually scans a product or variant barcode. Invoice cre
 - POS **batch-scanned** and **non-batch** carts (Slice 6C): authenticated quote (`postSalesQuoteAsPos` → `POST /api/sales/quote`, `source=pos`) then `POST /api/invoices` with `quotePublicId` and `paymentMethod`; per-line `batchId` is preserved for exact-batch allocation when present. After a successful quote, the in-app/58mm invoice snapshot is built from **`quote.lines` + `quote.rewardLines`** and **`quote.pricingBreakdownSnapshot`** via `buildInvoiceLinesFromQuote` / `buildPosInvoiceBreakdownFromQuote` in `src/lib/pos-quote-receipt.ts` (gift/free rows come from backend `rewardLines`, not local `computeInvoice` `freeItems`).
 - POS carts **without** batch lines may still use the legacy local invoice path when no admin JWT session is present.
 
-Slice 7 commercial allocation and promotion/voucher shipping-bucket behavior are implemented; Slice 8 unified backend JWT auth + backend storefront/account + Customer loyalty earn/redeem is planned next; standalone payment sessions and deeper Slice 9 reporting remain future/deferred.
+Slice 7 commercial allocation and promotion/voucher shipping-bucket behavior are implemented; Slice 8 unified backend JWT auth + backend storefront/account + Customer loyalty earn/redeem is **PASS / verified (2026-04-30)** (see Slice 10); the planned "Remove Lovable/Local Mock From Active FE Screens" cleanup must run before Slice 9 reporting, while standalone payment sessions and deeper Slice 9 reporting remain future/deferred.
 
 ## Slice 6C: Unified Sales Invoice Commercial Contract
 
@@ -2128,7 +2129,7 @@ Salt raw import:
    - exact-batch allocation, FEFO fallback, cancel/void allocation restore, `ProductBatch.remainingQty`, and `ProductVariant.stockQty` projection remain unchanged
 
 9. Slice 7: KiotViet-like commercial allocation, VAT, FREE_SHIPPING, promotion/voucher evaluation, reporting
-   - status: next/planned; not PASS until implementation and automated tests pass
+   - status: **PASS / DONE** — matches acceptance **§85** (backend allocation, reporting, and automated `*Slice7*` / regression coverage); this section remains the detailed design reference
    - goal: make newly created quotes, pending orders, invoices, receipts/prints, and reports use backend-owned commercial snapshots; frontend preview is display-only and must not become persisted pricing truth
    - backend preview endpoints remain display/precheck only: `POST /api/promotions/evaluate`, `POST /api/promotions/pick-best`, and `POST /api/vouchers/validate`; they must not create/update quote/order/invoice/payment/inventory records
    - admin promotion CRUD route family remains `/api/promotions`; mutation endpoints (`POST`, `PUT`, `PATCH /{id}/toggle`, `DELETE`) require `ADMIN`
@@ -2199,10 +2200,19 @@ Salt raw import:
      - `PendingOrder` remains the canonical pre-invoice record for online checkout
      - confirm is the authoritative online invoice creation step
      - `ProductBatch.remainingQty` remains stock truth; exact-batch, FEFO, cancel restore, receipt void, batch status/sellable predicate, combo archive, and production stock movement semantics must not be weakened
-     - no Supabase/cloud pending-order mutation fallback and no deployment/GitHub work; Slice 8 auth/storefront/loyalty remains a separate planned slice, and Slice 9 remains future/deferred
+     - no Supabase/cloud pending-order mutation fallback and no deployment/GitHub work; Slice 8 auth/storefront/loyalty verified **PASS** (2026-04-30, see Slice 10 item 10 verification record); Slice 9 remains future/deferred
 
 10. Slice 8: Unified JWT Auth + Storefront Backend Truth + User-Customer Loyalty Earn/Redeem
-   - status: **PLANNED / NEXT**; documentation plan only, not PASS until implementation, tests, and FE-BE smoke pass
+   - status: **PASS / verified close-out (2026-04-30)** — Default Spring profile uses **PostgreSQL** + Flyway through **V26** (not an H2-only claim). FE-BE smoke used **`http://localhost:8080`** and Vite **`http://localhost:5173`** with `/api` proxied to the backend.
+   - verification record (2026-04-30):
+     - **HTTP:** `curl.exe` to `http://localhost:8080/actuator/health` and `http://localhost:5173/api/products` returned **HTTP 200** with services running.
+     - **Auth / RBAC (via `5173/api` where applicable):** `POST /api/auth/login` for **`admin`** and **`user`** (passwords from local DB seed/Flyway only — not documented in-repo); tokens included expected roles (**`ROLE_ADMIN`** / **`ROLE_USER`**); `GET /api/auth/me`; `POST /api/auth/logout`; user `GET /api/account/me`; user `GET /api/customers` forbidden as configured.
+     - **Catalog / checkout:** `GET /api/products` exposed numeric **`productId=9001`**, **`variantId=9001`** for smoke inventory; `POST /api/promotions/pick-best` with those IDs succeeded (no erroneous “Không tìm thấy sản phẩm ID: 1”); `POST /api/sales/quote` (`source=storefront`) → `POST /api/pending-orders` (`quotePublicId`) → **`POST /api/receipts`** (admin) when confirm otherwise failed with **409** (no sellable batch) → admin **`POST /api/pending-orders/{id}/confirm`** succeeded.
+     - **Loyalty:** points earned on confirm; redemption exercised with **`requestedRedeemPoints=50`**: **`pointReserved`** reflected reservation while pending and returned to **0** after confirm; **`GET /api/account/points`** and **`GET /api/account/points/history`** matched expectations (examples from verifier session: **`INV-20260430-00005`**, **`INV-20260430-00006`**).
+     - **Admin `Hóa Đơn` + list API:** Admin invoice screen read path is **`BackendInvoiceAdapter` → `GET /api/invoices`**. After pending confirm, **`GET /api/invoices`** must include the new row; `Slice6cQuotePaymentIntegrationTest` now asserts **`invoiceService.listInvoices(PageRequest…)`** finds the confirmed invoice id and the pending row links the same invoice entity. Re-run proxy smoke: **`GET http://localhost:5173/api/invoices?page=0&size=20&sort=invoiceDate,desc`** (admin Bearer) after confirm. **Browser/UI** full click-through of `/admin/invoices` remains optional manual follow-up.
+     - **Implementation notes (same window):** Slice 6C/7 regression test wiring fixed with focused test-scope mocks for Slice 8 loyalty/account collaborators (no weakening of Slice 6C/7 tests); guest checkout rejects `customerId`; authenticated `ROLE_USER` binds linked customer when `customerId` omitted; `ROLE_ADMIN` may bind any active customer; invoice cancel loyalty reversal via idempotent **`ADJUST`**; earn-base rules unchanged from spec.
+     - **Exact gates (re-run after edits):** `cd C:\Work\NhaDanShopBT\NhaDanShop; .\gradlew.bat test --tests "*Slice8*" --no-daemon --console=plain`; `.\gradlew.bat test --tests "*Slice6c*" --no-daemon --console=plain`; `.\gradlew.bat test --tests "*Slice7*" --no-daemon --console=plain`; `.\gradlew.bat test --tests "com.example.nhadanshop.integration.AuthAccountMvcIntegrationTest" --no-daemon --console=plain`; `.\gradlew.bat test --tests "*PaymentEventIntegrationTest*" --no-daemon --console=plain`; full `.\gradlew.bat test --no-daemon --console=plain`; frontend `cd C:\Work\NhaDanShopBT\nha-dan-pos-c091ee5b`; `npm run build`; focused Vitest: `npm run test -- src/test/slice8-auth-catalog-cart.test.ts src/pages/storefront/checkoutGuards.test.ts src/services/sales/salesQuoteApi.test.ts src/lib/postLoginDestination.test.ts`.
+     - **Not claimed:** repository-wide **`npm test`** / optional GHN–Supabase harness; **automated browser/UI redirect** verification (manual or future E2E only — not “full browser PASS”).
    - summary:
      - app has one real auth flow: `/login` backed by backend JWT for both admin and user
      - remove `/admin/login` from active real flow, remove Supabase auth guard from app flow, and remove hidden `window.prompt` JWT login
@@ -2239,6 +2249,7 @@ Salt raw import:
      - storefront signup creates a linked customer; existing users without a customer are lazy-created/linked on `/api/account/me`
      - admin users normally do not require linked customers
      - guest checkout remains allowed but cannot redeem points and must not claim an existing customer account only by entering a phone number
+     - guest checkout also cannot submit or bind `customerId`; public pending-order creation rejects `customerId` and accepts only guest contact fields
    - business logic — auth:
      - one frontend session key: `nhadan.auth.session.v1`
      - session stores `accessToken`, `refreshToken`, `expiresAt`, `username`, `fullName`, `roles`, and optional `customerId`
@@ -2267,8 +2278,8 @@ Salt raw import:
      - `loyaltyDiscount` reduces item revenue/profit like other merchandise discounts
      - `loyaltyDiscount` does not reduce shipping and does not reduce VAT
      - reward/free lines receive zero loyalty allocation
-     - redemption is capped by requested points, available points, item net revenue after manual/promo/voucher, and optional backend max-percent config
-     - `availablePoints = pointBalance - pointReserved`
+     - redemption is capped by requested points, available points (`max(0, pointBalance - pointReserved)`), item net revenue after manual/promo/voucher, and optional backend max-percent config
+     - `availablePoints = max(0, pointBalance - pointReserved)` (negative `pointBalance` is allowed after full invoice cancellation reversals; summaries clamp **displayed** availability at zero)
    - business logic — pending-order reservation:
      - pending create from a quote with redeemed points creates a `RESERVED` reservation, increases `customer.pointReserved`, and binds reservation to customer, quote, and pending order
      - confirm converts reservation to `REDEEMED`, decreases `pointReserved`, decreases `pointBalance`, increases `lifetimePointsRedeemed`, and creates a `REDEEM` point transaction
@@ -2336,11 +2347,233 @@ Salt raw import:
      - frontend tests: unified auth provider/session/refresh/logout; route guards; no prompt auth; product/category public adapters; cart legacy clear; checkout payload numeric IDs + loyalty request; account points/history rendering
      - FE-BE smoke: backend PostgreSQL default profile on `8080`; Vite on `5173`; admin login/logout; user login/account; browse product -> cart -> checkout with points -> pending order; confirm/admin or Casso path; verify reservation/redeem/earn
 
-11. Future/deferred payment sessions formalization
+11. Slice 8B: Remove Lovable/Local Mock From Active FE Screens
+   - status: **PARTIAL — code + unit/IT PASS; E2E evidence = operator-run only (2026-05-01)** — Playwright specs cover REST-via-proxy, browser checkout (pick-best + quote + pending), store settings after `localStorage` wipe, POS scan UI + API cross-check, catalog product detail, legacy cart purge, user RBAC. **Gradle full suite**, **`npm run build`**, và **`npx vitest run`** đã PASS trong session cập nhật này. **GAP** còn: (i) một lần chạy **`RUN_FE_BE_E2E=1 npm run test:e2e`** trên PostgreSQL thật + Vite **127.0.0.1:5173** do người vận hành lưu log (không khai “full FE-BE PASS” nếu chưa chạy); (ii) type-only `mock-data` trên vài màn admin; (iii) luồng loyalty đổi điểm đầy đủ trong browser (reserve→confirm→earn) chưa có spec E2E riêng — engine/integration backend `Slice8LoyaltyIntegrationTest` vẫn là bằng chứng chính.
+   - update date: 2026-05-01 (cập nhật từ 2026-04-30).
+   - implementation report (2026-04-30 baseline + 2026-05-01 addendum):
+
+| Issue | Verdict |
+| --- | --- |
+| POS: no silent `/api/pos/scan` failure → mock `resolveScannedCode` | **PASS** — `POS.tsx` không import `pos-scan-demo` / `resolveScannedCode`; lỗi backend → toast, không thêm dòng giỏ. |
+| POS: cart variant lines from backend ids/price/stock | **PASS** — `GET /api/pos/scan/{code}` includes `variantStockQty`; cart uses stringified backend numeric ids. |
+| Goods receipt barcode labels: no mock catalog sell price | **PASS** — BE `variantSellPrice` on receipt items; FE `GoodsReceiptLine.variantSellPrice`; omit label price if absent. |
+| **P1 GoodsReceiptCreate: no offline fake save without admin JWT** | **PASS** — chỉ báo lỗi + redirect `/login?next=…`; không `savedNumber` giả / không toast success / không xóa draft khi không có JWT. |
+| **P2 ProfitReport: no FE COGS 72% fallback** | **PASS** — tổng hợp từ `/api/reports/profit`; chi tiết SP từ `/api/revenue/by-product`; thiếu field → `"—"`; có lọc `productIds` trên BE. |
+| **P2 RevenueReport: no client scale-by-share when filtering** | **PASS** — kỳ/filter gọi `/api/revenue/total` với `productIds`; không `scale`. |
+| **P2 Storefront Combos fake add-to-cart** | **PASS (listing-only v1)** — nút disabled “Chưa hỗ trợ mua online”; không toast / không cart mutation giả. |
+| POS thermal snapshot types | **PASS** — `src/lib/pos-print-types.ts`; POS / quote receipt / printable invoices updated. |
+| Vitest route guard (active graph) | **PASS** — `src/test/slice8b-route-guard.test.ts` + `slice8b-pos-goods-receipt.test.ts` (guard timeout 120s). |
+| Vitest Slice8B source hygiene | **PASS** — `src/test/slice8b-source-hygiene.test.ts` ( Profit/Revenue receipts / Combos / offline PN ). |
+| `store_payment_settings:v1` / `shipping_config:v1` in reachable app graph | **PASS** (guard) — keys only in `services/adapters/local/*` (not traversed as violators in guard scan). |
+| Migrate all admin `import type` off `@/lib/mock-data` | **GAP** — `ProductService` + adapters → `@/lib/catalog-types`; admin screens khác có thể còn mock-data types. |
+| Scripted FE–BE smoke (PostgreSQL + Vite proxy + seed `SMOKE8B-*`) | **PARTIAL — harness ready / evidence runner-dependent** — `playwright.config.ts` (`channel: 'chrome'`), `npm run test:e2e` / `test:e2e:headed` → `RUN_FE_BE_E2E=1` + `e2e/run-e2e.mjs` (`GET …/actuator/health` qua proxy). Specs: `e2e/specs/fe-be-api-smoke.spec.ts` (seed `SMOKE8B-*`, receipt 401 nếu thiếu JWT, POS stock delta, `GET /api/invoices` sau confirm, shipping quote ≥ zone base sau PUT), `e2e/specs/browser-session.spec.ts`, `e2e/specs/slice8b-browser-integration.spec.ts` (store settings sau `localStorage` clear, checkout browser + network, product detail, cart legacy drop, POS UI + API, user `/account`). **Chỉ ghi PASS E2E khi đã chạy Postgres+Chrome+5173 và lưu log.** |
+| Gradle `Slice7CommercialFlowIntegrationTest` promotion clock vs `mkBuyXGetY` | **PASS (fixed 2026-05-01)** — test dùng `Clock` cố định; cửa sổ `LocalDateTime.now()` trên JVM đã thay bằng cửa sổ cố định (xem implementation report dưới). |
+| Gradle `test` DB | **Note** — suite dùng **H2**; PASS không thay chứng minh Postgres production cho toàn cụm. |
+
+   - **Evidence — tooling (đã chạy trong repo, agent 2026-05-01):**
+     - `.\gradlew.bat test --tests "*Slice6c*" --tests "*Slice7*" --tests "*Slice8*" --no-daemon --console=plain` → **BUILD SUCCESSFUL** (bao gồm `Slice7CommercialFlowIntegrationTest`, `Slice8BMvcIntegrationTest`, `Slice8bStoreShippingMvcIntegrationTest`, các test Slice 6C/8 còn lại trong pattern).
+     - `.\gradlew.bat test --no-daemon --console=plain` → **BUILD SUCCESSFUL** (session 2026-05-01; ~7m — full module tests).
+     - `npm run build` + `npx vitest run` (`nha-dan-pos-c091ee5b`) → **PASS** (session 2026-05-01) — `22` test files / `65` tests (gồm guards Slice 8B + `cod-flow.test.ts` kiểm tra tồn tại file spec E2E).
+     - `.\gradlew.bat test --tests "com.example.nhadanshop.integration.Slice8BMvcIntegrationTest" --no-daemon` → BUILD SUCCESSFUL (toàn method trong class).
+
+   - **PostgreSQL FE–BE E2E (Playwright)** — chỉ chứng minh PASS khi tự chạy:
+     - Tiền đề: Backend profile PostgreSQL/`local` **127.0.0.1:8080**, Vite **127.0.0.1:5173** (`vite.config.ts` proxy `/api`, `/actuator`).
+     - Lệnh: `cd nha-dan-pos-c091ee5b` → `set RUN_FE_BE_E2E=1` (Windows) → `npm run test:e2e` hoặc `npm run test:e2e -- --headed`.
+     - Ghi nhận: prefix seed trong spec (`SMOKE8B-${Date.now()}`); admin mặc định `E2E_ADMIN_USER`/`E2E_ADMIN_PASSWORD` hoặc `admin`/`admin123`; user BF `user`/`user123`.
+     - Ghi chú: `playwright install chromium` có thể lỗi TLS (`UNABLE_TO_GET_ISSUER_CERT_LOCALLY`) — config dùng **Chrome đã cài** (`channel: 'chrome'`).
+
+   - Backend tests (MockMvc/H2 trong class): `Slice8BMvcIntegrationTest` (`@MockBean CustomerLoyaltyService` cho luồng confirm không Earn thật)
+     - `pos_scan_reflects_stock_qty_after_receipt_and_receipt_returns_variantSellPrice`
+     - `revenue_and_profit_product_ids_filter_use_merchandise_lines_only`
+     - `guest_can_get_store_payment_settings_public_endpoint`
+     - `pos_scan_unknown_code_returns_blocked_response_not_exception` — HTTP 200 với `sellable:false`, `blockReason` chứa `NOT_FOUND` (không mock tồn).
+     - `http_storefront_quote_pending_confirm_invoice_totals_match_quote_snapshot` — batch FEFO, quote, pending + `quotePublicId`, confirm; assert `GET /api/invoices` có `id` hóa đơn vừa tạo; khớp `finalAmount`/snapshot với quote (H2).
+     - `post_receipts_without_auth_returns_unauthorized` — POST `/api/receipts` không JWT → 401/403.
+
+   - Backend tests bổ sung (MockMvc/H2): `Slice8bStoreShippingMvcIntegrationTest` — PUT store/shipping settings (admin-only), quote phản hồi zones đã lưu (đã có trong suite `*Slice8*`).
+
+   - **cod-flow Vitest:** `src/test/cod-flow.test.ts` khẳng định có `fe-be-api-smoke.spec.ts` và `slice8b-browser-integration.spec.ts`; luồng thật: `Slice8BMvcIntegrationTest#http_storefront_quote_pending_confirm_invoice_totals_match_quote_snapshot` + Playwright (REST + browser checkout).
+   - APIs added/extended (2026-05-01):
+     - `GET /api/revenue/total` — optional lặp `productIds`; `rows[].invoiceCount`, `rows[].itemsSold` populated khi lọc (merchandise line truth).
+     - `GET /api/revenue/by-product` — optional `productIds`.
+     - `GET /api/reports/profit` — optional `productIds` (distinct invoices đếm theo invoice có ít nhất một dòng thuộc SP).
+   - summary:
+     - active frontend routes must stop using Lovable/local mock state as business truth
+     - admin Store Settings and Shipping Settings must be backend-owned; localStorage bootstrap/config can remain only for explicit demo/test flows
+     - active screens must either call backend-backed services/endpoints or surface an explicit GAP/disabled state
+     - no production route may silently fall back to local mock data after a backend failure
+     - local mock code may remain only where explicitly allowed below
+   - scope:
+     - admin dashboard/topbar, master-data screens, product detail, combo/customer/supplier/user management, stock adjustment flows, reporting pages, goods receipt lookup/import validation, POS selection, promotion pickers, storefront combo route, shared drawers/forms, and remaining local/hybrid services
+     - admin Store Settings (`/admin/store-settings`): remove local bootstrap from `LocalStoreSettingsAdapter`; backend `store_payment_settings` is the only real payment/QR/e-wallet settings truth
+     - admin Shipping Settings (`/admin/shipping-settings`): remove local `shipping_config:v1` truth; backend persisted shipping config drives both admin UI and `ShippingQuoteService`
+     - audit and migrate service adapters so `customers`, `vouchers`, and `payments` are no longer local-only for active production flows
+     - remove production local fallback from hybrid `product`, `category`, `inventory`, and `goodsReceipts` services; demo/test fallback must be explicit and flag-gated
+     - keep implementation focused on integration truth and route behavior; no UI redesign is required
+   - implementation constraints:
+     - first inspect `nha-dan-pos-c091ee5b/src/App.tsx`, all pages/components imported by active routes, `nha-dan-pos-c091ee5b/src/services/index.ts`, and imports/usages of `@/lib/mock-data`, `@/lib/store`, `useStore(`, `*Actions`, and `Local*Adapter`
+     - do not edit forbidden paths during this cleanup: `NhaDanShopUi/**`, `.cursor/**`, `NhaDanShop/scripts/**`, `dev-start.ps1`, `backups/**`, or `*.tsbuildinfo`
+     - no Git push/pull/merge/rebase/reset/deploy/commit work belongs in this slice
+     - do not put real secrets into `application.properties`, `application-local.properties.example`, docs, tests, or frontend env examples; config examples use placeholders only
+     - do not weaken or delete existing Slice 6C/7/8 tests; add focused tests when new backend endpoints or adapters are implemented
+   - business decision:
+     - active FE routes must not use local/mock as business truth for products, categories, inventory, customers, suppliers, users, combos, stock adjustments, reports, goods receipts, POS selections, promotions, vouchers, payments, or order/invoice creation
+     - store payment settings, VietQR settings, MoMo/ZaloPay QR settings, shipping zone rules, parcel defaults, free-ship thresholds, and declared-value settings are backend truth in production
+     - backend state is authoritative for persistence, eligibility, pricing, stock, reporting, and identity; frontend local state can only cache display snapshots or incomplete form input before a backend command
+     - production fallback cannot convert backend errors into believable mock business data
+   - allowed exceptions:
+     - tests, fixtures, Storybook/demo-only flags, and type-only imports may keep local/mock data when they cannot affect production routes
+     - POS print snapshot may keep local display state only after backend invoice creation succeeds and returns the invoice truth
+     - storefront cart local state is allowed only as UI cache when every line stores backend numeric `productId` / `variantId`, backend source metadata, and checkout uses backend quote before order creation
+     - address autocomplete fallback is allowed only as UX fallback for form completion or display convenience; admin shipping config and persisted pricing/order truth remain backend-owned
+     - if a Combo backend API does not exist, do not show mock combos as real; future implementation must either add a backend Combo API or mark combo route as explicit GAP/disabled
+   - screen-by-screen migration plan:
+     - Admin Dashboard / Topbar: replace `dashboardStats`, locally derived counters, and local notification/profile truth with backend summary/account endpoints; show loading/error/empty states instead of mock KPI values
+     - Admin StoreSettings: use only backend `GET/PUT /api/store/payment-settings`; remove `BackendStoreSettingsAdapter` local bootstrap from `LocalStoreSettingsAdapter`; no production read/write of `store_payment_settings:v1`; preview overrides remain admin-only and stored settings drive checkout/POS/pending-payment QR
+     - Admin ShippingSettings: add/use backend `GET/PUT /api/shipping/settings` (or the chosen backend route documented in the implementation report) backed by PostgreSQL; remove `HybridShippingAdapter.getConfig/saveConfig` delegation to `LocalShippingAdapter`; backend `ShippingQuoteService` reads the same persisted config used by the admin screen; `POST /api/shipping/quote` remains the quote endpoint
+     - Admin Categories: route list/create/update/delete through backend category endpoints only; no `categoryActions` or `@/lib/store` mutation path in active route
+     - Admin ProductDetail: load product, variant, stock, image, category, and inventory metadata from backend; do not hydrate detail pages from `seedProducts` or local product maps
+     - Admin Combos: migrate list/detail/create/archive to backend Combo endpoints if available; otherwise mark route as explicit GAP/disabled with no mock combo catalog
+     - Admin Customers: use backend customer endpoints and DTOs for list/detail/create/update/debt/loyalty visibility; remove `customerActions` as business truth
+     - Admin Suppliers: use backend supplier endpoints for CRUD and selectors; remove `supplierActions` in active route flows
+     - Admin UsersManagement: use backend user/admin auth endpoints for user list, role/state changes, and TOTP/security metadata; remove `userActions` production mutations
+     - Admin StockAdjustments / StockAdjustmentCreate: use backend product/variant/batch lookup and stock-adjustment create/reverse endpoints; remove `stockAdjustments`, `mockAdjustmentLines`, and local success mutation
+     - Admin InventoryReport / RevenueReport / ProfitReport: use backend report endpoints and persistently computed fields; no `inventoryReport`, `revenueData`, or `profitData` as production data
+     - Admin GoodsReceiptCreate lookup/import validation: product/supplier/variant lookup and import validation must call backend APIs; local parsing can prepare rows but cannot validate existence, stock impact, or batch identity as final truth
+     - Admin POS product/customer selection: product, variant, batch, price, promotion, customer, quote, and invoice creation must use backend APIs; local cart remains UI state only until backend quote/invoice confirms truth
+     - Admin Promotions product/category pickers: picker data must come from backend products/categories with backend numeric IDs; no local mock product/category source for real promotion scope
+     - Storefront Combos: use backend Combo API or show explicit GAP/disabled state; never show Lovable/mock combos as purchasable real combos
+     - shared drawers/forms using local actions: convert submit handlers to backend services or make them demo-only; optimistic UI is allowed only after a backend command succeeds or with rollback tied to the backend response
+   - service/backend endpoint plan:
+     - migrate or finish backend adapters before screen rewrites so active real services are backend-backed from `src/services/index.ts`
+     - Store Settings: keep existing backend `/api/store/payment-settings` and `store_payment_settings` table, but remove frontend local bootstrap/import path and add tests that backend-empty/default does not import localStorage into production truth
+     - Shipping Settings: implement PostgreSQL-backed singleton shipping settings, preferably `shipping_settings` with JSON/text columns for `zoneRules` and `parcelDefaults` plus timestamps; expose admin-only `GET/PUT /api/shipping/settings`; make `ShippingQuoteService` use persisted settings with code default only when the row does not exist
+     - use `/api/customers` for customers, `/api/suppliers` for suppliers, `/api/admin/users` for admin user management, `/api/categories` for categories, `/api/products` for product detail/create/update, `/api/revenue/**` and `/api/reports/profit` for revenue/profit reports, `/api/inventory/**` for inventory reports and lookup truth, and `/api/stock-adjustments` for stock-adjustment list/create/detail/reverse
+     - inventory existing endpoints for products, categories, inventory, goods receipts, customers, suppliers, users, promotions, reports, sales quote, pending orders, invoices, account, and loyalty; document missing endpoint gaps before coding
+     - add or expose backend endpoints in future implementation only where no real endpoint exists, especially Combo API, voucher validation/CRUD, payment/payment-event admin views, dashboard KPI summaries/search, supplier selectors, user management, stock adjustment search/create/reverse, product import/category creation, and report summary endpoints
+     - standardize FE adapters around backend-first contracts with no production local fallback; failed backend calls must return UI errors, explicit disabled state, or retry affordance
+     - local adapters may remain behind `MODE === "test"` or explicit `VITE_*_LOCAL_DEMO` flags that are excluded from production behavior and are never default true
+   - implementation order:
+     - service layer first: finish backend adapters for customers, suppliers, users, categories, product detail/create/update, reports, stock adjustments, combos or explicit combo GAP, vouchers, payments, and hybrid product/category/inventory/goods-receipt fallbacks
+     - admin screens second: migrate dashboard/topbar, categories, product detail, customers, suppliers, users management, reports, stock adjustments, goods receipt create/import validation, POS product/customer selection, and promotion pickers/forms to backend services
+     - storefront and shared components third: migrate storefront combos to backend or explicit disabled/GAP, then replace local action drawers/forms such as customer, supplier, user, product import review, stock-adjustment detail, and invoice-detail enrichment
+     - guard scans fourth: prove active-route runtime usage is removed or classify each remaining allowed exception
+     - tests and smoke last: run regression suites, frontend focused tests/build, and FE-BE smoke before any PASS claim
+   - guardlist:
+     - `@/lib/mock-data`
+     - `@/lib/store`
+     - `useStore(`
+     - `customerActions`
+     - `supplierActions`
+     - `userActions`
+     - `productActions`
+     - `categoryActions`
+     - `comboActions`
+     - `stockAdjustments`
+     - `mockAdjustmentLines`
+     - `dashboardStats`
+     - `revenueData`
+     - `profitData`
+     - `inventoryReport`
+     - `seedProducts`
+     - `LocalCustomerAdapter`
+     - `LocalVoucherAdapter`
+     - `LocalPaymentAdapter`
+     - `LocalStoreSettingsAdapter`
+     - `LocalShippingAdapter`
+     - `HybridShippingAdapter`
+     - `GhnShippingAdapter.getConfig`
+     - `shipping_config:v1`
+     - `store_payment_settings:v1`
+     - `LocalProductAdapter`
+     - `LocalCategoryAdapter`
+     - `LocalInventoryAdapter`
+     - `LocalGoodsReceiptAdapter`
+     - `LocalInvoiceAdapter`
+     - `current-customer`
+     - `currentCustomerActions`
+     - `vouchers-store`
+     - `invoiceActions`
+     - `new Local`
+     - `fallback`
+   - acceptance criteria:
+     - active production routes listed in scope have no guardlist term usage as business truth; any remaining usage is test-only, demo-flag-only, type-only, or explicitly justified in the implementation report
+     - production service adapters do not silently fall back to local/mock data after backend errors
+     - `/admin/store-settings` persists and reloads through backend only; clearing browser localStorage does not change saved payment/QR/e-wallet settings; `BackendStoreSettingsAdapter` no longer imports or instantiates `LocalStoreSettingsAdapter`
+     - `/admin/shipping-settings` persists and reloads through backend only; clearing browser localStorage does not change zone/parcel settings; `ShippingQuoteService` and storefront quote use the same backend shipping settings saved by the admin screen
+     - admin dashboard/topbar, categories, product detail, customers, suppliers, users, stock adjustments, reports, goods receipts, POS selectors, promotion pickers, and storefront combos are backend-backed or explicitly GAP/disabled
+     - storefront cart remains local UI cache only, contains backend IDs/sources for checkout lines, and real checkout uses backend quote before pending order creation
+     - address/shipping fallback cannot alter persisted quote/order pricing
+     - Combo route either uses backend Combo API or is explicitly disabled/GAP; no mock combos appear as sellable real data
+     - Slice 6C/7 pricing, stock allocation, Casso/payment confirmation, Slice 8 loyalty/auth, and existing verified behavior remain unchanged except for replacing local FE data sources
+   - test plan:
+     - static guardlist search over active FE route/service files, with allowed-exception notes for tests/demo/type-only imports
+     - focused unit/component tests for migrated screens verifying backend service calls, loading/error/empty states, and no local action mutation on submit
+     - adapter tests proving backend errors do not return mock business data in production mode
+     - backend tests for store payment settings GET/PUT permissions and persistence
+     - backend tests for shipping settings GET/PUT admin-only persistence, quote using saved zone/parcel config, and default fallback only when no settings row exists
+     - frontend tests for StoreSettings and ShippingSettings services proving no localStorage bootstrap/config is used in production service composition
+     - route hygiene test that scans active route imports and fails on runtime `mock-data` or `store` usage outside documented exceptions
+     - existing focused frontend tests stay in scope: invoice adapter, pending-order confirm invoice, Slice 8 auth/catalog/cart, checkout guards, sales quote API, and post-login destination
+     - POS/cart/checkout tests covering backend IDs, quote requirement, and print snapshot after invoice success
+     - route tests for explicit Combo GAP/disabled behavior if Combo backend API is deferred
+     - backend regression commands: `.\gradlew.bat test --tests "*Slice6c*" --no-daemon --console=plain`, `.\gradlew.bat test --tests "*Slice7*" --no-daemon --console=plain`, `.\gradlew.bat test --tests "*Slice8*" --no-daemon --console=plain`, and full `.\gradlew.bat test --no-daemon --console=plain`
+     - frontend gate: `npm run build`; add focused Vitest suites for service adapters and screens touched by the cleanup
+   - FE-BE smoke plan:
+     - run Spring Boot backend with default PostgreSQL profile on `8080` and Vite on `5173` with `/api` proxy
+     - login as admin, visit each migrated admin route, and perform at least one read path plus one safe create/update path where an existing backend endpoint supports it
+     - verify dashboard counts/search load from backend; categories CRUD, product list/detail create/update, customer create/update/list, supplier create/update/list, users list/update, reports, inventory, and stock-adjustment screens use backend APIs
+     - verify `/admin/store-settings`: save payment/QR/e-wallet settings through Vite proxy, reload page, clear browser localStorage, reload again, and confirm backend values remain
+     - verify `/admin/shipping-settings`: save a distinct zone/parcel rule through Vite proxy, reload page, clear browser localStorage, reload again, then call storefront `/api/sales/quote` and confirm shipping snapshot reflects backend settings
+     - verify POS product/customer selection calls backend, creates quote/invoice through backend path, and print snapshot reflects returned invoice
+     - verify pending confirm creates an invoice and `/admin/invoices?q=<invoiceNo>` finds it
+     - verify storefront catalog/cart/checkout still uses backend product IDs and backend quote/pending-order truth
+     - verify storefront combo route either reads backend combos or displays explicit disabled/GAP state
+     - verify reports load from backend report endpoints and do not show mock revenue/profit/inventory values when backend is unavailable
+     - verify no request or UI error such as “Không tìm thấy sản phẩm ID: 1” appears from local IDs
+   - implementation report requirements:
+     - include a PASS/GAP table by screen
+     - list every active screen/service touched and its final backend endpoint or explicit GAP/disabled decision
+     - group changed files by backend, frontend, tests, and docs
+     - list exact endpoints added and exact endpoints used
+     - include guardlist search results with each remaining hit classified as removed, test-only, demo-flag-only, type-only, POS print snapshot, cart UI cache, address/shipping UX fallback, or approved GAP
+     - state whether Combo backend API was implemented or Combo route was disabled/GAP
+     - list backend endpoint gaps discovered and whether they were implemented or deferred
+     - include tests run and FE-BE smoke commands/results
+     - explicitly report StoreSettings and ShippingSettings endpoints, persistence model, auth rules, and localStorage guard results
+     - confirm no silent production local fallback remains
+     - confirm no forbidden paths were touched and no Git push/pull/merge/rebase/reset/deploy/commit actions were performed
+   - implementation report, 2026-04-30:
+     - status: **PARTIAL PASS / GAP** — service bindings and active-route runtime local store imports were removed for the targeted admin/storefront screens; this is not yet a full PASS because backend regression suites and manual FE-BE smoke were not completed in this run
+     - PASS:
+       - service composition now binds customers, vouchers, payments, product/category/inventory/goods-receipt adapters to backend-first adapters or explicit backend GAP behavior
+       - Admin Dashboard / Topbar, Categories, ProductDetail, Combos, Customers, Suppliers, UsersManagement, StockAdjustments, StockAdjustmentCreate, InventoryReport, RevenueReport, ProfitReport, GoodsReceiptCreate, POS selectors, Promotions pickers/forms, shared drawers/forms, ProductImportReview, InvoiceDetailDrawer, and Storefront Combos no longer import `@/lib/store` as active runtime business truth
+       - Combo route uses `/api/combos` and storefront combo uses `/api/combos/active`; on failure storefront shows explicit unavailable/GAP state instead of mock combos
+       - POS keeps print snapshot only after backend quote/invoice success and does not create a production local invoice fallback
+     - GAP:
+       - Admin StoreSettings still needs backend-truth cleanup: remove `LocalStoreSettingsAdapter` bootstrap and prove payment/QR/e-wallet settings persist from backend only
+       - Admin ShippingSettings still needs backend-truth cleanup: add persisted backend shipping settings and remove `LocalShippingAdapter` / `shipping_config:v1` from production config truth
+       - payment sessions remain explicitly deferred; active order/payment truth still flows through pending orders and payment events
+       - remaining `@/lib/mock-data` imports in active files are type-only legacy view-model imports until shared DTO types are split out
+       - backend Slice 6C/7/8 regression commands and manual FE-BE smoke still need to be run before claiming full PASS
+     - endpoints used:
+       - `/api/customers`, `/api/suppliers`, `/api/admin/users`, `/api/categories`, `/api/products`, `/api/combos`, `/api/combos/active`, `/api/vouchers/active`, `/api/revenue/total`, `/api/revenue/by-product`, `/api/revenue/by-category`, `/api/reports/profit`, `/api/reports/inventory`, `/api/inventory/projections`, `/api/stock-adjustments`, `/api/receipts`, `/api/sales/quote`, `/api/invoices`, `/api/pending-orders`
+     - guard scan:
+       - active page/component runtime imports of `@/lib/store`, `useStore(`, and local `*Actions` removed
+       - remaining hits are local adapter/test/mock definitions, type-only `@/lib/mock-data` imports, POS print snapshot DTO typing, and local variable names backed by API data such as `stockAdjustments` / `inventoryReport`
+     - verification:
+       - `npm run build` in `nha-dan-pos-c091ee5b`: PASS
+       - IDE lint check on edited frontend files: PASS
+       - backend regression commands and live FE-BE smoke: not run in this implementation pass
+     - constraints:
+       - no Git push/pull/merge/rebase/reset/deploy/commit actions performed
+       - generated `*.tsbuildinfo` files from the build were removed
+
+12. Future/deferred payment sessions formalization
    - explicit payment-session lifecycle if needed beyond `paymentReference`
    - remains deferred behind Slice 8 auth/storefront/loyalty and must not be mixed into the Slice 8 implementation unless separately approved
 
-12. Slice 9: Reporting endpoints
+13. Slice 9: Reporting endpoints
    - revenue, profit, inventory reporting after invoice/inventory truth is live
    - inventory reporting must include all inventory movement source types, especially production, not only receipts and invoices, unless existing reports already derive from batch/movement truth automatically
 
@@ -2384,7 +2617,7 @@ Salt raw import:
 
 #### Slice 6 acceptance
 
-**PASS (Slice 6):** Core implementation verified: backend `ProductionSlice6IntegrationTest` (14 tests), full `.\gradlew.bat test`, admin route `/admin/production` + `BackendProductionAdminAdapter` + `npm run build`. No `raw_materials` table. Slice 7 is implemented separately; Slice 8 auth/storefront/loyalty is planned next; Slice 9 remains future/deferred. **Item 49:** inventory period report (`InventoryStockService`) includes production ledger via `production_*` movement sums; `InventoryProjectionService` remains batch-truth; revenue/profit (`RevenueService`, `ReportService`) use invoices only—production is not revenue. **GAP (deferred):** optional advanced reporting in Slice 9 (e.g. separate “production volume” analytics / multi-currency); not required for correctness of stock or P&L paths above.
+**PASS (Slice 6):** Core implementation verified: backend `ProductionSlice6IntegrationTest` (14 tests), full `.\gradlew.bat test`, admin route `/admin/production` + `BackendProductionAdminAdapter` + `npm run build`. No `raw_materials` table. Slice 7 is implemented separately (acceptance §85); Slice 8 auth/storefront/loyalty is **PASS / verified (2026-04-30)** — see Slice 10 item 10; Slice 9 remains future/deferred. **Item 49:** inventory period report (`InventoryStockService`) includes production ledger via `production_*` movement sums; `InventoryProjectionService` remains batch-truth; revenue/profit (`RevenueService`, `ReportService`) use invoices only—production is not revenue. **GAP (deferred):** optional advanced reporting in Slice 9 (e.g. separate “production volume” analytics / multi-currency); not required for correctness of stock or P&L paths above.
 
 27. Production recipe CRUD/archive exists in backend API and React admin UI.
 28. `CreateProductionRecipeRequest` supports `outputMustBeSellable`, defaulting to `true`.
@@ -2412,7 +2645,7 @@ Salt raw import:
 
 #### Slice 6C acceptance
 
-**PASS (core + commercial hardening + voucher/reward/POS quote, local 2026-04-28):** Quote API, quote-backed flows, backend voucher rules in quote, backend-backed Admin Voucher CRUD UI, `BUY_X_GET_Y` / `QUANTITY_GIFT` reward lines, POS non-batch quote+invoice when admin session exists, prior hardening (storefront line discount, server shipping, public `quotePublicId`, VAT profit exclusion). **Slice 7 backend allocation + reporting PASS (2026-04-29)** — see Slice 7 acceptance §85 below. Slice 8 unified backend JWT auth + storefront backend truth + Customer loyalty earn/redeem is PLANNED / NEXT; Slice 9 and carrier settlement / `shippingActualCost` remain future/deferred.
+**PASS (core + commercial hardening + voucher/reward/POS quote, local 2026-04-28):** Quote API, quote-backed flows, backend voucher rules in quote, backend-backed Admin Voucher CRUD UI, `BUY_X_GET_Y` / `QUANTITY_GIFT` reward lines, POS non-batch quote+invoice when admin session exists, prior hardening (storefront line discount, server shipping, public `quotePublicId`, VAT profit exclusion). **Slice 7 backend allocation + reporting PASS (2026-04-29)** — see Slice 7 acceptance §85 below. Slice 8 unified backend JWT auth + storefront backend truth + Customer loyalty earn/redeem is **PASS / verified (2026-04-30)** — see Slice 10 item 10; Slice 9 and carrier settlement / `shippingActualCost` remain future/deferred.
 
 50. Backend quote API exists and is used by real storefront/POS/admin checkout.
 51. Direct invoice and pending order creation use one shared backend commercial validator/quote model.
@@ -2475,8 +2708,8 @@ Local-only / no backfill: unchanged; old rows without `lineNetRevenue` continue 
 85i. Covered by `acceptance_85i_*`.
 85j. Covered by `Slice7CommercialFlowIntegrationTest.acceptance_85j_quote_to_pending_to_invoice_preserves_commercial_snapshots_without_recompute`.
 85k/85l. **PASS by regression** — full `./gradlew test`.
-86. **PLANNED / NEXT (Slice 8):** Unified backend JWT auth is the only real app auth flow: `/login` serves admin and user; `/signup`, TOTP, refresh, logout, and `/api/auth/**` remain backend JWT truth.
-87. `/admin/login` is not reachable in active route config; Supabase auth guard is not used for real admin/user flow; `window.prompt` JWT login and separate `nhadan.adminAuth.session` are removed.
+86. **PASS (Slice 8 verification close-out 2026-04-30):** Unified backend JWT storefront/auth path: `/login` and `/signup`; TOTP/refresh/logout; `/api/auth/**`, `/api/account/**`, Customer loyalty ledger. **PostgreSQL** default backend profile + **`http://localhost:5173`** Vite **`/api` proxy** FE-BE smoke completed (Slice 10 item 10 record). Automated **browser/UI** E2E not part of this acceptance line.
+87. `/admin/login` is removed from active route config; Supabase auth guard is not used for real admin/user flow; `window.prompt` JWT login is removed; `nhadan.adminAuth.session` is only actively cleared as legacy cleanup and is not an active session source.
 88. Frontend stores auth only under `nhadan.auth.session.v1` with access token, refresh token, expiry, username, full name, roles, and optional customer id.
 89. Admin with `ROLE_ADMIN` reaches `/admin`; regular user reaches `/account`; guest `/account` redirects to `/login?next=/account`; regular user is blocked from `/admin`.
 90. Access-token refresh runs proactively and retries once on 401; revoked/expired refresh clears session and redirects to login; logout revokes refresh and clears local session.
@@ -2496,13 +2729,17 @@ Local-only / no backfill: unchanged; old rows without `lineNetRevenue` continue 
 104. Loyalty redeem: guest cannot redeem; logged-in user can redeem only own linked customer points; default redeem policy starts as 1 point = 1đ.
 105. `loyaltyDiscount` is a merchandise discount bucket allocated to billable item lines as `allocatedLoyaltyDiscount`; it reduces item revenue/profit like other merchandise discounts.
 106. `loyaltyDiscount` does not reduce shipping and does not reduce VAT; reward/free lines receive zero loyalty allocation.
-107. Redemption caps requested points by available points, item net revenue after manual/promo/voucher, and optional max-percent config; `availablePoints = pointBalance - pointReserved`.
+107. Redemption caps requested points by available points, item net revenue after manual/promo/voucher, and optional max-percent config; `availablePoints = max(0, pointBalance - pointReserved)`.
 108. Pending order point lifecycle is atomic: pending create with points creates `RESERVED`, confirm converts to `REDEEMED`, cancel/expire converts to `RELEASED` or `EXPIRED` without decreasing point balance.
 109. Concurrent pending orders cannot overspend points; Casso retry cannot double earn or double redeem.
 110. Reports/account/admin/customer views expose point balance, reserved points, lifetime earned/redeemed, point history, invoice loyalty discount, and loyalty-redeemed points; profit/revenue reports remain discount-aware.
-111. Slice 8 FE-BE smoke covers PostgreSQL backend on `8080`, Vite on `5173`, admin login/logout, user login/account, backend catalog cart checkout with points, pending order creation, confirmation path, and reservation/redeem/earn verification.
-112. Future standalone payment-session formalization remains deferred unless separately approved.
-113. Slice 9 reporting endpoints remain future/deferred, except for any production-awareness naturally covered by existing batch/movement-truth reports.
+111. Slice 8 FE-BE smoke (proxy HTTP, **PostgreSQL** backend on **`8080`**, Vite on **`5173`**) verified admin/user auth, RBAC boundary on `/api/customers`, backend catalog identifiers, promotions pick-best + quote + pending-order + receipt stock + confirm, and loyalty earn plus **requested redeem** reservation lifecycle; automated **browser** redirect/UI not required for this checklist line.
+112. **PARTIAL:** Slice 8B POS/receipt/report guards and BE fields `variantStockQty` / `variantSellPrice` are implemented; Playwright FE-BE specs extended (`fe-be-api-smoke`, `slice8b-browser-integration`, `browser-session`). **PASS** for end-to-end proof still requires an operator-run `RUN_FE_BE_E2E=1` cycle on PostgreSQL + Vite (see §11); admin `mock-data` type-only migration remains **GAP**.
+113. Slice 8B implementation must report guardlist search results for `@/lib/mock-data`, `@/lib/store`, `useStore(`, local action names, local report data names, seed products, local adapters, `LocalStoreSettingsAdapter`, `LocalShippingAdapter`, `shipping_config:v1`, `store_payment_settings:v1`, `current-customer`, `vouchers-store`, and `invoiceActions`; any remaining production hit is a blocker unless classified under an allowed exception.
+114. Future standalone payment-session formalization remains deferred unless separately approved.
+115. Slice 9 reporting endpoints remain future/deferred, except for any production-awareness naturally covered by existing batch/movement-truth reports.
+
+**Slice 8 implementation summary (2026-04-30):** Migration `V26__slice8_auth_customer_loyalty.sql`; `users.customer_id -> customers.id`; customer point counters; `customer_point_transactions` / `customer_point_reservations`; loyalty settings; `/api/account/**`; quote loyalty snapshot + caps; pending-order reserve/redeem/release; invoice earn-once + cancel reversal; FE session `nhadan.auth.session.v1`; storefront catalog/cart/checkout guards. **Status:** **PASS** after full backend suites (`*Slice8*` / `*Slice6c*` / `*Slice7*` / `PaymentEventIntegrationTest` / `AuthAccountMvcIntegrationTest` / full `./gradlew.bat test`), frontend `npm run build` + focused Vitest paths in Slice 10 item 10, and **PostgreSQL + Vite proxy** HTTP smoke (**no H2 substitution**). Older “local implementation note” claims that Slice 6c/Slice 7/full suite/Vitest/FE-BE smoke were uncaptured **are superseded** by this close-out record.
 
 ## 10. Risks / Open Questions
 
@@ -2528,7 +2765,10 @@ Local-only / no backfill: unchanged; old rows without `lineNetRevenue` continue 
 20. Current storefront mock/local IDs can break backend commercial APIs with errors such as “Không tìm thấy sản phẩm ID: 1”; Slice 8 must clear/block legacy cart IDs and use backend numeric product/variant IDs only.
 21. `User` and `Customer` must not be conflated: `User` is login/security/role identity, while `Customer` owns CRM/order/total-spend/debt/loyalty state.
 22. Points belong to `Customer`, not `User`; normal users must only access and redeem points from their linked customer via `users.customer_id`.
-23. Point overspend is a concurrency risk across multiple pending orders; Slice 8 reservation must atomically maintain `pointReserved` and enforce `availablePoints = pointBalance - pointReserved`.
+23. Point overspend is a concurrency risk across multiple pending orders; Slice 8 reservation must atomically maintain `pointReserved` and enforce `availablePoints = max(0, pointBalance - pointReserved)` (display clamps at zero when balance is negative after cancellation reversals).
 24. `loyaltyDiscount` must remain a merchandise discount allocated to billable item lines; it must not reduce shipping or VAT and must not allocate to reward/free lines.
-25. Redemption and pending-order reservation are in scope for planned Slice 8, including `RESERVE -> REDEEM -> RELEASE`; they are not deferred to the standalone payment-session slice.
+25. Redemption and pending-order reservation are **implemented** in Slice 8, including `RESERVE -> REDEEM -> RELEASE`; deeper standalone gateway payment-session formalization stays future unless approved separately.
 26. Auth migration risk: `/admin/login`, Supabase guard behavior, prompt-based JWT login, and separate admin session storage may have hidden dependencies in current frontend screens; Slice 8 must remove active real-flow usage without breaking admin/user role routing.
+27. Slice 8B risk: active FE screens may still contain Lovable/local mock sources that look functional in production. The cleanup must prefer explicit backend errors, loading/empty states, or GAP/disabled routes over silent local fallback, especially for Combo, dashboard/reporting, customer/supplier/user management, vouchers, payments, Store Settings, Shipping Settings, and hybrid product/category/inventory/goods-receipt services.
+28. Store Settings risk: `BackendStoreSettingsAdapter` can bootstrap from `LocalStoreSettingsAdapter`, so stale browser localStorage may become backend payment/QR truth. Slice 8B must remove that bootstrap and prove checkout/POS/pending-payment QR uses backend settings only.
+29. Shipping Settings risk: the admin page currently edits local zone/parcel config while backend quote uses `ShippingQuoteService`. Slice 8B must persist shipping settings in PostgreSQL and make admin settings and quote computation read the same backend config.

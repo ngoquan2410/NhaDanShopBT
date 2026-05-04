@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 interface ConfirmDialogProps {
   open: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   title: string;
   description: string;
   confirmLabel?: string;
@@ -35,8 +35,18 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, description, co
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t bg-muted/30 rounded-b-lg">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm font-medium border rounded-md hover:bg-muted transition-colors">{cancelLabel}</button>
-          <button onClick={() => { onConfirm(); onClose(); }} className={cn(
+          <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm font-medium border rounded-md hover:bg-muted transition-colors">{cancelLabel}</button>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await Promise.resolve(onConfirm());
+                onClose();
+              } catch {
+                /* Error surfaced by caller (e.g. toast); keep dialog open */
+              }
+            }}
+            className={cn(
             "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
             variant === 'danger' ? "bg-danger text-danger-foreground hover:bg-danger/90" :
             variant === 'warning' ? "bg-warning text-warning-foreground hover:bg-warning/90" :

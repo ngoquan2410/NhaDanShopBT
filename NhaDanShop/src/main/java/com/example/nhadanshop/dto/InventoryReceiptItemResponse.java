@@ -24,7 +24,9 @@ public record InventoryReceiptItemResponse(
         Long variantId,
         String variantCode,
         String variantName,
-        String sellUnit
+        String sellUnit,
+        /** Retail sell price from linked variant when present (label pricing). */
+        BigDecimal variantSellPrice
 ) {}
 
 

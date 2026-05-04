@@ -257,6 +257,8 @@ export interface CartLine {
   qty: number;
   unitPrice: Money;
   lineSubtotal: Money;
+  catalogSource?: "backend";
+  schemaVersion?: number;
   /** Exact batch for stock trace only (Slice 6B/6C). */
   batchId?: ID;
 }
@@ -337,7 +339,7 @@ export interface CartContext {
 
 /* ========================= ORDER / PENDING PAYMENT ========================= */
 
-export type PaymentMethod = "cash" | "bank_transfer" | "momo" | "zalopay";
+export type PaymentMethod = "cash" | "cod" | "cash_on_delivery" | "bank_transfer" | "momo" | "zalopay";
 
 export type PendingOrderStatus =
   | "pending_payment"
@@ -366,6 +368,8 @@ export interface PricingBreakdownSnapshot {
   shippingDiscount: Money;
   itemNetRevenue?: Money;
   shippingNetRevenue?: Money;
+  loyaltyDiscount?: Money;
+  loyaltyRedeemedPoints?: number;
   vatBase: Money;
   vatPercent: number;
   vatAmount: Money;
@@ -415,6 +419,9 @@ export interface PendingOrder {
   shippingQuoteSnapshot?: ShippingQuoteSnapshot | null;
   pricingBreakdownSnapshot: PricingBreakdownSnapshot;
   note?: string;
+  /** Present only on the immediate `confirm()` response when backend returns an invoice. */
+  confirmedInvoiceId?: string;
+  confirmedInvoiceNo?: string;
 }
 
 export interface CreatePendingOrderInput {
@@ -512,6 +519,8 @@ export interface InventoryProjection {
   available: number;
   /** Sale-sellable capacity (SINGLE + physical batches); undefined for COMBO virtual stock. */
   sellableQty?: number;
+  /** From backend variant min threshold (when provided). */
+  minStockQty?: number;
   byBatch?: InventoryProjectionBatch[];
 }
 
@@ -614,6 +623,8 @@ export interface GoodsReceiptLine {
   batchId?: ID;
   /** false = raw/NVL / ẩn bán lẻ — optional, Excel/import staging; BE đích là source of truth. */
   isSellable?: boolean;
+  /** Retail / label price from variant at receipt fetch (`InventoryReceiptItemResponse.variantSellPrice`). */
+  variantSellPrice?: Money;
 }
 
 export interface GoodsReceipt {

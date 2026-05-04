@@ -8,17 +8,19 @@ import { SupplierFormDrawer } from "@/components/shared/SupplierFormDrawer";
 import { RowActions } from "@/components/shared/RowActions";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { useTableControls } from "@/hooks/useTableControls";
-import { useStore, supplierActions } from "@/lib/store";
+import { useService } from "@/hooks/useService";
+import { adminSuppliers } from "@/services";
 import { Plus, Truck, Pencil, Trash2, Power, PowerOff } from "lucide-react";
 import { toast } from "sonner";
-import { Supplier } from "@/lib/mock-data";
+import type { Supplier } from "@/lib/mock-data";
 
 export default function AdminSuppliers() {
-  const { suppliers } = useStore();
   const [search, setSearch] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [deleting, setDeleting] = useState<Supplier | null>(null);
+  const { data, loading, error, reload } = useService(() => adminSuppliers.list(search), [search]);
+  const suppliers = data ?? [];
 
   const filtered = useMemo(() => suppliers.filter(s =>
     !search || s.name.toLowerCase().includes(search.toLowerCase()) || s.code.toLowerCase().includes(search.toLowerCase()) || s.phone.includes(search)
@@ -43,9 +45,12 @@ export default function AdminSuppliers() {
 
       <DataTableToolbar search={search} onSearchChange={setSearch} searchPlaceholder="Tìm tên, mã, SĐT..." />
 
-      {filtered.length === 0 ? (
+      {loading && <p className="text-sm text-muted-foreground">Đang tải nhà cung cấp từ backend...</p>}
+      {error && <p className="text-sm text-danger">Không tải được nhà cung cấp: {error.message}</p>}
+
+      {!loading && filtered.length === 0 ? (
         <EmptyState icon={Truck} title="Không tìm thấy nhà cung cấp" />
-      ) : (
+      ) : !loading && (
         <>
           <div className="hidden md:block bg-card rounded-lg border overflow-hidden">
             <table className="w-full text-sm">
@@ -83,8 +88,9 @@ export default function AdminSuppliers() {
                               label: s.active ? "Ngừng hoạt động" : "Kích hoạt lại",
                               icon: s.active ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />,
                               onClick: () => {
-                                supplierActions.update(s.id, { active: !s.active });
-                                toast.success(s.active ? "Đã ngừng hoạt động" : "Đã kích hoạt lại");
+                                adminSuppliers.save({ ...s, active: !s.active })
+                                  .then(() => { toast.success(s.active ? "Đã ngừng hoạt động" : "Đã kích hoạt lại"); reload(); })
+                                  .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể đổi trạng thái"));
                               },
                             },
                             { separatorBefore: true, label: "Xóa", icon: <Trash2 className="h-3.5 w-3.5" />, danger: true, onClick: () => setDeleting(s) },
@@ -117,11 +123,22 @@ export default function AdminSuppliers() {
         </>
       )}
 
-      <SupplierFormDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} supplier={editing} />
+      <SupplierFormDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        supplier={editing}
+        onSave={async (input) => { await adminSuppliers.save(input); reload(); }}
+      />
       <ConfirmDialog
         open={!!deleting}
         onClose={() => setDeleting(null)}
-        onConfirm={() => { if (deleting) { supplierActions.remove(deleting.id); toast.success("Đã xóa nhà cung cấp"); } }}
+        onConfirm={() => {
+          if (deleting) {
+            adminSuppliers.remove(deleting.id)
+              .then(() => { toast.success("Đã xóa nhà cung cấp"); reload(); })
+              .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể xóa nhà cung cấp"));
+          }
+        }}
         title="Xóa nhà cung cấp?"
         description={`Bạn chắc chắn muốn xóa "${deleting?.name}"?`}
         variant="danger"

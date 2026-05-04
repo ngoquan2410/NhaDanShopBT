@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { paymentEvents } from "@/services";
+import { ADMIN_BADGES_REFRESH_EVENT } from "@/lib/adminBadges";
+import { paymentEvents, pendingOrders } from "@/services";
 import {
   LayoutDashboard, FolderTree, Package, Layers, Factory, FileInput, Receipt,
   ShoppingCart, Clock, Tags, Users, Truck, ClipboardCheck,
@@ -30,7 +31,7 @@ const navGroups = [
     items: [
       { path: "/admin/pos", icon: ShoppingCart, label: "POS / Tạo hóa đơn" },
       { path: "/admin/invoices", icon: Receipt, label: "Hóa đơn" },
-      { path: "/admin/pending-orders", icon: Clock, label: "Đơn chờ thanh toán", badge: 2 },
+      { path: "/admin/pending-orders", icon: Clock, label: "Đơn chờ thanh toán", badgeKey: "pending_orders" as const },
       { path: "/admin/unmatched-payments", icon: AlertCircle, label: "Giao dịch chưa khớp", badgeKey: "unmatched" as const },
       { path: "/admin/promotions", icon: Tags, label: "Khuyến mãi" },
       { path: "/admin/vouchers", icon: Tags, label: "Voucher" },
@@ -81,6 +82,7 @@ interface AdminSidebarProps {
 export function AdminSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: AdminSidebarProps) {
   const location = useLocation();
   const [unmatchedCount, setUnmatchedCount] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
 
   // Poll backend counts on an interval instead of using browser realtime channels.
   useEffect(() => {
@@ -92,14 +94,27 @@ export function AdminSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }:
       } catch {
         /* unauthenticated or offline → just hide the badge */
       }
+      try {
+        const p = await pendingOrders.list({ page: 1, pageSize: 500 });
+        const list = p.items ?? [];
+        const c = list.filter(
+          (o) => o.status === "pending_payment" || o.status === "waiting_confirm" || o.status === "paid_auto",
+        ).length;
+        if (alive) setPendingCount(c);
+      } catch {
+        if (alive) setPendingCount(0);
+      }
     };
     void tick();
+    const onBadges = () => void tick();
+    window.addEventListener(ADMIN_BADGES_REFRESH_EVENT, onBadges);
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void tick();
     }, 15000);
     return () => {
       alive = false;
       window.clearInterval(timer);
+      window.removeEventListener(ADMIN_BADGES_REFRESH_EVENT, onBadges);
     };
   }, []);
 
@@ -110,6 +125,7 @@ export function AdminSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }:
 
   const badgeFor = (item: any): number | undefined => {
     if (item.badgeKey === "unmatched") return unmatchedCount > 0 ? unmatchedCount : undefined;
+    if (item.badgeKey === "pending_orders") return pendingCount > 0 ? pendingCount : undefined;
     return item.badge;
   };
 

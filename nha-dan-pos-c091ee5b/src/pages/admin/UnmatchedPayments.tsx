@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Link } from "react-router-dom";
+import { dispatchAdminBadgesRefresh } from "@/lib/adminBadges";
 
 type TabId = "unmatched" | "matched" | "ignored";
 
@@ -231,6 +232,8 @@ export default function UnmatchedPaymentsPage() {
                                 try {
                                   await paymentEvents.markIgnored(e.id);
                                   toast.success("Đã bỏ qua giao dịch");
+                                  await refresh();
+                                  dispatchAdminBadgesRefresh();
                                 } catch (err: any) {
                                   toast.error(err?.message ?? "Không bỏ qua được");
                                 }
@@ -249,6 +252,8 @@ export default function UnmatchedPaymentsPage() {
                               try {
                                 await paymentEvents.unmarkIgnored(e.id);
                                 toast.success("Đã khôi phục giao dịch");
+                                await refresh();
+                                dispatchAdminBadgesRefresh();
                               } catch (err: any) {
                                 toast.error(err?.message ?? "Không khôi phục được");
                               }
@@ -279,6 +284,7 @@ export default function UnmatchedPaymentsPage() {
         onLinked={() => {
           setLinking(null);
           refresh();
+          dispatchAdminBadgesRefresh();
         }}
       />
     </div>

@@ -45,8 +45,9 @@ public class RevenueController {
     public RevenueTotalDto totalRevenue(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            @RequestParam(defaultValue = "daily") String period) {
-        return revenueService.getTotalRevenue(from, to, period);
+            @RequestParam(defaultValue = "daily") String period,
+            @RequestParam(required = false) List<Long> productIds) {
+        return revenueService.getTotalRevenue(from, to, period, productIds);
     }
 
     @GetMapping("/total/export")
@@ -66,8 +67,9 @@ public class RevenueController {
     public List<RevenueByProductDto> revenueByProduct(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            @RequestParam(defaultValue = "daily") String period) {
-        return revenueService.getRevenueByProduct(from, to, period);
+            @RequestParam(defaultValue = "daily") String period,
+            @RequestParam(required = false) List<Long> productIds) {
+        return revenueService.getRevenueByProduct(from, to, period, productIds);
     }
 
     @GetMapping("/by-product/export")

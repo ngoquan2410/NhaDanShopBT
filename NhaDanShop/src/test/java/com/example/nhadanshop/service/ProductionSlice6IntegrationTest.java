@@ -89,6 +89,9 @@ class ProductionSlice6IntegrationTest {
     @MockBean
     InvoiceNumberGenerator invoiceNumberGenerator;
 
+    @MockBean
+    CustomerLoyaltyService customerLoyaltyService;
+
     @BeforeEach
     void auth() {
         SecurityContextHolder.clearContext();

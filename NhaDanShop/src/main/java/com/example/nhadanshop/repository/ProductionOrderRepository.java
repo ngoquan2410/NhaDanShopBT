@@ -39,11 +39,8 @@ public interface ProductionOrderRepository extends JpaRepository<ProductionOrder
             WHERE (:status IS NULL OR o.status = :status)
             AND (:recipeId IS NULL OR recipe.id = :recipeId)
             AND (:outputVariantId IS NULL OR o.outputVariant.id = :outputVariantId)
-            AND (:dateFrom IS NULL OR o.createdAt >= :dateFrom)
-            AND (:dateTo IS NULL OR o.createdAt <= :dateTo)
-            AND (:q IS NULL OR LOWER(o.orderNo) LIKE LOWER(CONCAT('%', :q, '%'))
-                 OR LOWER(recipe.recipeCode) LIKE LOWER(CONCAT('%', :q, '%'))
-                 OR LOWER(recipe.name) LIKE LOWER(CONCAT('%', :q, '%')))
+            AND o.createdAt >= :dateFrom
+            AND o.createdAt <= :dateTo
             """,
             countQuery = """
                     SELECT COUNT(o) FROM ProductionOrder o
@@ -51,13 +48,46 @@ public interface ProductionOrderRepository extends JpaRepository<ProductionOrder
                     WHERE (:status IS NULL OR o.status = :status)
                     AND (:recipeId IS NULL OR recipe.id = :recipeId)
                     AND (:outputVariantId IS NULL OR o.outputVariant.id = :outputVariantId)
-                    AND (:dateFrom IS NULL OR o.createdAt >= :dateFrom)
-                    AND (:dateTo IS NULL OR o.createdAt <= :dateTo)
-                    AND (:q IS NULL OR LOWER(o.orderNo) LIKE LOWER(CONCAT('%', :q, '%'))
-                         OR LOWER(recipe.recipeCode) LIKE LOWER(CONCAT('%', :q, '%'))
-                         OR LOWER(recipe.name) LIKE LOWER(CONCAT('%', :q, '%')))
+                    AND o.createdAt >= :dateFrom
+                    AND o.createdAt <= :dateTo
                     """)
-    Page<ProductionOrder> searchOrders(
+    Page<ProductionOrder> searchOrdersWithoutText(
+            @Param("status") String status,
+            @Param("recipeId") Long recipeId,
+            @Param("outputVariantId") Long outputVariantId,
+            @Param("dateFrom") LocalDateTime dateFrom,
+            @Param("dateTo") LocalDateTime dateTo,
+            Pageable pageable);
+
+    @Query(value = """
+            SELECT o FROM ProductionOrder o
+            LEFT JOIN o.recipe recipe
+            WHERE (:status IS NULL OR o.status = :status)
+            AND (:recipeId IS NULL OR recipe.id = :recipeId)
+            AND (:outputVariantId IS NULL OR o.outputVariant.id = :outputVariantId)
+            AND o.createdAt >= :dateFrom
+            AND o.createdAt <= :dateTo
+            AND (
+                 LOWER(o.orderNo) LIKE LOWER(CONCAT('%', :q, '%'))
+                 OR LOWER(recipe.recipeCode) LIKE LOWER(CONCAT('%', :q, '%'))
+                 OR LOWER(recipe.name) LIKE LOWER(CONCAT('%', :q, '%'))
+            )
+            """,
+            countQuery = """
+                    SELECT COUNT(o) FROM ProductionOrder o
+                    LEFT JOIN o.recipe recipe
+                    WHERE (:status IS NULL OR o.status = :status)
+                    AND (:recipeId IS NULL OR recipe.id = :recipeId)
+                    AND (:outputVariantId IS NULL OR o.outputVariant.id = :outputVariantId)
+                    AND o.createdAt >= :dateFrom
+                    AND o.createdAt <= :dateTo
+                    AND (
+                         LOWER(o.orderNo) LIKE LOWER(CONCAT('%', :q, '%'))
+                         OR LOWER(recipe.recipeCode) LIKE LOWER(CONCAT('%', :q, '%'))
+                         OR LOWER(recipe.name) LIKE LOWER(CONCAT('%', :q, '%'))
+                    )
+                    """)
+    Page<ProductionOrder> searchOrdersWithText(
             @Param("status") String status,
             @Param("recipeId") Long recipeId,
             @Param("outputVariantId") Long outputVariantId,

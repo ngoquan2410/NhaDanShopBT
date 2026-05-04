@@ -2,9 +2,12 @@ import { Bell, Menu, Search, LogOut, User, Shield, UserCircle, Store, Check, Pac
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { dashboardStats, products, invoices, customers } from "@/lib/mock-data";
+import { addDays } from "date-fns";
+import { useService } from "@/hooks/useService";
+import { adminCustomers, inventory, invoices, pendingOrders, products } from "@/services";
 import { cn } from "@/lib/utils";
 import { useAdminAuth } from "@/lib/admin-auth";
+import { ADMIN_BADGES_REFRESH_EVENT } from "@/lib/adminBadges";
 
 interface AdminTopbarProps {
   onMenuClick: () => void;
@@ -14,6 +17,20 @@ type SearchHit =
   | { kind: "product"; id: string; title: string; sub: string; href: string }
   | { kind: "invoice"; id: string; title: string; sub: string; href: string }
   | { kind: "customer"; id: string; title: string; sub: string; href: string };
+
+const EXPIRY_SOON_DAYS = 30;
+
+function parseYmdTopbar(iso: string | undefined): Date | null {
+  if (!iso) return null;
+  const d = new Date(iso.slice(0, 10));
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function startOfDayTopbar(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
 
 export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
   const { user, signOut } = useAdminAuth();
@@ -27,6 +44,62 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
   const searchRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+  const { data: topbarData, reload: reloadTopbar } = useService(async () => {
+    const [productPage, invoicePage, customerRows, inventoryRows, pending] = await Promise.all([
+      products.list({ page: 1, pageSize: 50 }),
+      invoices.list({ page: 1, pageSize: 20 }),
+      adminCustomers.list(),
+      inventory.listInventoryProjections(),
+      pendingOrders.list({ page: 1, pageSize: 400 }),
+    ]);
+    const t0 = startOfDayTopbar(new Date());
+    const soonUntil = addDays(t0, EXPIRY_SOON_DAYS);
+    const expirySoonLots: Array<{ productName: string; variantName: string; expiryDate: string }> = [];
+    for (const v of inventoryRows) {
+      const productName = v.productName ?? "";
+      const variantName = v.variantName ?? v.variantCode ?? "";
+      for (const b of v.byBatch ?? []) {
+        const expRaw = b.expiryDate;
+        if (!expRaw) continue;
+        const exp = parseYmdTopbar(expRaw);
+        if (!exp) continue;
+        if (exp < t0) continue;
+        if (exp <= soonUntil) {
+          expirySoonLots.push({
+            productName,
+            variantName,
+            expiryDate: expRaw.slice(0, 10),
+          });
+        }
+      }
+    }
+    expirySoonLots.sort((a, b) => a.expiryDate.localeCompare(b.expiryDate));
+
+    return {
+      products: productPage.items,
+      invoices: invoicePage.items,
+      customers: customerRows,
+      pendingOrdersCount: pending.items.filter(
+        (o) => o.status === "pending_payment" || o.status === "waiting_confirm" || o.status === "paid_auto",
+      ).length,
+      lowStockVariants: inventoryRows
+        .filter((v) => {
+          if (v.sellableQty == null) return false;
+          const a = v.available ?? v.onHand ?? 0;
+          const min = v.minStockQty ?? 10;
+          return a > 0 && a <= min;
+        })
+        .slice(0, 2),
+      nearExpiryLots: expirySoonLots.slice(0, 3),
+    };
+  }, []);
+
+  useEffect(() => {
+    const onBadges = () => reloadTopbar();
+    window.addEventListener(ADMIN_BADGES_REFRESH_EVENT, onBadges);
+    return () => window.removeEventListener(ADMIN_BADGES_REFRESH_EVENT, onBadges);
+  }, [reloadTopbar]);
+  const topbar = topbarData ?? { products: [], invoices: [], customers: [], pendingOrdersCount: 0, lowStockVariants: [], nearExpiryLots: [] };
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -50,23 +123,36 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
     };
   }, []);
 
-  const baseNotifications = useMemo(() => [
-    ...dashboardStats.lowStockVariants.slice(0, 2).map(v => ({
+  const baseNotifications = useMemo(() => {
+    const stock = topbar.lowStockVariants.map((v) => ({
       id: `low-${v.variantName}`,
       type: "warning" as const,
       title: "Sắp hết hàng",
-      desc: `${v.productName} - ${v.variantName} còn ${v.stock}`,
-      href: "/admin/inventory",
-    })),
-    ...dashboardStats.nearExpiryLots.slice(0, 1).map(v => ({
-      id: `exp-${v.variantName}`,
+      desc: `${v.productName} - ${v.variantName} còn ${v.available ?? v.onHand}`,
+      href: "/admin/inventory-report",
+    }));
+    const expiry = topbar.nearExpiryLots.map((v, idx) => ({
+      id: `exp-${idx}-${v.variantName}-${v.expiryDate}`,
       type: "warning" as const,
       title: "Sắp hết hạn",
       desc: `${v.productName} - HSD ${v.expiryDate}`,
-      href: "/admin/inventory",
-    })),
-    { id: "po", type: "info" as const, title: "Đơn chờ thanh toán", desc: `${dashboardStats.pendingOrdersCount} đơn đang chờ`, href: "/admin/pending-orders" },
-  ], []);
+      href: "/admin/inventory-report",
+    }));
+    // Only surface pending-order noise when the API says there are open orders (matches sidebar + pending-orders page).
+    const pending =
+      topbar.pendingOrdersCount > 0
+        ? [
+            {
+              id: "po",
+              type: "info" as const,
+              title: "Đơn chờ thanh toán",
+              desc: `${topbar.pendingOrdersCount} đơn đang chờ`,
+              href: "/admin/pending-orders",
+            },
+          ]
+        : [];
+    return [...stock, ...expiry, ...pending];
+  }, [topbar]);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const notifications = baseNotifications.filter(n => !readIds.has(n.id));
 
@@ -74,14 +160,14 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
     await signOut();
     toast.success("Đã đăng xuất");
     setUserOpen(false);
-    navigate("/admin/login");
+    navigate("/login");
   };
 
   // Build search results — grouped, lightweight
   const hits: SearchHit[] = useMemo(() => {
     const q = searchQ.trim().toLowerCase();
     if (!q) return [];
-    const productHits: SearchHit[] = products
+    const productHits: SearchHit[] = topbar.products
       .filter(p =>
         p.name.toLowerCase().includes(q) ||
         p.code.toLowerCase().includes(q) ||
@@ -95,7 +181,7 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
         sub: `${p.code} · ${p.categoryName} · ${p.variants.length} phân loại`,
         href: `/admin/products/${p.id}`,
       }));
-    const invoiceHits: SearchHit[] = invoices
+    const invoiceHits: SearchHit[] = topbar.invoices
       .filter(i => i.number.toLowerCase().includes(q) || i.customerName.toLowerCase().includes(q))
       .slice(0, 5)
       .map(i => ({
@@ -105,7 +191,7 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
         sub: `${i.customerName} · ${new Date(i.date).toLocaleDateString("vi-VN")}`,
         href: `/admin/invoices?q=${encodeURIComponent(i.number)}`,
       }));
-    const customerHits: SearchHit[] = customers
+    const customerHits: SearchHit[] = topbar.customers
       .filter(c => c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.code.toLowerCase().includes(q))
       .slice(0, 5)
       .map(c => ({
@@ -116,7 +202,7 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
         href: `/admin/customers?q=${encodeURIComponent(c.name)}`,
       }));
     return [...productHits, ...invoiceHits, ...customerHits];
-  }, [searchQ]);
+  }, [searchQ, topbar]);
 
   useEffect(() => { setActiveIdx(0); }, [searchQ]);
 
