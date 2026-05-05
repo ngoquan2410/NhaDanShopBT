@@ -111,6 +111,7 @@ public class InventoryReceiptService {
                             ci.getQuantity() * cr.quantity(),
                             componentCost,
                             safe(cr.discountPercent()),
+                            null, null, null,
                             null, 1, null, null // importUnit=null, pieces=1, variantId=null, expiryDateOverride=null
                     ));
                 }
@@ -242,8 +243,21 @@ public class InventoryReceiptService {
             variant = variantRepo.findByIdForUpdate(variantId)
                     .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy variant ID: " + variantId));
 
-            // Cập nhật costPrice variant, stockQty sẽ được đồng bộ từ batch.
+            // Cập nhật catalog current price metadata; receipt totals/profit use snapshots below.
             variant.setCostPrice(finalCostWithVat);
+            if (itemReq.sellPrice() != null && itemReq.sellPrice().compareTo(BigDecimal.ZERO) > 0) {
+                variant.setSellPrice(itemReq.sellPrice());
+            }
+            if (Boolean.TRUE.equals(itemReq.isSellableExplicit()) && itemReq.isSellable() != null) {
+                boolean wantsSellable = Boolean.TRUE.equals(itemReq.isSellable());
+                BigDecimal effectiveSell = variant.getSellPrice() != null ? variant.getSellPrice() : BigDecimal.ZERO;
+                if (wantsSellable && effectiveSell.compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new IllegalArgumentException(
+                            "Không thể bật bán lẻ cho variant '" + variant.getVariantCode()
+                                    + "' khi giá bán hiện hành bằng 0.");
+                }
+                variant.setIsSellable(wantsSellable);
+            }
             variant.setUpdatedAt(LocalDateTime.now(businessClock));
             variantRepo.save(variant);
 

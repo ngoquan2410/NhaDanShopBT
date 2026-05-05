@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertCircle, AlertTriangle, ArrowLeft, Check, ChevronRight, FileSpreadsheet,
-  FileText, Package, Plus, Printer, RefreshCw, Save, Search, Trash2, Upload, X,
+  FileText, Loader2, Package, Plus, Printer, RefreshCw, Save, Search, Trash2, Upload, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DateInput } from "@/components/shared/DateInput";
@@ -53,6 +53,7 @@ interface ReceiptLineDraft {
   fromImport: boolean;
   edited?: boolean;
   isSellable?: boolean;
+  isSellableExplicit?: boolean;
   isSellableInvalid?: boolean;
   importParserWarnings?: string[];
 }
@@ -98,9 +99,48 @@ function convertImportedRow(row: ReceiptImportRow, _receiptDate: string, index: 
     note: row.note || "",
     fromImport: true,
     isSellable: row.isSellable,
+    isSellableExplicit: row.isSellableExplicit,
     isSellableInvalid: row.isSellableInvalid,
     importParserWarnings: row.importWarnings,
   };
+}
+
+type CatalogManualHit = { product: Product; variant: ProductVariant };
+
+/** Autocomplete nhập tay: khớp tên SP, mã SP, mã variant (substring, có xếp hạng đơn giản). */
+function catalogHitsForManualAdd(catalog: Product[], query: string): CatalogManualHit[] {
+  const ql = query.trim().toLowerCase();
+  if (!ql) return [];
+  const scored: { hit: CatalogManualHit; score: number }[] = [];
+  const seen = new Set<string>();
+  for (const product of catalog) {
+    if (!product.variants?.length) continue;
+    for (const variant of product.variants) {
+      const pc = product.code.toLowerCase();
+      const pn = product.name.toLowerCase();
+      const vc = variant.code.toLowerCase();
+      let score = 0;
+      if (vc === ql) score = 100;
+      else if (vc.startsWith(ql)) score = 88;
+      else if (vc.includes(ql)) score = 75;
+      else if (pc === ql) score = 72;
+      else if (pc.startsWith(ql)) score = 65;
+      else if (pn.includes(ql)) score = 58;
+      else if (pc.includes(ql)) score = 54;
+      if (score <= 0) continue;
+      const key = `${product.id}:${variant.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      scored.push({ hit: { product, variant }, score });
+    }
+  }
+  scored.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.hit.product.code.localeCompare(b.hit.product.code) ||
+      a.hit.variant.code.localeCompare(b.hit.variant.code),
+  );
+  return scored.slice(0, 12).map((s) => s.hit);
 }
 
 function inferOutcome(line: ReceiptLineDraft): { outcome: ReceiptImportOutcome; message?: string } {
@@ -143,6 +183,14 @@ function validateImportedLine(line: ReceiptLineDraft): LineIssue {
     }
   }
   if (line.sellPrice > 0 && line.unitCost > 0 && line.sellPrice < line.unitCost) warnings.push("Giá bán < giá nhập.");
+  const inferred = inferOutcome(line);
+  const needsPositiveSellForNewVariant =
+    inferred.outcome === "create-product-and-variant" || inferred.outcome === "create-variant";
+  if (needsPositiveSellForNewVariant && line.isSellable !== false) {
+    if (!Number.isFinite(line.sellPrice) || line.sellPrice <= 0) {
+      errors.push("SP/variant mới và đang bán — giá bán phải > 0.");
+    }
+  }
   const known = validationCatalog.flatMap((p) => p.variants).find((v) => v.code === line.variantCode);
   if (known && line.unitCost > known.costPrice * 2) warnings.push(`Giá nhập cao bất thường (gần nhất ${formatVND(known.costPrice)}).`);
   if (line.isSellableInvalid) errors.push("Cột bán hàng (P) không hợp lệ.");
@@ -193,6 +241,7 @@ export default function AdminGoodsReceiptCreate() {
   const [importedFilename, setImportedFilename] = useState<string | null>(null);
   const [validationTick, setValidationTick] = useState(0);
   const [manualSearch, setManualSearch] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
 
   useEffect(() => {
@@ -235,6 +284,8 @@ export default function AdminGoodsReceiptCreate() {
       expiryMode: line.expiryDays ? "days" : "date",
       note: "",
       fromImport: false,
+      isSellable: true,
+      isSellableExplicit: false,
     }));
     setLines(revalidateLines(mapped));
     setSupplier(draft.supplierId);
@@ -281,7 +332,7 @@ export default function AdminGoodsReceiptCreate() {
   const today = new Date().toISOString().slice(0, 10);
   const futureDateError = receiptDate > today;
   const missingSupplier = !supplier;
-  const canSave = lines.length > 0 && !missingSupplier && !futureDateError && stats.err === 0;
+  const canSave = lines.length > 0 && !missingSupplier && !futureDateError && stats.err === 0 && !isSaving;
 
   const filteredLines = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -316,14 +367,19 @@ export default function AdminGoodsReceiptCreate() {
   };
 
   const handleRevalidate = () => {
+    if (isSaving) return;
     setLines((prev) => revalidateLines(prev));
     setValidationTick((v) => v + 1);
     toast.info("Đã revalidate.");
   };
 
-  const removeLine = (id: string) => setLines((prev) => prev.filter((l) => l.id !== id));
+  const removeLine = (id: string) => {
+    if (isSaving) return;
+    setLines((prev) => prev.filter((l) => l.id !== id));
+  };
 
   const addManualLine = () => {
+    if (isSaving) return;
     if (!manualSearch.trim()) return;
     const next: ReceiptLineDraft = {
       id: createLineId("manual"), sourceRow: 0, status: "warning", outcome: "create-product-and-variant",
@@ -331,6 +387,7 @@ export default function AdminGoodsReceiptCreate() {
       variantCode: "", productName: manualSearch.trim(), variantName: "Mặc định", category: "", newProductUnit: "",
       importUnit: "Cái", sellUnit: "Cái", piecesPerUnit: 1, quantity: 1, unitCost: 0, sellPrice: 0,
       discountPercent: 0, expiryDate: "", expiryDays: 0, expiryMode: "date", note: "", fromImport: false,
+      isSellable: true, isSellableExplicit: false,
     };
     setLines((prev) => revalidateLines([...prev, next]));
     setManualSearch("");
@@ -348,6 +405,7 @@ export default function AdminGoodsReceiptCreate() {
   };
 
   const handleSaveDraft = () => {
+    if (isSaving) return;
     if (lines.length === 0) { toast.error("Chưa có dòng nào."); return; }
     const supplierName = suppliers.find((s) => s.id === supplier)?.name ?? "— Chưa chọn NCC —";
     const number = draftNumber ?? `DRAFT-${receiptDate.replace(/-/g, "")}-${String(Math.floor(Math.random() * 900) + 100)}`;
@@ -390,6 +448,54 @@ export default function AdminGoodsReceiptCreate() {
     return backendCatalog;
   }, [backendCatalog]);
 
+  const manualCatalogHits = useMemo(
+    () => catalogHitsForManualAdd(catalogProducts, manualSearch),
+    [catalogProducts, manualSearch],
+  );
+
+  const addLineFromCatalog = (p: Product, v: ProductVariant) => {
+    if (isSaving) return;
+    const next: ReceiptLineDraft = {
+      id: createLineId("manual"),
+      sourceRow: 0,
+      status: "warning",
+      outcome: "update-pricing",
+      message: "Đã chọn từ catalog.",
+      productCode: p.code,
+      variantCode: v.code,
+      productName: p.name,
+      variantName: v.name,
+      category: p.categoryName ?? "",
+      newProductUnit: "",
+      importUnit: v.importUnit || "Cái",
+      sellUnit: v.sellUnit || "Cái",
+      piecesPerUnit: Math.max(1, v.piecesPerImportUnit ?? 1),
+      quantity: 1,
+      unitCost: Math.max(0, v.costPrice ?? 0),
+      sellPrice: Math.max(0, v.sellPrice ?? 0),
+      discountPercent: 0,
+      expiryDate: "",
+      expiryDays: 0,
+      expiryMode: "date",
+      note: "",
+      fromImport: false,
+      isSellable: v.isSellable ?? true,
+      isSellableExplicit: false,
+    };
+    setLines((prev) => revalidateLines([...prev, next]));
+    setManualSearch("");
+  };
+
+  const submitManualEnter = () => {
+    if (isSaving) return;
+    if (manualCatalogHits.length > 0) {
+      const h = manualCatalogHits[0];
+      addLineFromCatalog(h.product, h.variant);
+      return;
+    }
+    addManualLine();
+  };
+
   function findCatalogVariant(line: ReceiptLineDraft): { product: Product; variant: ProductVariant } | null {
     const p = catalogProducts.find((x) => x.code.toUpperCase() === line.productCode.trim().toUpperCase());
     if (!p) return null;
@@ -430,6 +536,9 @@ export default function AdminGoodsReceiptCreate() {
         quantity: Math.max(1, line.quantity),
         unitCost: Math.max(0, line.unitCost),
         discountPercent: Math.max(0, Math.min(100, line.discountPercent)),
+        sellPrice: Number.isFinite(line.sellPrice) ? Math.max(0, line.sellPrice) : null,
+        isSellable: line.isSellable ?? null,
+        isSellableExplicit: line.fromImport ? Boolean(line.isSellableExplicit) : false,
         importUnit: line.importUnit.trim(),
         piecesOverride: Math.max(1, line.piecesPerUnit),
         variantId: oid,
@@ -462,6 +571,7 @@ export default function AdminGoodsReceiptCreate() {
   }
 
   const handleSave = () => {
+    if (isSaving) return;
     if (!canSave) {
       if (futureDateError) toast.error("Ngày nhập không thể ở tương lai.");
       else if (missingSupplier) toast.error("Vui lòng chọn nhà cung cấp.");
@@ -470,28 +580,33 @@ export default function AdminGoodsReceiptCreate() {
     }
 
     void (async () => {
+      const toastId = "goods-receipt-save";
+      setIsSaving(true);
+      toast.loading("Đang lưu phiếu nhập...", { id: toastId });
       if (!getAdminSession()?.accessToken) {
         toast.error(
           "Không có phiên admin hợp lệ — không thể lưu phiếu nhập lên máy chủ (JWT hết hạn hoặc chưa đăng nhập).",
+          { id: toastId },
         );
         navigate(`/login?next=${encodeURIComponent(location.pathname + location.search)}`);
+        setIsSaving(false);
         return;
       }
-
-      setBarcodeItems([]);
-
-      const items = buildReceiptItems();
-      if (!items) return;
-      const supplierIdNum = supplier ? Number(supplier) : NaN;
-      if (!Number.isFinite(supplierIdNum)) {
-        toast.error("supplierId không hợp lệ — cần NCC có id số từ backend.");
-        return;
-      }
-      const now = new Date();
-      const t = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-      const receiptDateTime = `${receiptDate}T${t}`;
 
       try {
+        setBarcodeItems([]);
+
+        const items = buildReceiptItems();
+        if (!items) return;
+        const supplierIdNum = supplier ? Number(supplier) : NaN;
+        if (!Number.isFinite(supplierIdNum)) {
+          toast.error("supplierId không hợp lệ — cần NCC có id số từ backend.", { id: toastId });
+          return;
+        }
+        const now = new Date();
+        const t = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+        const receiptDateTime = `${receiptDate}T${t}`;
+
         const created = await createInventoryReceipt({
           supplierId: supplierIdNum,
           supplierName: suppliers.find((s) => s.id === supplier)?.name ?? null,
@@ -509,7 +624,7 @@ export default function AdminGoodsReceiptCreate() {
           setCurrentDraftId(null);
           setDraftNumber(null);
         }
-        toast.success(`Đã lưu phiếu nhập ${created.receiptNo} (backend).`);
+        toast.success(`Đã lưu phiếu nhập ${created.receiptNo} (backend).`, { id: toastId });
 
         try {
           const batches = await fetchBatchesByReceiptId(created.id);
@@ -538,7 +653,9 @@ export default function AdminGoodsReceiptCreate() {
           toast.error(e instanceof Error ? e.message : "Đã lưu phiếu nhưng không tải được danh sách lô để in tem.");
         }
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Lưu phiếu nhập backend thất bại");
+        toast.error(e instanceof Error ? e.message : "Lưu phiếu nhập backend thất bại", { id: toastId });
+      } finally {
+        setIsSaving(false);
       }
     })();
   };
@@ -592,7 +709,7 @@ export default function AdminGoodsReceiptCreate() {
             </button>
             <Chip active={filter === "ok"} tone="ok" label="Hợp lệ" count={stats.ok} onClick={() => setFilter("ok")} />
             <Chip active={filter === "edited"} tone="edited" label="Đã sửa" count={stats.edited} onClick={() => setFilter("edited")} />
-            <button onClick={handleRevalidate} className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted">
+            <button onClick={handleRevalidate} disabled={isSaving} className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50">
               <RefreshCw className="h-3 w-3" /> Revalidate
             </button>
           </div>
@@ -665,13 +782,64 @@ export default function AdminGoodsReceiptCreate() {
                 </button>
               )}
             </div>
-            <div className="relative">
-              <input value={manualSearch} onChange={(e) => setManualSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addManualLine()} placeholder="Thêm dòng tay..." className="h-8 w-44 rounded-md border bg-card px-3 text-xs focus:outline-none focus:ring-1 focus:ring-ring" />
+            <div className="relative z-40 min-w-[10rem] max-w-[17rem]">
+              <input
+                value={manualSearch}
+                onChange={(e) => setManualSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    submitManualEnter();
+                  }
+                  if (e.key === "Escape") setManualSearch("");
+                }}
+                placeholder="Thêm dòng tay (catalog)..."
+                aria-autocomplete="list"
+                aria-expanded={manualCatalogHits.length > 0}
+                className="h-8 w-full rounded-md border bg-card px-3 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              {manualCatalogHits.length > 0 && (
+                <ul
+                  role="listbox"
+                  className="absolute left-0 right-0 mt-1 max-h-52 overflow-auto rounded-md border bg-popover text-xs shadow-md"
+                >
+                  {manualCatalogHits.map((h, idx) => (
+                    <li key={`${h.product.id}-${h.variant.id}`}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={idx === 0}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          addLineFromCatalog(h.product, h.variant);
+                        }}
+                        className={cn(
+                          "flex w-full flex-col gap-0.5 px-2.5 py-2 text-left hover:bg-muted",
+                          idx === 0 && "bg-muted/60",
+                        )}
+                      >
+                        <span className="truncate font-medium">
+                          {h.product.name}{" "}
+                          <span className="font-mono text-muted-foreground">· {h.variant.name}</span>
+                        </span>
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {h.product.code} · {h.variant.code}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-            <button onClick={addManualLine} disabled={!manualSearch.trim()} className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50">
+            <button
+              type="button"
+              onClick={() => submitManualEnter()}
+              disabled={!manualSearch.trim() || isSaving}
+              className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+            >
               <Plus className="inline h-3 w-3" />
             </button>
-            <button onClick={() => setImportOpen(true)} className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">
+            <button onClick={() => setImportOpen(true)} disabled={isSaving} className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50">
               <Upload className="h-3.5 w-3.5" /> Excel
             </button>
           </div>
@@ -702,7 +870,7 @@ export default function AdminGoodsReceiptCreate() {
                       {line.status === "error" ? <AlertCircle className="h-2.5 w-2.5" /> : line.status === "warning" ? <AlertTriangle className="h-2.5 w-2.5" /> : <Check className="h-2.5 w-2.5" />}
                       {line.status}
                     </span>
-                    <button onClick={() => removeLine(line.id)} className="ml-auto rounded p-1 text-muted-foreground hover:text-danger"><Trash2 className="h-3 w-3" /></button>
+                    <button onClick={() => removeLine(line.id)} disabled={isSaving} className="ml-auto rounded p-1 text-muted-foreground hover:text-danger disabled:opacity-50"><Trash2 className="h-3 w-3" /></button>
                   </div>
                   <div className="grid grid-cols-2 gap-1.5">
                     <input value={line.productCode} onChange={(e) => syncLine(line.id, { productCode: e.target.value.toUpperCase() })} className={cn("h-8 rounded border bg-background px-2 text-xs font-mono", !line.productCode.trim() && "border-danger")} placeholder="Mã SP" />
@@ -897,7 +1065,7 @@ export default function AdminGoodsReceiptCreate() {
                         </div>
                       </td>
                       <td className="px-1 py-1.5 text-center">
-                        <button onClick={() => removeLine(line.id)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-danger"><Trash2 className="h-3 w-3" /></button>
+                        <button onClick={() => removeLine(line.id)} disabled={isSaving} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-danger disabled:opacity-50"><Trash2 className="h-3 w-3" /></button>
                       </td>
                     </tr>
                   );
@@ -939,13 +1107,27 @@ export default function AdminGoodsReceiptCreate() {
             )}
             {!savedNumber ? (
               <div className="space-y-1.5">
-                <button onClick={handleSave} disabled={!canSave} className="flex w-full items-center justify-center gap-1.5 rounded-md bg-primary py-2 text-xs font-semibold text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50">
-                  <Save className="h-3.5 w-3.5" /> Lưu phiếu nhập
+                <button
+                  type="button"
+                  data-testid="goods-receipt-save-submit"
+                  onClick={handleSave}
+                  disabled={!canSave}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-md bg-primary py-2 text-xs font-semibold text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Đang lưu...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-3.5 w-3.5" /> Lưu phiếu nhập
+                    </>
+                  )}
                 </button>
-                <button onClick={handleSaveDraft} className="flex w-full items-center justify-center gap-1.5 rounded-md border py-1.5 text-xs font-medium hover:bg-muted">
+                <button onClick={handleSaveDraft} disabled={isSaving} className="flex w-full items-center justify-center gap-1.5 rounded-md border py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50">
                   <FileText className="h-3.5 w-3.5" /> {currentDraftId ? "Cập nhật nháp" : "Lưu nháp"}
                 </button>
-                <button onClick={handleRevalidate} className="flex w-full items-center justify-center gap-1.5 rounded-md border py-1.5 text-xs font-medium hover:bg-muted">
+                <button onClick={handleRevalidate} disabled={isSaving} className="flex w-full items-center justify-center gap-1.5 rounded-md border py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50">
                   <RefreshCw className="h-3.5 w-3.5" /> Revalidate
                 </button>
               </div>

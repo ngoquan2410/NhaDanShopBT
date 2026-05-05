@@ -245,6 +245,10 @@ export interface StockAdjustment {
   itemCount: number;
   status: 'draft' | 'confirmed';
   createdBy?: string;
+  /** ISO — phiếu đã được đảo khi có giá trị */
+  reversedAt?: string;
+  reversalAdjustmentId?: string;
+  reversesAdjustmentId?: string;
 }
 
 export interface StockAdjustmentLine {

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { cartActions } from "@/lib/cart";
+import { dispatchSessionExpired } from "@/lib/sessionExpiryEvents";
 
 export const AUTH_SESSION_KEY = "nhadan.auth.session.v1";
 
@@ -108,7 +109,11 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     if (!session?.refreshToken) return null;
     const res = await fetch("/api/auth/refresh", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ refreshToken: session.refreshToken }) });
     const data = await parse(res);
-    if (!res.ok) { persist(null); return null; }
+    if (!res.ok) {
+      persist(null);
+      dispatchSessionExpired({ nextPath: window.location.pathname + window.location.search });
+      return null;
+    }
     const next = normalize(data);
     persist(next);
     return next;

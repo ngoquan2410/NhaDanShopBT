@@ -216,7 +216,7 @@ export default function AdminGoodsReceipts() {
         title="Xóa phiếu nháp?" description="Phiếu nháp sẽ bị xóa khỏi danh sách."
         confirmLabel="Xóa nháp" variant="danger" />
 
-      <GoodsReceiptDetailDrawer receipt={detail} onClose={() => setDetail(null)} />
+      <GoodsReceiptDetailDrawer receipt={detail} onClose={() => setDetail(null)} onReceiptChanged={reload} />
       <ReceiptImportPreviewDialog open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );

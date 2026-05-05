@@ -12,6 +12,7 @@ export class LocalCategoryAdapter implements CategoryService {
     const all = getStoreState().categories;
     const q = params?.query?.trim().toLowerCase();
     const filtered = all.filter((c) => {
+      if (params?.includeInactive === false && !c.active) return false;
       if (params?.active !== undefined && c.active !== params.active) return false;
       if (q && !c.name.toLowerCase().includes(q)) return false;
       return true;

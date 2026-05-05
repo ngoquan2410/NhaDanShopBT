@@ -35,6 +35,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -49,6 +50,7 @@ import static org.mockito.Mockito.when;
         ExcelReceiptImportService.class,
         ProductService.class,
         ProductVariantService.class,
+        StockedCatalogGuardService.class,
         StockMutationService.class,
         ProductComboService.class,
         ExcelReceiptImportServiceSlice5IntegrationTest.ClockTestConfig.class
@@ -91,7 +93,7 @@ class ExcelReceiptImportServiceSlice5IntegrationTest {
 
     @Test
     void previewExcel_blankColumnP_defaultsToTrue() throws Exception {
-        MockMultipartFile file = receiptWorkbook("S5-RP-DF-1", "S5-RP-DF-1-G", false, null);
+        MockMultipartFile file = receiptWorkbookWithSellColF("S5-RP-DF-1", "S5-RP-DF-1-G", false, null, 90_000);
         ExcelPreviewResponse preview = excelReceiptImportService.previewExcel(file);
         ExcelPreviewResponse.PreviewRow row = preview.rows().stream()
                 .filter(r -> r.lineNumber() == 4)
@@ -173,6 +175,47 @@ class ExcelReceiptImportServiceSlice5IntegrationTest {
         assertEquals(Boolean.TRUE, reloaded.getIsSellable());
         assertTrue(result.warnings().stream().anyMatch(w -> w.contains("không tự cập nhật")
                 || w.contains("Excel Bán hàng?") || w.contains("isSellable")));
+    }
+
+    @Test
+    void importReceipt_newProduct_defaultSellable_zeroSellPrice_failsPass1() throws Exception {
+        XSSFWorkbook wb = new XSSFWorkbook();
+        Sheet sh = wb.createSheet("SP Don");
+        for (int i = 0; i < 3; i++) {
+            sh.createRow(i);
+        }
+        Row r = sh.createRow(3);
+        r.createCell(0).setCellValue("S5-RP-SZ-1");
+        r.createCell(1).setCellValue("S5-RP-SZ-1-G");
+        r.createCell(2).setCellValue("Thu SZ product");
+        r.createCell(3).setCellValue(1);
+        r.createCell(4).setCellValue(50_000);
+        r.createCell(5).setCellValue(0);
+        r.createCell(6).setCellValue(0);
+        r.createCell(7).setCellValue("");
+        r.createCell(8).setCellValue("Nguyên liệu");
+        r.createCell(9).setCellValue("g");
+        r.createCell(10).setCellValue("kg");
+        r.createCell(11).setCellValue("g");
+        r.createCell(12).setCellValue(1000);
+        r.createCell(14).setCellValue(30);
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        wb.write(bos);
+        wb.close();
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "slice5-rcp-sellzero.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                bos.toByteArray());
+        ExcelReceiptImportService.ExcelImportValidationException ex = assertThrows(
+                ExcelReceiptImportService.ExcelImportValidationException.class,
+                () -> excelReceiptImportService.importReceiptFromExcel(
+                        file, "NCC SZ", null, "", BigDecimal.ZERO, BigDecimal.ZERO,
+                        LocalDateTime.of(2025, 1, 10, 12, 0)));
+        assertTrue(ex.getValidationErrors().stream().anyMatch(m -> {
+            String x = m.toLowerCase();
+            return x.contains("gia ban") || x.contains("giá bán") || x.contains("sell");
+        }));
     }
 
     @Test
@@ -286,6 +329,43 @@ class ExcelReceiptImportServiceSlice5IntegrationTest {
         return new MockMultipartFile(
                 "file",
                 "slice5-rcp-blankb.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                bos.toByteArray()
+        );
+    }
+
+    /** Giống receiptWorkbook nhưng cho phép đặt giá bán cột F. */
+    private static MockMultipartFile receiptWorkbookWithSellColF(
+            String productCode, String variantCode, boolean includeP, String colP, double sellColF) throws Exception {
+        XSSFWorkbook wb = new XSSFWorkbook();
+        Sheet sh = wb.createSheet("SP Don");
+        for (int i = 0; i < 3; i++) {
+            sh.createRow(i);
+        }
+        Row r = sh.createRow(3);
+        r.createCell(0).setCellValue(productCode);
+        r.createCell(1).setCellValue(variantCode);
+        r.createCell(2).setCellValue("Bánh tráng nguyên liệu");
+        r.createCell(3).setCellValue(1);
+        r.createCell(4).setCellValue(50_000);
+        r.createCell(5).setCellValue(sellColF);
+        r.createCell(6).setCellValue(0);
+        r.createCell(7).setCellValue("");
+        r.createCell(8).setCellValue("Nguyên liệu");
+        r.createCell(9).setCellValue("g");
+        r.createCell(10).setCellValue("kg");
+        r.createCell(11).setCellValue("g");
+        r.createCell(12).setCellValue(1000);
+        r.createCell(14).setCellValue(30);
+        if (includeP && colP != null) {
+            r.createCell(15).setCellValue(colP);
+        }
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        wb.write(bos);
+        wb.close();
+        return new MockMultipartFile(
+                "file",
+                "slice5-receipt-sellf.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 bos.toByteArray()
         );

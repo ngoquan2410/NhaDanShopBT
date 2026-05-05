@@ -46,3 +46,19 @@ export async function waitForButtonEnabledContaining(driver, substring, timeoutM
   const xp = `//button[contains(normalize-space(.), "${substring.replace(/"/g, '\\"')}") and not(@disabled)]`;
   await driver.wait(until.elementLocated(By.xpath(xp)), timeoutMs);
 }
+
+/**
+ * Assert response is an .xlsx (ZIP) from an authenticated GET.
+ * @param {ReturnType<import('./api.mjs').createApiHelper>} api
+ */
+export async function assertXlsxMagicFromGet(api, pathname) {
+  const res = await api.fetch(pathname, { method: "GET", timeout: 60000 });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`${pathname} HTTP ${res.status}: ${t.slice(0, 200)}`);
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4b) {
+    throw new Error(`${pathname}: not ZIP/xlsx signature`);
+  }
+}

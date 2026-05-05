@@ -380,7 +380,9 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
           {userOpen && (
             <div className="absolute right-0 top-full mt-1 w-56 bg-popover border rounded-md shadow-lg z-50 animate-fade-in">
               <div className="px-3 py-2 border-b">
-                <p className="text-sm font-medium">{user?.email ?? "Admin"}</p>
+                <p className="text-sm font-medium">
+                  {user?.fullName?.trim() || user?.username || "Admin"}
+                </p>
                 <p className="text-[11px] text-muted-foreground">admin · Quản trị viên</p>
               </div>
               <div className="py-1">

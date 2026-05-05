@@ -18,7 +18,7 @@ export default function AdminStockAdjustments() {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string | null>(null);
   const [detail, setDetail] = useState<StockAdjustment | null>(null);
-  const { data, loading, error } = useService(() => adminStockAdjustments.list(), []);
+  const { data, loading, error, reload } = useService(() => adminStockAdjustments.list(), []);
   const stockAdjustments = data?.items ?? [];
   const apiTotal = data?.total ?? 0;
 
@@ -131,7 +131,7 @@ export default function AdminStockAdjustments() {
         </>
       )}
 
-      <StockAdjustmentDetailDrawer adjustment={detail} onClose={() => setDetail(null)} />
+      <StockAdjustmentDetailDrawer adjustment={detail} onClose={() => setDetail(null)} onChanged={reload} />
     </div>
   );
 }

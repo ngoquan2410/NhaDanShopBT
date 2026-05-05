@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatCard } from "@/components/shared/StatCard";
 import { DataTableToolbar } from "@/components/shared/DataTableToolbar";
@@ -13,6 +14,7 @@ export default function AdminInventoryReport() {
   const [search, setSearch] = useState('');
   const [from, setFrom] = useState("2026-04-01");
   const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [excelBusy, setExcelBusy] = useState(false);
   const { data, loading, error } = useService(() => adminReports.inventory(from, to), [from, to]);
   const inventoryReport = data ?? [];
   const filtered = inventoryReport.filter(r =>
@@ -23,12 +25,34 @@ export default function AdminInventoryReport() {
   const totalClosingStock = inventoryReport.reduce((s, r) => s + r.closingStock, 0);
   const lowStockCount = inventoryReport.filter(r => r.closingStock > 0 && r.closingStock < 15).length;
 
+  const handleExportExcel = async () => {
+    try {
+      setExcelBusy(true);
+      await adminReports.downloadInventoryExcel(from, to);
+      toast.success("Đã tải file Excel báo cáo tồn kho");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Không xuất Excel được");
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4 admin-dense">
       <PageHeader
         title="Báo cáo tồn kho"
         description="Tổng quan tồn kho theo phân loại"
-        actions={<button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted"><Download className="h-3.5 w-3.5" /> Xuất Excel</button>}
+        actions={
+          <button
+            type="button"
+            data-testid="inventory-report-export-excel"
+            disabled={excelBusy}
+            onClick={() => void handleExportExcel()}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted disabled:opacity-50"
+          >
+            <Download className="h-3.5 w-3.5" /> {excelBusy ? "Đang xuất…" : "Xuất Excel"}
+          </button>
+        }
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

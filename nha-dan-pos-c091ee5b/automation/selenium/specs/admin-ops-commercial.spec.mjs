@@ -1,3 +1,4 @@
+import { By, until } from "selenium-webdriver";
 import { waitForH1Containing } from "../helpers/assertions.mjs";
 
 /** Phase 5+ promotions / vouchers admin + public evaluate hygiene. */
@@ -33,9 +34,20 @@ export default {
 
     await driver.get(`${origin}/admin/promotions`);
     await waitForH1Containing(driver, "Khuyến mãi", 25000);
+    const mkBtn = await driver.findElements(By.xpath("//button[contains(.,'Tạo khuyến mãi')]"));
+    if (mkBtn.length) await mkBtn[0].click();
+    await driver.wait(until.elementLocated(By.xpath("//h2|//h3")), 8000).catch(() => {});
 
     await driver.get(`${origin}/admin/vouchers`);
     await waitForH1Containing(driver, "Voucher / Mã giảm giá", 25000);
+    const vAdd = await driver.findElements(By.xpath("//button[contains(.,'Thêm voucher')]"));
+    if (vAdd.length) {
+      await vAdd[0].click();
+      await driver.wait(
+        until.elementLocated(By.xpath(`//*[contains(normalize-space(.),'Thêm voucher mới')]`)),
+        15000,
+      );
+    }
 
     ctx.api.setAccessToken(null);
   },

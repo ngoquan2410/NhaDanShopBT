@@ -44,5 +44,7 @@ export interface GoodsReceiptService {
   createDraft(input: CreateGoodsReceiptInput): Promise<GoodsReceipt>;
   /** Local / legacy only. Backend POST is already confirmed stock-in. */
   confirm(id: ID): Promise<GoodsReceipt>;
+  /** Backend: PATCH /api/receipts/{id}/void — keeps history, adjusts remaining batch qty. */
+  voidReceipt(id: ID, body?: { reason?: string; voidedBy?: string }): Promise<GoodsReceipt>;
   remove(id: ID): Promise<void>;
 }

@@ -9,9 +9,10 @@ import { useService } from "@/hooks/useService";
 import { categories as categoryService, products as productService } from "@/services";
 import type { ProductVariant } from "@/lib/mock-data";
 import { formatVND } from "@/lib/format";
-import { resolveProductImage, fileToDataUrl, MAX_IMAGE_BYTES } from "@/lib/product-image";
+import { resolveProductImage, MAX_IMAGE_BYTES } from "@/lib/product-image";
+import { adminUploadImage } from "@/services/auth/adminApi";
 import {
-  ArrowLeft, Save, Plus, Pencil, Trash2, Upload, ImageIcon, Check, Star, X
+  ArrowLeft, Save, Plus, Pencil, Trash2, Upload, ImageIcon, Check, Star, X, Loader2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -23,6 +24,7 @@ interface VariantForm {
   sellPrice: number; costPrice: number;
   stock: number; minStock: number; expiryDays: number;
   isDefault: boolean;
+  isSellable?: boolean;
 }
 
 const emptyVariant: VariantForm = {
@@ -30,7 +32,7 @@ const emptyVariant: VariantForm = {
   sellUnit: "Cái", importUnit: "Thùng", piecesPerImportUnit: 1,
   sellPrice: 0, costPrice: 0,
   stock: 0, minStock: 10, expiryDays: 0,
-  isDefault: false,
+  isDefault: false, isSellable: true,
 };
 
 export default function AdminProductDetailRoute() {
@@ -132,7 +134,7 @@ function AdminProductDetail() {
   };
 
   const openAddVariant = () => setVariantForm({ ...emptyVariant, isDefault: !product || product.variants.length === 0 });
-  const openEditVariant = (v: ProductVariant) => setVariantForm({ ...v });
+  const openEditVariant = (v: ProductVariant) => setVariantForm({ ...v, isSellable: v.isSellable ?? true });
 
   const variantErrors = (() => {
     const e: Record<string, string> = {};
@@ -149,7 +151,7 @@ function AdminProductDetail() {
       if (Number.isNaN(v)) e[k as string] = `${label} không hợp lệ`;
       else if (v < 0) e[k as string] = `${label} không được âm`;
     }
-    if (!e.sellPrice && variantForm.sellPrice <= 0) e.sellPrice = "Giá bán phải > 0";
+    if (!e.sellPrice && variantForm.isSellable !== false && variantForm.sellPrice <= 0) e.sellPrice = "Giá bán phải > 0";
     if (!e.piecesPerImportUnit && variantForm.piecesPerImportUnit <= 0) e.piecesPerImportUnit = "Phải > 0";
     return e;
   })();
@@ -391,6 +393,20 @@ function AdminProductDetail() {
                     Đặt làm phân loại mặc định
                   </label>
                 </div>
+                <div className="rounded-md border bg-muted/20 p-2">
+                  <label className="flex items-center gap-2 text-xs font-medium cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={variantForm.isSellable !== false}
+                      onChange={(e) => setVariantForm({ ...variantForm, isSellable: e.target.checked })}
+                      className="h-3.5 w-3.5"
+                    />
+                    Bán lẻ / hiển thị cửa hàng
+                  </label>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Tắt nếu đây là NVL/quy cách chỉ nhập kho; khi tắt có thể để giá bán bằng 0.
+                  </p>
+                </div>
               </div>
               <div className="flex gap-2 mt-3 items-center">
                 <button
@@ -435,7 +451,15 @@ function AdminProductDetail() {
                           </button>
                         </td>
                         <td className="px-3 py-2.5 font-mono text-xs">{v.code}</td>
-                        <td className="px-3 py-2.5 font-medium">{v.name}</td>
+                        <td className="px-3 py-2.5 font-medium">
+                          <div>{v.name}</div>
+                          <span className={cn(
+                            "mt-0.5 inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                            v.isSellable === false ? "bg-muted text-muted-foreground" : "bg-success-soft text-success",
+                          )}>
+                            {v.isSellable === false ? "NVL" : "Bán lẻ"}
+                          </span>
+                        </td>
                         <td className="px-3 py-2.5 text-center text-muted-foreground">{v.sellUnit}</td>
                         <td className="px-3 py-2.5 text-center text-muted-foreground">{v.importUnit} ({v.piecesPerImportUnit})</td>
                         <td className="px-3 py-2.5 text-right font-medium">{formatVND(v.sellPrice)}</td>
@@ -472,7 +496,7 @@ function AdminProductDetail() {
 
       {/* Images */}
       {activeTab === "images" && product && (
-        <ImagesTab product={product} />
+        <ImagesTab product={product} reloadProduct={reloadProduct} />
       )}
       {activeTab === "images" && !product && (
         <div className="bg-card rounded-lg border p-6 text-sm text-muted-foreground">
@@ -501,36 +525,66 @@ function AdminProductDetail() {
 }
 
 // ===== Images Tab =====
-function ImagesTab({ product }: { product: { id: string; name: string; image: string; variants: ProductVariant[] } }) {
+function ImagesTab({
+  product,
+  reloadProduct,
+}: {
+  product: { id: string; name: string; image: string; variants: ProductVariant[] };
+  reloadProduct: () => void;
+}) {
   const productInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingProductImage, setUploadingProductImage] = useState(false);
+  const [uploadingVariantId, setUploadingVariantId] = useState<string | null>(null);
+  const [productImageBroken, setProductImageBroken] = useState(false);
+
+  useEffect(() => {
+    setProductImageBroken(false);
+  }, [product.image]);
 
   const handleProductFile = async (file: File | null) => {
     if (!file) return;
     if (file.size > MAX_IMAGE_BYTES) { toast.error("Ảnh vượt quá 5MB"); return; }
     if (!file.type.startsWith("image/")) { toast.error("Chỉ chấp nhận file ảnh"); return; }
-    const dataUrl = await fileToDataUrl(file);
-    await productService.update(product.id, { image: dataUrl });
-    reloadProduct();
-    toast.success("Đã cập nhật ảnh sản phẩm");
+    setUploadingProductImage(true);
+    try {
+      const { url } = await adminUploadImage(file);
+      await productService.update(product.id, { image: url });
+      reloadProduct();
+      toast.success("Đã cập nhật ảnh sản phẩm");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Không upload được ảnh";
+      toast.error(msg.includes("503") || msg.includes("R2") ? `${msg} — nhập URL ảnh thủ công ở tab Thông tin chung.` : msg);
+    } finally {
+      setUploadingProductImage(false);
+      if (productInputRef.current) productInputRef.current.value = "";
+    }
   };
 
   const handleVariantFile = async (variantId: string, file: File | null) => {
     if (!file) return;
     if (file.size > MAX_IMAGE_BYTES) { toast.error("Ảnh vượt quá 5MB"); return; }
     if (!file.type.startsWith("image/")) { toast.error("Chỉ chấp nhận file ảnh"); return; }
-    const dataUrl = await fileToDataUrl(file);
-    await productService.updateVariant(product.id, variantId, { image: dataUrl });
-    reloadProduct();
-    toast.success("Đã cập nhật ảnh phân loại");
+    setUploadingVariantId(variantId);
+    try {
+      const { url } = await adminUploadImage(file);
+      await productService.updateVariant(product.id, variantId, { image: url });
+      reloadProduct();
+      toast.success("Đã cập nhật ảnh phân loại");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Không upload được ảnh";
+      toast.error(msg.includes("503") || msg.includes("R2") ? `${msg} — nhập URL ảnh thủ công trong sửa phân loại.` : msg);
+    } finally {
+      setUploadingVariantId(null);
+    }
   };
 
   const clearProductImage = () => {
-    productService.update(product.id, { image: "" }).then(reloadProduct);
+    void productService.update(product.id, { image: "" }).then(() => { reloadProduct(); });
     toast.success("Đã xóa ảnh sản phẩm");
   };
 
   const clearVariantImage = (variantId: string) => {
-    productService.updateVariant(product.id, variantId, { image: "" }).then(reloadProduct);
+    void productService.updateVariant(product.id, variantId, { image: "" }).then(() => { reloadProduct(); });
     toast.success("Đã xóa ảnh override");
   };
 
@@ -549,8 +603,13 @@ function ImagesTab({ product }: { product: { id: string; name: string; image: st
 
         <div className="mt-3 flex items-center gap-4">
           <div className="h-32 w-32 rounded-md border bg-muted/30 overflow-hidden flex items-center justify-center shrink-0">
-            {product.image ? (
-              <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
+            {product.image && !productImageBroken ? (
+              <img
+                src={product.image}
+                alt={product.name}
+                onError={() => setProductImageBroken(true)}
+                className="h-full w-full object-cover"
+              />
             ) : (
               <ImageIcon className="h-8 w-8 text-muted-foreground/40" />
             )}
@@ -565,12 +624,14 @@ function ImagesTab({ product }: { product: { id: string; name: string; image: st
             />
             <button
               onClick={() => productInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover w-fit"
+              disabled={uploadingProductImage}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover w-fit disabled:opacity-50"
             >
-              <Upload className="h-3.5 w-3.5" /> {product.image ? "Thay ảnh" : "Tải ảnh lên"}
+              {uploadingProductImage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              {uploadingProductImage ? "Đang tải..." : product.image ? "Thay ảnh" : "Tải ảnh lên"}
             </button>
             {product.image && (
-              <button onClick={clearProductImage} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted w-fit text-danger">
+              <button onClick={clearProductImage} disabled={uploadingProductImage} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted w-fit text-danger disabled:opacity-50">
                 <Trash2 className="h-3.5 w-3.5" /> Xóa ảnh
               </button>
             )}
@@ -595,6 +656,7 @@ function ImagesTab({ product }: { product: { id: string; name: string; image: st
                 fallback={product.image}
                 onUpload={(file) => handleVariantFile(v.id, file)}
                 onClear={() => clearVariantImage(v.id)}
+                uploading={uploadingVariantId === v.id}
               />
             ))}
           </div>
@@ -609,15 +671,22 @@ function VariantImageCard({
   fallback,
   onUpload,
   onClear,
+  uploading,
 }: {
   variant: ProductVariant;
   fallback: string;
   onUpload: (file: File | null) => void;
   onClear: () => void;
+  uploading: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const hasOverride = !!variant.image;
   const display = variant.image || fallback;
+  const [broken, setBroken] = useState(false);
+
+  useEffect(() => {
+    setBroken(false);
+  }, [display]);
 
   return (
     <div className="border rounded-md p-3 bg-background">
@@ -634,10 +703,18 @@ function VariantImageCard({
         </span>
       </div>
       <div className="aspect-square rounded border bg-muted/30 overflow-hidden flex items-center justify-center mb-2">
-        {display ? (
-          <img src={display} alt={variant.name} className="h-full w-full object-cover" />
+        {display && !broken ? (
+          <img
+            src={display}
+            alt={variant.name}
+            onError={() => setBroken(true)}
+            className="h-full w-full object-cover"
+          />
         ) : (
-          <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
+          <div className="flex flex-col items-center gap-1 text-muted-foreground/50">
+            <ImageIcon className="h-6 w-6" />
+            {display && <span className="text-[10px]">Không tải được ảnh</span>}
+          </div>
         )}
       </div>
       <input
@@ -645,17 +722,22 @@ function VariantImageCard({
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={(e) => onUpload(e.target.files?.[0] ?? null)}
+        onChange={(e) => {
+          onUpload(e.target.files?.[0] ?? null);
+          e.currentTarget.value = "";
+        }}
       />
       <div className="flex items-center gap-1.5">
         <button
           onClick={() => inputRef.current?.click()}
-          className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-medium border rounded hover:bg-muted"
+          disabled={uploading}
+          className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-medium border rounded hover:bg-muted disabled:opacity-50"
         >
-          <Upload className="h-3 w-3" /> {hasOverride ? "Thay" : "Tải lên"}
+          {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+          {uploading ? "Đang tải" : hasOverride ? "Thay" : "Tải lên"}
         </button>
         {hasOverride && (
-          <button onClick={onClear} className="px-2 py-1.5 text-[11px] font-medium border rounded hover:bg-muted text-danger" title="Xóa override">
+          <button onClick={onClear} disabled={uploading} className="px-2 py-1.5 text-[11px] font-medium border rounded hover:bg-muted text-danger disabled:opacity-50" title="Xóa override">
             <X className="h-3 w-3" />
           </button>
         )}

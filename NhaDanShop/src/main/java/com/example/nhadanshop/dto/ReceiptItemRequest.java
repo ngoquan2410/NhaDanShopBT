@@ -13,6 +13,16 @@ public record ReceiptItemRequest(
         @NotNull @Min(1) Integer quantity,
         @NotNull @DecimalMin("0.00") BigDecimal unitCost,
         @DecimalMin("0.00") @DecimalMax("100.00") BigDecimal discountPercent,
+        /**
+         * Optional catalog current sell price update. It is pricing metadata only;
+         * receipt totals and batch cost continue to use unitCost/allocation fields.
+         */
+        @DecimalMin("0.00") BigDecimal sellPrice,
+        /**
+         * Optional catalog sellable update. Applied only when isSellableExplicit=true.
+         */
+        Boolean isSellable,
+        Boolean isSellableExplicit,
         String importUnit,
         @Min(1) Integer piecesOverride,
 

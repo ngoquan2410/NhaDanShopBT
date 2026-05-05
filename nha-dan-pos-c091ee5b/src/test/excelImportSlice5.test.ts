@@ -108,6 +108,48 @@ describe("Slice 5 excel-parser facade (real .xlsx in memory)", () => {
     expect(row!.isSellableInvalid).toBeFalsy();
   });
 
+  it("parseProductExcel: variantCode/name inherit product columns (single-variant template)", async () => {
+    const file = productWorkbook(undefined);
+    const rows = await parseProductExcel(file);
+    const row = rows.find((r) => r.code === "BT-RAW");
+    expect(row).toBeDefined();
+    expect(row!.variantCode).toBe("BT-RAW");
+    expect(row!.variantName).toBe("Bánh tráng nguyên liệu");
+  });
+
+  it("parseProductExcel: empty product code yields empty variantCode, variantName still matches name", async () => {
+    const pad = (): unknown[] => {
+      const r = Array(14).fill(null);
+      r[0] = ".";
+      return r;
+    };
+    const r: unknown[] = Array(14).fill(null);
+    r[0] = "";
+    r[1] = "Chưa có mã SP";
+    r[2] = "Nguyên liệu";
+    r[3] = 50000;
+    r[4] = 10000;
+    r[5] = 0;
+    r[6] = 30;
+    r[8] = "kg";
+    r[9] = "g";
+    r[10] = 1000;
+    r[11] = "";
+    r[12] = 100;
+    const aoa: unknown[][] = [pad(), pad(), pad(), r];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as Uint8Array;
+    const file = toXlsxFile(new Uint8Array(buf), "product-no-code.xlsx");
+    const rows = await parseProductExcel(file);
+    const row = rows.find((x) => x.name === "Chưa có mã SP");
+    expect(row).toBeDefined();
+    expect(row!.code).toBe("");
+    expect(row!.variantCode).toBe("");
+    expect(row!.variantName).toBe("Chưa có mã SP");
+  });
+
   it("parseProductExcel: invalid N → error status and invalid flag", async () => {
     const file = productWorkbook("___not_a_token___");
     const rows = await parseProductExcel(file);
@@ -124,6 +166,7 @@ describe("Slice 5 excel-parser facade (real .xlsx in memory)", () => {
     expect(row!.isSellable).toBe(false);
     expect(row!.isSellableExplicit).toBe(true);
     expect(row!.isSellableInvalid).toBe(false);
+    expect(row!.sellPrice).toBe(0);
   });
 
   it("parseReceiptExcel: blank P → default sellable true", async () => {
@@ -131,6 +174,7 @@ describe("Slice 5 excel-parser facade (real .xlsx in memory)", () => {
     const rows = await parseReceiptExcel(file);
     const row = rows.find((r) => r.productCode === "BT-RAW");
     expect(row!.isSellable).toBe(true);
+    expect(row!.isSellableExplicit).toBe(false);
   });
 
   it("parseReceiptExcel: invalid P → invalid flag", async () => {
@@ -156,5 +200,27 @@ describe("Slice 5 excel-parser facade (real .xlsx in memory)", () => {
     const st = importStaging.takeProducts();
     expect(st).not.toBeNull();
     expect(st!.rows.some((r) => r.isSellable === false)).toBe(true);
+  });
+
+  /** Mirrors ProductImportReview saleable-aware pricing (NVL allows zero when isSellable===false). */
+  function saleablePriceIssues(isSellable: boolean | undefined, sellPrice: number, costPrice: number) {
+    const saleable = isSellable !== false;
+    const errors: string[] = [];
+    if (!Number.isFinite(sellPrice)) errors.push("sell");
+    else if (sellPrice < 0) errors.push("sellNeg");
+    else if (saleable && sellPrice === 0) errors.push("sellZero");
+    if (!Number.isFinite(costPrice)) errors.push("cost");
+    else if (costPrice < 0) errors.push("costNeg");
+    else if (saleable && costPrice === 0) errors.push("costZero");
+    return errors;
+  }
+
+  it("saleable-aware pricing: saleable blocks zero prices", () => {
+    expect(saleablePriceIssues(true, 0, 100)).toContain("sellZero");
+    expect(saleablePriceIssues(undefined, 10, 0)).toContain("costZero");
+  });
+
+  it("saleable-aware pricing: NVL allows zero catalog prices", () => {
+    expect(saleablePriceIssues(false, 0, 0)).toEqual([]);
   });
 });

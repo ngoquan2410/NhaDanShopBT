@@ -12,10 +12,13 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.ByteArrayOutputStream;
+import java.time.Clock;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -29,7 +32,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "spring.flyway.enabled=false",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
-@Import({ExcelImportService.class, ProductService.class, ProductVariantService.class})
+@Import({
+        ExcelImportService.class,
+        ProductService.class,
+        ProductVariantService.class,
+        StockedCatalogGuardService.class,
+        ExcelImportServiceSlice5IntegrationTest.ClockTestConfig.class,
+})
 class ExcelImportServiceSlice5IntegrationTest {
 
     @Autowired
@@ -94,6 +103,79 @@ class ExcelImportServiceSlice5IntegrationTest {
                 || row.errorMessage().contains("Bán hàng"));
     }
 
+    @Test
+    void previewProducts_saleable_missingColumnN_zeroSellPrice_errors() throws Exception {
+        String code = "S5-ZSELL-01";
+        MockMultipartFile file = productWorkbookPricing(code, false, null, 50_000, 0);
+        ProductExcelPreviewResponse preview = excelImportService.previewProducts(file);
+        assertFalse(preview.canImport());
+        var row = preview.rows().stream()
+                .filter(r -> code.equalsIgnoreCase(r.resolvedCode() != null ? r.resolvedCode() : r.code()))
+                .findFirst()
+                .orElseThrow();
+        assertNotNull(row.errorMessage());
+    }
+
+    @Test
+    void previewProducts_nonSellable_zeroPrices_ok() throws Exception {
+        String code = "S5-ZNVL-01";
+        MockMultipartFile file = productWorkbookPricing(code, true, "raw", 0, 0);
+        ProductExcelPreviewResponse preview = excelImportService.previewProducts(file);
+        assertTrue(preview.canImport());
+        var row = preview.rows().stream()
+                .filter(r -> code.equalsIgnoreCase(r.resolvedCode() != null ? r.resolvedCode() : r.code()))
+                .findFirst()
+                .orElseThrow();
+        assertFalse(row.isSellable());
+    }
+
+    @Test
+    void importProducts_nonSellable_zeroPrices_persisted() throws Exception {
+        String code = "S5-ZNVL-02";
+        MockMultipartFile file = productWorkbookPricing(code, true, "không", 0, 0);
+        ExcelImportResult result = excelImportService.importProducts(file);
+        assertEquals(0, result.errorCount());
+        ProductVariant v = productVariantRepository.findByVariantCodeIgnoreCase(code).orElseThrow();
+        assertEquals(Boolean.FALSE, v.getIsSellable());
+        assertEquals(0, v.getSellPrice().compareTo(java.math.BigDecimal.ZERO));
+        assertEquals(0, v.getCostPrice().compareTo(java.math.BigDecimal.ZERO));
+    }
+
+    private static MockMultipartFile productWorkbookPricing(String productCode, boolean includeColN, String colN,
+                                                           double costD, double sellD) throws Exception {
+        XSSFWorkbook wb = new XSSFWorkbook();
+        Sheet sh = wb.createSheet("Import");
+        for (int i = 0; i < 3; i++) {
+            sh.createRow(i);
+        }
+        Row r = sh.createRow(3);
+        r.createCell(0).setCellValue(productCode);
+        r.createCell(1).setCellValue("Bánh tráng nguyên liệu");
+        r.createCell(2).setCellValue("Nguyên liệu");
+        r.createCell(3).setCellValue(costD);
+        r.createCell(4).setCellValue(sellD);
+        r.createCell(5).setCellValue(0);
+        r.createCell(6).setCellValue(30);
+        r.createCell(7).setCellValue(true);
+        r.createCell(8).setCellValue("kg");
+        r.createCell(9).setCellValue("g");
+        r.createCell(10).setCellValue(1000);
+        r.createCell(11).setCellValue("1kg=1000g");
+        r.createCell(12).setCellValue(100);
+        if (includeColN && colN != null) {
+            r.createCell(13).setCellValue(colN);
+        }
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        wb.write(bos);
+        wb.close();
+        return new MockMultipartFile(
+                "file",
+                "slice5-product-priced.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                bos.toByteArray()
+        );
+    }
+
     /**
      * Data row 4 (0-based index 3), cột N (index 13) = optional isSellable.
      */
@@ -129,5 +211,13 @@ class ExcelImportServiceSlice5IntegrationTest {
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 bos.toByteArray()
         );
+    }
+
+    @TestConfiguration
+    static class ClockTestConfig {
+        @Bean
+        Clock clock() {
+            return Clock.systemUTC();
+        }
     }
 }

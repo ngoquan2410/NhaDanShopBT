@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
-import { FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
+import { Download, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { importStaging } from "@/lib/import-staging";
 import { parseReceiptExcel } from "@/lib/excel-parser";
+import { downloadAdminBlob } from "@/services/auth/adminApi";
 
 interface Props {
   open: boolean;
@@ -14,11 +15,25 @@ export function ReceiptImportPreviewDialog({ open, onClose }: Props) {
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
   const [parsing, setParsing] = useState(false);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
 
   if (!open) return null;
 
   const handleClose = () => {
-    if (!parsing) onClose();
+    if (!parsing && !downloadingTemplate) onClose();
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      setDownloadingTemplate(true);
+      await downloadAdminBlob("/api/receipts/template", "template_import_phieu_nhap_kho.xlsx");
+      toast.success("Đã tải template.");
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Không thể tải template.");
+    } finally {
+      setDownloadingTemplate(false);
+    }
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -60,7 +75,7 @@ export function ReceiptImportPreviewDialog({ open, onClose }: Props) {
             <FileSpreadsheet className="h-5 w-5 text-primary" />
             <h3 className="font-semibold">Nhập Excel phiếu nhập</h3>
           </div>
-          <button onClick={handleClose} disabled={parsing} className="text-muted-foreground hover:text-foreground disabled:opacity-50">
+          <button onClick={handleClose} disabled={parsing || downloadingTemplate} className="text-muted-foreground hover:text-foreground disabled:opacity-50">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -70,19 +85,30 @@ export function ReceiptImportPreviewDialog({ open, onClose }: Props) {
             <div className="mb-3 inline-flex rounded-full bg-muted p-3">
               <Upload className="h-6 w-6 text-muted-foreground" />
             </div>
-            <h4 className="font-semibold">Chọn đúng template “template_import_phieu_nhap_kho- Bánh tráng Tìn Tìn.xlsx”</h4>
+            <h4 className="font-semibold">Tải template, điền dữ liệu, rồi upload để review.</h4>
             <p className="mt-1 text-sm text-muted-foreground">
-              Modal này chỉ chọn file và parse. Màn hình <strong>/admin/goods-receipts/create</strong> sẽ là nơi duy nhất để review, sửa lỗi và lưu phiếu nhập.
+              Màn hình <strong>/admin/goods-receipts/create</strong> là nơi duy nhất để review, sửa lỗi và lưu phiếu nhập.
             </p>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFileChange} className="hidden" />
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={parsing}
-              className="mt-4 inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {parsing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-              {parsing ? "Đang parse file..." : "Chọn file Excel"}
-            </button>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={handleDownloadTemplate}
+                disabled={parsing || downloadingTemplate}
+                className="inline-flex items-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {downloadingTemplate ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                Tải template Excel
+              </button>
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={parsing || downloadingTemplate}
+                className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {parsing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {parsing ? "Đang parse file..." : "Chọn file Excel"}
+              </button>
+            </div>
           </div>
         </div>
       </div>

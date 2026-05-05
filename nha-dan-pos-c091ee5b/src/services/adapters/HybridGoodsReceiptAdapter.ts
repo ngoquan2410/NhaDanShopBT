@@ -38,4 +38,8 @@ export class HybridGoodsReceiptAdapter implements GoodsReceiptService {
   async remove(id: ID): Promise<void> {
     return this.backend.remove(id);
   }
+
+  async voidReceipt(id: ID, body?: { reason?: string; voidedBy?: string }): Promise<GoodsReceipt> {
+    return this.backend.voidReceipt(id, body);
+  }
 }

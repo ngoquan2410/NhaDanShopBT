@@ -18,6 +18,7 @@ export default function AdminRevenueReport() {
   const [groupBy, setGroupBy] = useState<Group>("daily");
   const [from, setFrom] = useState("2026-04-01");
   const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [excelBusy, setExcelBusy] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
@@ -88,6 +89,18 @@ export default function AdminRevenueReport() {
   const pickerProducts = products.filter((p) => !pickerSearch || p.name.toLowerCase().includes(pickerSearch.toLowerCase()));
   const toggle = (id: string) => setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
+  const handleExportExcel = async () => {
+    try {
+      setExcelBusy(true);
+      await adminReports.downloadRevenueTotalExcel(from, to, groupBy);
+      toast.success("Đã tải file Excel doanh thu");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Không xuất Excel được");
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4 admin-dense">
       <PageHeader
@@ -100,10 +113,11 @@ export default function AdminRevenueReport() {
         actions={
           <button
             type="button"
-            onClick={() => toast.success("Đã xuất báo cáo Excel")}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted"
+            disabled={excelBusy}
+            onClick={() => void handleExportExcel()}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted disabled:opacity-50"
           >
-            <Download className="h-3.5 w-3.5" /> Xuất Excel
+            <Download className="h-3.5 w-3.5" /> {excelBusy ? "Đang xuất…" : "Xuất Excel"}
           </button>
         }
       />

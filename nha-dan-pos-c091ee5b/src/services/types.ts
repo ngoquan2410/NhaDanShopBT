@@ -595,7 +595,7 @@ export interface Invoice {
 
 /* ========================= GOODS RECEIPT (CANONICAL) ========================= */
 
-export type GoodsReceiptStatus = "draft" | "confirmed";
+export type GoodsReceiptStatus = "draft" | "confirmed" | "voided";
 
 export interface GoodsReceiptLine {
   id: ID;

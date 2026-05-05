@@ -7,6 +7,12 @@ export type InventoryReceiptCreateItem = {
   quantity: number;
   unitCost: number;
   discountPercent: number;
+  /** Catalog current sell price update hint. Does not affect receipt totals. */
+  sellPrice?: number | null;
+  /** Catalog sellable update hint. Applied only when isSellableExplicit is true. */
+  isSellable?: boolean | null;
+  /** True only when admin explicitly provided the Excel/UI sellable value. */
+  isSellableExplicit?: boolean | null;
   importUnit: string;
   piecesOverride: number;
   variantId: number | null;

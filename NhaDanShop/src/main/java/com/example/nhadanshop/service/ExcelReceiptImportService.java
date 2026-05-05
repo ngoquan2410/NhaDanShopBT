@@ -418,6 +418,29 @@ public class ExcelReceiptImportService {
                 }
             }
 
+            if (errorMsg == null && sellPrice != null && sellPrice.compareTo(java.math.BigDecimal.ZERO) < 0) {
+                errorMsg = "Giá bán không được âm";
+            }
+            if (errorMsg == null) {
+                boolean saleable = ImportSellableParser.defaultTrue(sellableCell.value());
+                if (saleable && productCode != null && !productCode.isBlank()) {
+                    String upperCode = productCode.trim().toUpperCase();
+                    var po = productRepository.findByCode(upperCode);
+                    if (Boolean.TRUE.equals(isNew)
+                            && (sellPrice == null || sellPrice.compareTo(java.math.BigDecimal.ZERO) <= 0)) {
+                        errorMsg = "SP mới có Bán hàng=TRUE — giá bán (cột F) phải > 0";
+                    } else if (po.isPresent() && !po.get().isCombo()) {
+                        String trimmedVariantCode = (variantCode != null && !variantCode.isBlank())
+                                ? variantCode.trim() : null;
+                        if (trimmedVariantCode != null
+                                && variantRepo.findByVariantCodeIgnoreCase(trimmedVariantCode).isEmpty()
+                                && (sellPrice == null || sellPrice.compareTo(java.math.BigDecimal.ZERO) <= 0)) {
+                            errorMsg = "Variant mới có Bán hàng=TRUE — giá bán (cột F) phải > 0";
+                        }
+                    }
+                }
+            }
+
             java.math.BigDecimal lineTotal = (cost != null && qty != null)
                 ? cost.multiply(java.math.BigDecimal.valueOf(qty))
                 : java.math.BigDecimal.ZERO;
@@ -629,6 +652,9 @@ public class ExcelReceiptImportService {
                     if (sellableCell.invalid()) {
                         errors.add("❌ Dòng " + lineNum + " [SP Don]: Cột P (Bán hàng?/isSellable) không hợp lệ."); continue;
                     }
+                    if (sellPrice != null && sellPrice.compareTo(BigDecimal.ZERO) < 0) {
+                        errors.add("❌ Dòng " + lineNum + " [SP Don]: Giá bán (cột F) không được âm."); continue;
+                    }
 
                     String passImportUnit = (excelImportUnit != null && !excelImportUnit.isBlank()) ? excelImportUnit.trim() : null;
                     String passSellUnit   = (excelSellUnit   != null && !excelSellUnit.isBlank())   ? excelSellUnit.trim()   : null;
@@ -667,6 +693,10 @@ public class ExcelReceiptImportService {
                                     + "' — bắt buộc điền cột O (Số ngày HSD)."
                                     + " Nếu SP không có HSD, điền 3650 (10 năm)."); continue;
                         }
+                        String sellErrNewProd = validateNewVariantSellPrice(lineNum, sellPrice, sellableCell);
+                        if (sellErrNewProd != null) {
+                            errors.add(sellErrNewProd); continue;
+                        }
                         ValidatedRow vRow = new ValidatedRow(
                                 VariantAction.NEW_PRODUCT, null, null, false, newVariantCode,
                                 name.trim(), categoryName.trim(), unit.trim(), upperCode,
@@ -695,6 +725,10 @@ public class ExcelReceiptImportService {
                             errors.add("❌ Dòng " + lineNum + " [SP Don]: Variant mới '" + newVCodeForPending
                                     + "' — bắt buộc điền cột O (Số ngày HSD)."
                                     + " Nếu SP không có HSD, điền 3650 (10 năm)."); continue;
+                        }
+                        String sellErrPendingVar = validateNewVariantSellPrice(lineNum, sellPrice, sellableCell);
+                        if (sellErrPendingVar != null) {
+                            errors.add(sellErrPendingVar); continue;
                         }
                         warnings.add("ℹ️ Dòng " + lineNum + ": SP '" + upperCode + "' plan tạo mới → thêm variant '" + newVCodeForPending + "'.");
                         validatedRows.add(new ValidatedRow(
@@ -750,6 +784,10 @@ public class ExcelReceiptImportService {
                                         + " Nếu SP không có HSD, điền 3650 (10 năm)."); continue;
                             }
                             maybeAddPass1VariantCodeWarning(lineNum, product, hasVariantCode, sellableCell, warnings);
+                            String sellErrNoVars = validateNewVariantSellPrice(lineNum, sellPrice, sellableCell);
+                            if (sellErrNoVars != null) {
+                                errors.add(sellErrNoVars); continue;
+                            }
                             validatedRows.add(new ValidatedRow(VariantAction.CREATE_NEW, product, null, false, null,
                                     null, null, null, null, qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
                                     passImportUnit, passSellUnit, passPieces, expiryDateOverride, expiryDaysFromExcel,
@@ -836,6 +874,10 @@ public class ExcelReceiptImportService {
                             errors.add("❌ Dòng " + lineNum + " [SP Don]: Variant mới '" + variantCode
                                     + "' — bắt buộc điền cột O (Số ngày HSD)."
                                     + " Nếu SP không có HSD, điền 3650 (10 năm)."); continue;
+                        }
+                        String sellErrNewVCode = validateNewVariantSellPrice(lineNum, sellPrice, sellableCell);
+                        if (sellErrNewVCode != null) {
+                            errors.add(sellErrNewVCode); continue;
                         }
                         validatedRows.add(new ValidatedRow(VariantAction.CREATE_NEW, product, null, false, variantCode,
                                 null, null, null, null, qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
@@ -1525,6 +1567,19 @@ public class ExcelReceiptImportService {
         String name = file.getOriginalFilename();
         if (name == null || !name.toLowerCase().endsWith(".xlsx"))
             throw new IllegalArgumentException("Chỉ hỗ trợ file .xlsx");
+    }
+
+    /**
+     * Variant/SP mới từ Excel: nếu bán được (cột P trống hoặc TRUE) thì giá bán phải &gt; 0.
+     * NVL ({@code isSellable}=false) được phép giá bán 0. Giá âm xử lý ở bước trước.
+     */
+    private static String validateNewVariantSellPrice(int lineNum, BigDecimal sellPrice,
+                                                        ImportSellableParser.Result sellableCell) {
+        if (!ImportSellableParser.defaultTrue(sellableCell.value())) return null;
+        if (sellPrice == null || sellPrice.compareTo(BigDecimal.ZERO) <= 0) {
+            return "❌ Dòng " + lineNum + " [SP Don]: SP/Variant mới và Bán hàng=TRUE — giá bán (cột F) phải > 0.";
+        }
+        return null;
     }
 
     private boolean isRowEmpty(Row row, boolean isNewFormat) {

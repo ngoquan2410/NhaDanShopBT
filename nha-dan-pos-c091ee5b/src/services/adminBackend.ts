@@ -1,4 +1,4 @@
-import { adminFetchJson } from "@/services/auth/adminApi";
+import { adminFetchJson, downloadAdminBlob } from "@/services/auth/adminApi";
 import type {
   Combo,
   ComboItem,
@@ -122,6 +122,9 @@ function mapStockAdjustment(raw: Record<string, unknown>): StockAdjustment {
     itemCount: items.length,
     status,
     createdBy: (raw.createdBy as string | undefined) ?? undefined,
+    reversedAt: raw.reversedAt != null ? asString(raw.reversedAt) : undefined,
+    reversalAdjustmentId: raw.reversalAdjustmentId != null ? asString(raw.reversalAdjustmentId) : undefined,
+    reversesAdjustmentId: raw.reversesAdjustmentId != null ? asString(raw.reversesAdjustmentId) : undefined,
   };
 }
 
@@ -246,15 +249,28 @@ export const adminCombos = {
 
 export const adminStockAdjustments = {
   async list(): Promise<{ items: StockAdjustment[]; total: number }> {
-    const raw = await adminFetchJson<Page<Record<string, unknown>>>("/api/stock-adjustments?page=0&size=100");
+    const raw = await adminFetchJson<Page<Record<string, unknown>>>("/api/stock-adjustments?page=0&size=500");
     const items = toPageItems(raw).map(mapStockAdjustment);
     const total = typeof raw?.totalElements === "number" ? raw.totalElements : items.length;
     return { items, total };
+  },
+  async getOne(id: string): Promise<StockAdjustment> {
+    const raw = await adminFetchJson<Record<string, unknown>>(`/api/stock-adjustments/${encodeURIComponent(id)}`);
+    return mapStockAdjustment(raw);
   },
   async getLines(id: string): Promise<StockAdjustmentLine[]> {
     const raw = await adminFetchJson<Record<string, unknown>>(`/api/stock-adjustments/${encodeURIComponent(id)}`);
     const items = Array.isArray(raw.items) ? (raw.items as Record<string, unknown>[]) : [];
     return items.map(mapStockAdjustmentLine);
+  },
+  async reverse(id: string, payload?: { reason?: string | null }): Promise<StockAdjustment> {
+    const trimmed = payload?.reason != null ? String(payload.reason).trim() : "";
+    const body = trimmed !== "" ? JSON.stringify({ reason: trimmed }) : JSON.stringify({});
+    const raw = await adminFetchJson<Record<string, unknown>>(`/api/stock-adjustments/${encodeURIComponent(id)}/reverse`, {
+      method: "POST",
+      body,
+    });
+    return mapStockAdjustment(raw);
   },
 };
 
@@ -272,7 +288,7 @@ export const adminReports = {
       sold: asNumber(r.sold, asNumber(r.totalSold)),
       adjusted: asNumber(r.totalAdjusted, asNumber(r.adjusted)),
       closingStock: asNumber(r.closingStock),
-      closingValue: asNumber(r.closingValue),
+      closingValue: asNumber(r.closingValue, asNumber(r.closingStockValue)),
     }));
   },
   async revenue(from: string, to: string, period: string, productIds?: string[]): Promise<RevenueRow[]> {
@@ -315,5 +331,21 @@ export const adminReports = {
       ...(margin !== undefined ? { margin } : {}),
       invoiceCount,
     }];
+  },
+  async downloadInventoryExcel(from: string, to: string): Promise<void> {
+    await downloadAdminBlob(
+      `/api/reports/inventory/export?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      `TonKho_${from}_${to}.xlsx`,
+    );
+  },
+  async downloadRevenueTotalExcel(from: string, to: string, period: string): Promise<void> {
+    const q = new URLSearchParams({ from, to, period });
+    await downloadAdminBlob(`/api/revenue/total/export?${q}`, `DoanhThu_${from}_${to}.xlsx`);
+  },
+  async downloadProfitExcel(from: string, to: string): Promise<void> {
+    await downloadAdminBlob(
+      `/api/reports/profit/export?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      `LoiNhuan_${from}_${to}.xlsx`,
+    );
   },
 };

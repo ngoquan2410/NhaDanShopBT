@@ -5,7 +5,10 @@ function qtyFromProjections(rows, vid) {
   for (const raw of rows) {
     const p = typeof raw === "object" && raw !== null ? raw : {};
     if (Number(p.variantId) !== Number(vid)) continue;
-    return Number(p.available ?? p.onHand ?? 0);
+    if (p.sellableQty === null || p.sellableQty === undefined) {
+      return Number(p.available ?? p.onHand ?? 0);
+    }
+    return Number(p.sellableQty ?? p.available ?? p.onHand ?? 0);
   }
   return null;
 }
@@ -30,7 +33,7 @@ export default {
     ctx.api.setAccessToken(token);
 
     const projections = await ctx.api.fetchJson("/api/inventory/projections");
-    const pick = Array.isArray(projections) ? pickSellableVariantScan(projections) : null;
+    const pick = Array.isArray(projections) ? pickSellableVariantScan(projections, { minAvail: 2 }) : null;
     if (!pick?.variantCode) {
       ctx.api.setAccessToken(null);
       return { skipped: true, reason: "No sellable variant with stock found in projections" };
@@ -63,7 +66,8 @@ export default {
     );
     await driver.sleep(300);
 
-    const checkoutXp = '//button[contains(normalize-space(.), "Tạo hóa đơn") and contains(normalize-space(.), "đ")]';
+    // formatVND uses vi-VN currency (typically "₫") — do not require ASCII "đ".
+    const checkoutXp = '//button[contains(normalize-space(.), "Tạo hóa đơn")]';
     const btn = await driver.wait(until.elementLocated(By.xpath(checkoutXp)), 45000);
     await driver.wait(async () => (await btn.isEnabled()), 45000);
     await driver.executeScript("arguments[0].scrollIntoView({block:'center'});", btn);

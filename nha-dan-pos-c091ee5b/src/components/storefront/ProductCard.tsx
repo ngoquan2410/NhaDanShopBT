@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Package, ShoppingCart, Heart } from "lucide-react";
 import { formatVND } from "@/lib/format";
@@ -17,12 +18,17 @@ function getStockStatus(stock: number, minStock: number) {
 
 export function ProductCard({ product, compact = false }: { product: Product; compact?: boolean }) {
   const dv = product.variants.find((v) => v.isDefault) || product.variants[0];
+  const [imageBroken, setImageBroken] = useState(false);
   const stockStatus = getStockStatus(dv.stock, dv.minStock);
   const hasMulti = product.variants.length > 1;
   const minPrice = Math.min(...product.variants.map((v) => v.sellPrice));
   const maxPrice = Math.max(...product.variants.map((v) => v.sellPrice));
   const discount = stockStatus === "in-stock" && dv.sellPrice > 20000 ? Math.floor(((maxPrice - minPrice) / maxPrice) * 100) : 0;
   const imageUrl = resolveProductImage(product, dv);
+
+  useEffect(() => {
+    setImageBroken(false);
+  }, [imageUrl]);
 
   const handleAdd = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -57,11 +63,12 @@ export function ProductCard({ product, compact = false }: { product: Product; co
     >
       {/* Image */}
       <div className="aspect-square bg-gradient-to-br from-muted/40 to-storefront-soft relative overflow-hidden">
-        {imageUrl ? (
+        {imageUrl && !imageBroken ? (
           <img
             src={imageUrl}
             alt={product.name}
             loading="lazy"
+            onError={() => setImageBroken(true)}
             className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
           />
         ) : (

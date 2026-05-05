@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -149,6 +150,10 @@ public class SalesQuoteService {
                         .orElseThrow(() -> new EntityNotFoundException("Khong tim thay lo hang batchId=" + line.batchId()));
                 if (!batch.getVariant().getId().equals(variant.getId())) {
                     throw new IllegalArgumentException("batchId khong thuoc variant da chon — chi dung trace kho.");
+                }
+                LocalDate today = LocalDate.now(clock);
+                if (batch.getExpiryDate() != null && batch.getExpiryDate().isBefore(today)) {
+                    throw new IllegalArgumentException("Lo hang da het han, khong the bao gia voi batchId chi dinh.");
                 }
             }
 

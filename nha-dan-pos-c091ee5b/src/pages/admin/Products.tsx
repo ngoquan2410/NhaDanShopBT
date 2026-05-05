@@ -11,7 +11,7 @@ import { useService } from "@/hooks/useService";
 import { products as productService, categories as categoryService } from "@/services";
 import type { Product } from "@/lib/mock-data";
 import { formatVND } from "@/lib/format";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Search, Plus, Package, MoreHorizontal, Upload, Pencil, Trash2, Power, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
@@ -23,6 +23,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 function getStockSignal(product: Product) {
   const hasOutOfStock = product.variants.some(v => v.stock === 0);
@@ -37,18 +44,8 @@ export default function AdminProducts() {
   const initialQ = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("q") ?? "" : "";
   const [search, setSearch] = useState(initialQ);
   const [filterCategory, setFilterCategory] = useState<string | null>(null);
-  const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Product | null>(null);
   const [showImport, setShowImport] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpenMenu(null);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
 
   // Service-driven list. Filtering by category is pushed to the adapter; the
   // free-text search stays client-side because the local adapter only matches
@@ -99,7 +96,6 @@ export default function AdminProducts() {
     await productService.update(p.id, { active: !p.active });
     reload();
     toast.success(p.active ? `Đã ngưng "${p.name}"` : `Đã kích hoạt "${p.name}"`);
-    setOpenMenu(null);
   };
 
   const handleDelete = async () => {
@@ -223,27 +219,36 @@ export default function AdminProducts() {
                           <StatusBadge status={product.active ? "active" : "inactive"} />
                         </td>
                         <td className="px-3 py-2.5 text-right font-medium">{dv ? formatVND(dv.sellPrice) : "—"}</td>
-                        <td className="px-3 py-2.5 relative">
-                          <button onClick={() => setOpenMenu(openMenu === product.id ? null : product.id)} className="p-1 text-muted-foreground hover:text-foreground rounded hover:bg-muted">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </button>
-                          {openMenu === product.id && (
-                            <div ref={menuRef} className="absolute right-2 top-9 z-20 w-44 bg-popover border rounded-md shadow-lg py-1 animate-fade-in">
-                              <button onClick={() => { navigate(`/admin/products/${product.id}`); setOpenMenu(null); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted text-left">
-                                <Eye className="h-3.5 w-3.5" /> Xem chi tiết
+                        <td className="px-3 py-2.5">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                className="p-1 text-muted-foreground hover:text-foreground rounded hover:bg-muted data-[state=open]:bg-muted"
+                                aria-label="Thao tác"
+                              >
+                                <MoreHorizontal className="h-4 w-4" />
                               </button>
-                              <button onClick={() => { navigate(`/admin/products/${product.id}`); setOpenMenu(null); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted text-left">
-                                <Pencil className="h-3.5 w-3.5" /> Sửa sản phẩm
-                              </button>
-                              <button onClick={() => handleToggleActive(product)} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted text-left">
-                                <Power className="h-3.5 w-3.5" /> {product.active ? "Ngưng bán" : "Kích hoạt"}
-                              </button>
-                              <div className="my-1 border-t" />
-                              <button onClick={() => { setConfirmDelete(product); setOpenMenu(null); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-danger-soft text-danger text-left">
-                                <Trash2 className="h-3.5 w-3.5" /> Xóa sản phẩm
-                              </button>
-                            </div>
-                          )}
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem onClick={() => navigate(`/admin/products/${product.id}`)}>
+                                <Eye className="h-3.5 w-3.5 mr-2" /> Xem chi tiết
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => navigate(`/admin/products/${product.id}`)}>
+                                <Pencil className="h-3.5 w-3.5 mr-2" /> Sửa sản phẩm
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => void handleToggleActive(product)}>
+                                <Power className="h-3.5 w-3.5 mr-2" /> {product.active ? "Ngưng bán" : "Kích hoạt"}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-danger focus:text-danger"
+                                onClick={() => setConfirmDelete(product)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5 mr-2" /> Xóa sản phẩm
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </td>
                       </tr>
                     );

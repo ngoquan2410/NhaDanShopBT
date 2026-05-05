@@ -1,3 +1,4 @@
+import { By, until } from "selenium-webdriver";
 import { waitForH1Containing } from "../helpers/assertions.mjs";
 
 /**
@@ -54,6 +55,15 @@ export default {
 
     await driver.get(`${origin}/admin/goong-test`);
     await waitForH1Containing(driver, "Goong API", 25000);
+
+    await driver.get(`${origin}/admin`);
+    await waitForH1Containing(driver, "Dashboard", 25000);
+    await driver.executeScript(`
+      window.dispatchEvent(new CustomEvent('nhadan:session-expired', { detail: { nextPath: '/admin/store-settings' } }));
+    `);
+    await driver.wait(until.elementLocated(By.css('[data-testid="session-expired-modal"]')), 12000);
+    await driver.findElement(By.css('[data-testid="session-expired-login"]')).click();
+    await driver.wait(async () => (await driver.getCurrentUrl()).includes("/login"), 15000);
 
     ctx.api.setAccessToken(null);
   },

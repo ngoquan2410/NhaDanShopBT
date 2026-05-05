@@ -5,6 +5,7 @@ import com.example.nhadanshop.dto.ProductComboResponse;
 import com.example.nhadanshop.entity.*;
 import com.example.nhadanshop.entity.Product.ProductType;
 import com.example.nhadanshop.repository.CategoryRepository;
+import com.example.nhadanshop.repository.ProductBatchRepository;
 import com.example.nhadanshop.repository.ProductComboRepository;
 import com.example.nhadanshop.repository.ProductRepository;
 import com.example.nhadanshop.repository.ProductVariantRepository;
@@ -14,13 +15,16 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
  * Combo = Product(productType=COMBO) + ProductComboItem[]
- * Tồn kho combo (Virtual): min(component.defaultVariant.stockQty / component.qty)
+ * Tồn kho combo (Virtual): min(sellableFromBatches(component default variant) / component.qty)
+ * với predicate bán được thống nhất (batch active, không hết hạn, variant và product đang hoạt động và sellable).
  * Giá vốn combo: Σ (component.defaultVariant.costPrice × qty)
  * Giá bán combo: từ default variant của combo
  */
@@ -33,6 +37,9 @@ public class ProductComboService {
     private final ProductComboRepository comboItemRepo;
     private final CategoryRepository categoryRepo;
     private final ProductVariantRepository variantRepo;
+    private final ProductBatchRepository batchRepository;
+    private final StockedCatalogGuardService stockedCatalogGuardService;
+    private final Clock businessClock;
 
     public List<ProductComboResponse> listActive() {
         return productRepo.findByProductTypeAndActiveTrue(ProductType.COMBO)
@@ -80,6 +87,7 @@ public class ProductComboService {
 
     public void delete(Long id) {
         Product combo = findComboOrThrow(id);
+        stockedCatalogGuardService.assertComboMayArchiveOrDeactivate(combo);
         if (productRepo.isComboStructurallyUsed(id)) {
             archiveCombo(combo);
         } else {
@@ -104,6 +112,9 @@ public class ProductComboService {
 
     public ProductComboResponse toggleActive(Long id) {
         Product combo = findComboOrThrow(id);
+        if (Boolean.TRUE.equals(combo.getActive())) {
+            stockedCatalogGuardService.assertComboMayArchiveOrDeactivate(combo);
+        }
         combo.setActive(!combo.getActive());
         // Đồng bộ active sang variant
         variantRepo.findByProductIdOrderByIsDefaultDescVariantCodeAsc(combo.getId())
@@ -120,24 +131,28 @@ public class ProductComboService {
      */
     public void updateVirtualStock(Product combo) {
         if (!combo.isCombo()) return;
+        LocalDate today = LocalDate.now(businessClock);
         List<ProductComboItem> items = comboItemRepo.findByComboProduct(combo);
         if (items.isEmpty()) { syncComboVariant(combo, 0, BigDecimal.ZERO); return; }
 
         for (ProductComboItem ci : items) {
             ProductVariant cv = ci.getProduct().getDefaultVariant();
-            int stock = cv != null && cv.getStockQty() != null ? cv.getStockQty() : 0;
-            if (stock < 0) {
+            int phys = cv != null ? batchRepository.sumRemainingQtyByVariantId(cv.getId()) : 0;
+            if (phys < 0) {
                 throw new IllegalStateException(
                         "Tồn thành phần âm trong combo '" + combo.getCode() + "': sản phẩm '"
-                                + ci.getProduct().getCode() + "' stockQty=" + stock);
+                                + ci.getProduct().getCode() + "' tổng lô remainingQty=" + phys);
             }
         }
 
         int virtualStock = items.stream()
                 .mapToInt(ci -> {
                     ProductVariant cv = ci.getProduct().getDefaultVariant();
-                    int stock = cv != null ? cv.getStockQty() : 0;
-                    return stock / ci.getQuantity();
+                    if (cv == null || ci.getQuantity() == null || ci.getQuantity() <= 0) {
+                        return 0;
+                    }
+                    int sellable = batchRepository.sumSellableRemainingQtyByVariantId(cv.getId(), today);
+                    return sellable / ci.getQuantity();
                 })
                 .min().orElse(0);
 

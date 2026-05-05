@@ -32,7 +32,72 @@ r2.public-url=https://pub-xxxx.r2.dev
 # ── JWT ─────────────────────────────────────────────────────
 jwt.secret=REMOVED_JWT_SECRET
 jwt.access-token-expiry-minutes=30
-jwt.refresh-token-expiry-days=7
+jwt.refresh-token-expiry-minutes=15
+
+# ── GHN Shipping ────────────────────────────────────────────
+# Runtime requirements:
+# - ghn.token and ghn.shop-id must come from local secrets/env, never from a shared committed config
+# - timeout behavior is controlled in GhnShippingService (4s connect, 8s request)
+# - province/district/ward mapping is still name-based, so address normalization remains important
+ghn.token=9dfbf97a-3e39-11f1-aa1b-526af48628fc
+ghn.shop-id=6399378
+# Optional. If omitted, GHN derives pickup district from shop config.
+ghn.from-district-id=
+
+# ── VietQR ───────────────────────────────────────────────────
+vietqr.image-base-url=https://img.vietqr.io/image
+
+# ── Casso Webhook ────────────────────────────────────────────
+casso.webhook-secure-token=2SNA4aAoxXjaZuUs1scqqNAJUCdwmWEOP9WRDgI2oQBMXGFzhX4T3Xb7s6WKUpYU
+casso.webhook-checksum-key=2SNA4aAoxXjaZuUs1scqqNAJUCdwmWEOP9WRDgI2oQBMXGFzhX4T3Xb7s6WKUpYU
 
 # ── TOTP ────────────────────────────────────────────────────
 totp.issuer=NhaDanShop
+
+# ── SMTP (quên mật khẩu / forgot-password) ─────────────────
+# Bật profile local khi chạy app:
+#   Windows PowerShell: $env:SPRING_PROFILES_ACTIVE='local';  .\gradlew.bat bootRun
+#   hoặc: java -jar ... --spring.profiles.active=local
+#
+# Cách 1 — Biến môi trường (không cần profile `local` — application.properties đã map ${MAIL_*}):
+#   MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD
+#   Tùy chọn: MAIL_FROM, APP_PUBLIC_BASE_URL
+#
+# Cách 2 — Sửa trực tiếp các dòng spring.mail.* bên dưới (sau khi copy file này thành
+#   src/main/resources/application-local.properties — KHÔNG commit file thật).
+
+# --- Gmail (ứng dụng): bật 2FA → Mật khẩu ứng dụng 16 ký tự ---
+# spring.mail.host=smtp.gmail.com
+# spring.mail.port=587
+# spring.mail.username=youraccount@gmail.com
+# spring.mail.password=xxxx xxxx xxxx xxxx
+# spring.mail.from=${spring.mail.username}
+# spring.mail.properties.mail.smtp.auth=true
+# spring.mail.properties.mail.smtp.starttls.enable=true
+
+# --- Gmail / provider dùng cổng SSL 465 (SMTPS) — bật 2 dòng ssl, tắt starttls required ---
+# spring.mail.host=smtp.gmail.com
+# spring.mail.port=465
+# spring.mail.username=qngo2410hv@gmail.com
+# spring.mail.password=vobobuckznuayrnu
+# spring.mail.properties.mail.smtp.auth=true
+# spring.mail.properties.mail.smtp.ssl.enable=true
+# spring.mail.properties.mail.smtp.starttls.enable=false
+
+# --- Outlook / Microsoft 365 (STARTTLS) ---
+# spring.mail.host=smtp.office365.com
+# spring.mail.port=587
+# spring.mail.username=noreply@yourdomain.com
+# spring.mail.password=...
+
+# --- SMTP nội bộ / VPS (ví dụ) ---
+# spring.mail.host=mail.yourdomain.com
+# spring.mail.port=587
+# spring.mail.username=noreply@yourdomain.com
+# spring.mail.password=...
+
+# URL gốc mà email reset trỏ tới (không dấu / cuối). Production: https://your-frontend-domain
+app.public-base-url=http://localhost:5173
+
+# Khi chưa gửi mail thật nhưng muốn /actuator/health = UP (dev):
+# management.health.mail.enabled=false

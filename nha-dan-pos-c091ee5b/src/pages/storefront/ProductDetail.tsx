@@ -19,6 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { cartActions } from "@/lib/cart";
+import { resolveProductImage } from "@/lib/product-image";
 import { getPublicProduct, listPublicProducts, type StorefrontProduct } from "@/services/catalog/publicCatalog";
 
 function getStockStatus(stock: number, minStock: number) {
@@ -34,6 +35,7 @@ export default function StorefrontProductDetail() {
   const [allProducts, setAllProducts] = useState<StorefrontProduct[]>([]);
   const [variantId, setVariantId] = useState<string | undefined>();
   const [qty, setQty] = useState(1);
+  const [imageBroken, setImageBroken] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -46,6 +48,10 @@ export default function StorefrontProductDetail() {
     }).catch(() => alive && setProduct(null));
     return () => { alive = false; };
   }, [id]);
+
+  useEffect(() => {
+    setImageBroken(false);
+  }, [id, variantId]);
 
   if (product === undefined) {
     return <div className="max-w-4xl mx-auto px-4 py-12 text-sm text-muted-foreground">Đang tải sản phẩm backend...</div>;
@@ -72,6 +78,7 @@ export default function StorefrontProductDetail() {
   }
 
   const variant = product.variants.find((v) => v.id === variantId) || product.variants[0];
+  const imageUrl = resolveProductImage(product, variant);
   const stockStatus = getStockStatus(variant.stock, variant.minStock);
   const related = allProducts
     .filter((p) => p.id !== product.id && p.categoryId === product.categoryId && p.active)
@@ -133,7 +140,16 @@ export default function StorefrontProductDetail() {
           {/* Image gallery */}
           <div className="space-y-3">
             <div className="aspect-square bg-storefront-surface rounded-3xl border flex items-center justify-center relative overflow-hidden sf-shadow">
-              <Package className="h-28 w-28 text-muted-foreground/25" strokeWidth={1.1} />
+              {imageUrl && !imageBroken ? (
+                <img
+                  src={imageUrl}
+                  alt={product.name}
+                  onError={() => setImageBroken(true)}
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+              ) : (
+                <Package className="h-28 w-28 text-muted-foreground/25" strokeWidth={1.1} />
+              )}
               {stockStatus !== "in-stock" && (
                 <div className="absolute top-4 left-4">
                   <StatusBadge status={stockStatus} />

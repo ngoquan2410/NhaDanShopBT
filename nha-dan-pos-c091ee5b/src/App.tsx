@@ -8,6 +8,7 @@ import { StorefrontLayout } from "@/components/layout/StorefrontLayout";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { AdminAuthGuard } from "@/components/layout/AdminAuthGuard";
 import { AdminAuthProvider } from "@/lib/admin-auth";
+import { SessionExpiredHost } from "@/components/auth/SessionExpiredHost";
 
 import StorefrontHome from "@/pages/storefront/Home";
 import StorefrontProducts from "@/pages/storefront/Products";
@@ -63,6 +64,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AdminAuthProvider>
+          <SessionExpiredHost />
           <Routes>
             {/* Storefront */}
             <Route element={<StorefrontLayout />}>

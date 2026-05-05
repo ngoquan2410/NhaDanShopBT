@@ -14,7 +14,7 @@ interface Props {
 
 const inputCls = "w-full h-9 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring";
 
-export function CustomerFormDrawer({ open, onClose, customer }: Props) {
+export function CustomerFormDrawer({ open, onClose, customer, onSave }: Props) {
   const [form, setForm] = useState({
     name: "", phone: "", email: "", group: "retail" as Customer["group"], active: true,
   });

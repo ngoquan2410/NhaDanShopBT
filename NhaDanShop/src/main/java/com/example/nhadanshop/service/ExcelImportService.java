@@ -45,8 +45,8 @@ import java.util.*;
  *   R1: Tên SP bắt buộc
  *   R2: Danh mục bắt buộc
  *   R3: Đơn vị bắt buộc
- *   R4: Giá vốn bắt buộc > 0
- *   R5: Giá bán bắt buộc > 0
+ *   R4–R5: Khi {@code isSellable} mặc định/TRUE (cột N trống hoặc bán được): giá vốn và giá bán phải &gt; 0.
+ *        Khi {@code isSellable}=FALSE (NVL): cho phép giá 0; giá âm vẫn bị chặn.
  *   R6: Số lẻ/ĐV >= 1 nếu có nhập
  *   R7: Hạn dùng >= 0 nếu có nhập
  *   R8: Mã SP nhập tay → phải unique trong DB
@@ -417,12 +417,20 @@ public class ExcelImportService {
                                     name, catOpt.get().getId())) {
                             willSkip = true;
                         }
-                        // R10a: giá bán = 0 → WARNING (chưa có giá, cần điền sau)
-                        if (!willSkip && (sellPrice == null || sellPrice.compareTo(BigDecimal.ZERO) == 0)) {
-                            warningMsg = "Giá bán = 0 — SP sẽ hiện 0₫ trên POS, vui lòng cập nhật sau khi nhập kho";
+                        if (!willSkip) {
+                            boolean saleable = ImportSellableParser.defaultTrue(isSellable);
+                            if (saleable) {
+                                if (costPrice == null || costPrice.compareTo(BigDecimal.ZERO) <= 0) {
+                                    errorMsg = "Cột D (Giá vốn) phải > 0 khi SP được bán (cột N để trống hoặc TRUE). "
+                                            + "NVL: đặt cột N = FALSE/không/nguyên liệu.";
+                                } else if (sellPrice == null || sellPrice.compareTo(BigDecimal.ZERO) <= 0) {
+                                    errorMsg = "Cột E (Giá bán) phải > 0 khi SP được bán (cột N để trống hoặc TRUE). "
+                                            + "NVL: đặt cột N = FALSE/không/nguyên liệu.";
+                                }
+                            }
                         }
-                        // R10b: giá vốn > giá bán → WARNING (chỉ khi cả 2 đều > 0)
-                        if (!willSkip && warningMsg == null
+                        // R10: giá vốn > giá bán → WARNING (chỉ khi cả 2 đều > 0)
+                        if (!willSkip && errorMsg == null && warningMsg == null
                                 && costPrice != null && costPrice.compareTo(BigDecimal.ZERO) > 0
                                 && sellPrice != null && sellPrice.compareTo(BigDecimal.ZERO) > 0
                                 && costPrice.compareTo(sellPrice) > 0) {

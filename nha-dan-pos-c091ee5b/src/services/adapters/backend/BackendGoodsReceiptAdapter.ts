@@ -195,4 +195,12 @@ export class BackendGoodsReceiptAdapter implements GoodsReceiptService {
       { method: "DELETE" },
     );
   }
+
+  async voidReceipt(id: ID, body?: { reason?: string; voidedBy?: string }): Promise<GoodsReceipt> {
+    const raw = await adminFetchJson<BeReceipt>(
+      `${API}/${encodeURIComponent(String(id))}/void`,
+      { method: "PATCH", json: body ?? {} },
+    );
+    return mapReceipt(raw);
+  }
 }

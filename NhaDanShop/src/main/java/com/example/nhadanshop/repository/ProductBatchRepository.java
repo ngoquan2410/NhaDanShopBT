@@ -52,6 +52,7 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
     @Query("""
             SELECT b FROM ProductBatch b
             WHERE b.remainingQty > 0
+              AND b.status IN ('active', 'blocked')
               AND b.expiryDate <= :threshold
             ORDER BY b.expiryDate ASC
             """)
@@ -63,6 +64,7 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
     @Query("""
             SELECT b FROM ProductBatch b
             WHERE b.remainingQty > 0
+              AND b.status IN ('active', 'blocked')
               AND b.expiryDate < :today
             ORDER BY b.expiryDate ASC
             """)
@@ -158,6 +160,8 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             """)
     int sumRemainingQtyByVariantId(@Param("variantId") Long variantId);
 
+    long countByVariant_IdAndRemainingQtyGreaterThan(Long variantId, int minRemaining);
+
     /** Kiểm tra variant đã có lô nào chưa */
     boolean existsByVariantId(Long variantId);
 
@@ -234,12 +238,16 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
      * Dùng để tính closingValue = closingStock * avgCostPrice (phụ thuộc kỳ báo cáo).
      * ⚠️ Chỉ tính batch còn bán được theo policy (expiryDate >= :asOf).
      */
+    /**
+     * Đồng nhất với predicate tồn thực đang theo dõi cho cost: lô active/blocked, còn hạn, không voided/archived.
+     */
     @Query("""
             SELECT b.variant.id,
                    SUM(b.remainingQty * b.costPrice) / NULLIF(SUM(b.remainingQty), 0)
             FROM ProductBatch b
             WHERE b.variant IS NOT NULL
               AND b.remainingQty > 0
+              AND b.status IN ('active', 'blocked')
               AND b.expiryDate >= :asOf
             GROUP BY b.variant.id
             """)

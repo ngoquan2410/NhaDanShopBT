@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, ChevronRight,
-  FileSpreadsheet, Package, Plus, RefreshCw, Save, Search, Trash2, X,
+  FileSpreadsheet, Loader2, Package, Plus, RefreshCw, Save, Search, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,9 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { useService } from "@/hooks/useService";
 import { categories as categoryService, products as productService } from "@/services";
 import { productImportRowSellableLabel, type ProductImportRow } from "@/lib/import-types";
+import type { Category } from "@/lib/mock-data";
+import { findCategoryByImportedName, isImportedCategoryNew } from "@/lib/categoryImportMatch";
+import { buildVariantsForProductImportCreate } from "@/lib/productImportSavePayload";
 
 interface DraftVariant {
   code: string;
@@ -52,6 +55,8 @@ interface Props {
 
 type StatusFilter = "all" | "error" | "warning" | "ok" | "edited";
 
+const PRODUCT_IMPORT_SAVE_TOAST_ID = "product-import-save";
+
 function createDrafts(rows: ProductImportRow[]): DraftProduct[] {
   return rows.map((row, index) => ({
     key: `${row.code || "NEW"}-${row.sourceRow}-${index}`,
@@ -61,8 +66,8 @@ function createDrafts(rows: ProductImportRow[]): DraftProduct[] {
     name: row.name,
     category: row.category,
     variants: [{
-      code: row.variantCode,
-      name: row.variantName || "Mặc định",
+      code: row.variantCode || row.code,
+      name: row.variantName || row.name || "Mặc định",
       sellPrice: row.sellPrice,
       costPrice: row.costPrice,
       stock: row.stock,
@@ -95,18 +100,24 @@ function generateProductCode(name: string, category: string, usedCodes: Set<stri
   return attempt;
 }
 
-function validateDraft(draft: DraftProduct, existingCodes: Set<string>, duplicateCodes: Set<string>): DraftIssue {
+function validateDraft(
+  draft: DraftProduct,
+  existingCodes: Set<string>,
+  duplicateCodes: Set<string>,
+  categories: Category[],
+): DraftIssue {
   const errors: string[] = [];
   const warnings: string[] = [];
   const variants = draft.variants.map<VariantIssue>((variant, index) => {
     const ve: string[] = []; const vw: string[] = [];
     if (!variant.name.trim()) ve.push("Thiếu tên phân loại.");
+    const saleable = variant.isSellable !== false;
     if (!Number.isFinite(variant.sellPrice)) ve.push("Giá bán không hợp lệ.");
     else if (variant.sellPrice < 0) ve.push("Giá bán không được âm.");
-    else if (variant.sellPrice === 0) ve.push("Giá bán phải > 0 (VND).");
+    else if (saleable && variant.sellPrice === 0) ve.push("Giá bán phải > 0 (VND) khi bán hàng.");
     if (!Number.isFinite(variant.costPrice)) ve.push("Giá vốn không hợp lệ.");
     else if (variant.costPrice < 0) ve.push("Giá vốn không được âm.");
-    else if (variant.costPrice === 0) ve.push("Giá vốn phải > 0 (VND).");
+    else if (saleable && variant.costPrice === 0) ve.push("Giá vốn phải > 0 (VND) khi bán hàng.");
     if (!variant.sellUnit.trim()) ve.push("Thiếu đơn vị bán.");
     if (!variant.importUnit.trim()) vw.push("Thiếu ĐV nhập — sẽ dùng ĐV bán.");
     if (variant.piecesPerImportUnit <= 0) ve.push("Quy đổi phải > 0.");
@@ -114,12 +125,22 @@ function validateDraft(draft: DraftProduct, existingCodes: Set<string>, duplicat
     if (variant.stock < 0) ve.push("Tồn đầu không hợp lệ.");
     if (variant.isSellableInvalid) ve.push("Cột bán hàng (N) từ Excel không hợp lệ.");
     if (variant.costPrice > 0 && variant.sellPrice > 0 && variant.sellPrice < variant.costPrice) vw.push("Giá bán < giá vốn.");
-    if (!variant.code.trim()) vw.push(`Phân loại #${index + 1} sẽ tự sinh mã.`);
+    if (!variant.code.trim()) {
+      vw.push(
+        index === 0
+          ? "Phân loại #1 trống mã — khi lưu sẽ dùng mã sản phẩm (hoặc mã sinh nếu SP không có mã)."
+          : `Phân loại #${index + 1} trống mã — khi lưu sẽ dùng hậu tố -${String(index + 1).padStart(2, "0")} sau mã SP.`,
+      );
+    }
     return { errors: ve, warnings: vw };
   });
 
   if (!draft.name.trim()) errors.push("Thiếu tên sản phẩm.");
   if (!draft.category.trim()) errors.push("Thiếu danh mục.");
+  const catHit = draft.category.trim() ? findCategoryByImportedName(categories, draft.category) : null;
+  if (catHit && !catHit.active) {
+    errors.push(`Danh mục "${catHit.name}" đã tồn tại nhưng đang ngưng hoạt động.`);
+  }
   if (draft.code && existingCodes.has(draft.code.trim().toUpperCase())) errors.push(`Mã SP ${draft.code} đã tồn tại.`);
   if (draft.code && duplicateCodes.has(draft.code.trim().toUpperCase())) errors.push(`Mã SP ${draft.code} bị trùng trong file.`);
   if (!draft.code.trim()) warnings.push("Mã SP để trống — hệ thống tự sinh.");
@@ -139,7 +160,7 @@ function statusOf(issue: DraftIssue): "error" | "warning" | "ok" {
 export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props) {
   const navigate = useNavigate();
   const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 500 }), []);
-  const { data: categoryData } = useService(() => categoryService.list({ active: false }), []);
+  const { data: categoryData } = useService(() => categoryService.list({ includeInactive: true }), []);
   const products = productData?.items ?? [];
   const categories = categoryData?.items ?? [];
   const [drafts, setDrafts] = useState<DraftProduct[]>(() => createDrafts(rows));
@@ -148,6 +169,7 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const groupRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [isSaving, setIsSaving] = useState(false);
 
   const activeDrafts = useMemo(() => drafts.filter((d) => !d.removed), [drafts]);
   const existingCodes = useMemo(() => new Set(products.map((p) => p.code.toUpperCase())), [products]);
@@ -163,9 +185,24 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
 
   const issues = useMemo(() => {
     const map = new Map<string, DraftIssue>();
-    activeDrafts.forEach((d) => map.set(d.key, validateDraft(d, existingCodes, duplicateCodes)));
+    activeDrafts.forEach((d) => map.set(d.key, validateDraft(d, existingCodes, duplicateCodes, categories)));
     return map;
-  }, [activeDrafts, duplicateCodes, existingCodes, validationTick]);
+  }, [activeDrafts, categories, duplicateCodes, existingCodes, validationTick]);
+
+  // Bind Excel category text to canonical catalog names (spacing/case) once categories load.
+  useEffect(() => {
+    if (!categories.length) return;
+    setDrafts((prev) => {
+      let changed = false;
+      const next = prev.map((d) => {
+        const hit = findCategoryByImportedName(categories, d.category);
+        if (!hit || hit.name === d.category) return d;
+        changed = true;
+        return { ...d, category: hit.name };
+      });
+      return changed ? next : prev;
+    });
+  }, [categories]);
 
   const stats = useMemo(() => {
     let err = 0, warn = 0, ok = 0, edited = 0;
@@ -272,48 +309,83 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
   };
 
   const handleSaveAll = async () => {
+    if (isSaving) return;
     if (stats.err > 0) { toast.error(`Còn ${stats.err} sản phẩm có lỗi.`); return; }
     if (stats.total === 0) { toast.error("Không còn sản phẩm nào để lưu."); return; }
 
+    toast.loading("Đang lưu import...", { id: PRODUCT_IMPORT_SAVE_TOAST_ID });
+    setIsSaving(true);
+
     const usedCodes = new Set<string>([...existingCodes]);
     let createdProducts = 0, createdVariants = 0, createdCategories = 0;
+    let catCache: Category[] = [...categories];
 
-    for (const draft of activeDrafts) {
-      let category = categories.find((c) => c.name.trim().toLowerCase() === draft.category.trim().toLowerCase());
-      if (!category) {
-        category = await categoryService.create({ name: draft.category.trim(), description: "Tạo từ import Excel" });
-        createdCategories += 1;
-      }
-      const productCode = draft.code.trim() || generateProductCode(draft.name, draft.category, usedCodes);
-      usedCodes.add(productCode);
-      const created = await productService.create({
-        code: productCode, name: draft.name.trim(),
-        categoryId: category.id, categoryName: category.name,
-        image: "", active: draft.variants.some((v) => v.active),
-        type: draft.variants.length > 1 ? "multi" : "single",
-        variants: [],
-      });
-      createdProducts += 1;
-      for (let index = 0; index < draft.variants.length; index += 1) {
-        const variant = draft.variants[index];
-        const variantCode = variant.code.trim() || `${productCode}-${String(index + 1).padStart(2, "0")}`;
-        await productService.addVariant(created.id, {
-          code: variantCode, name: variant.name.trim(),
-          sellUnit: variant.sellUnit.trim(),
-          importUnit: (variant.importUnit || variant.sellUnit).trim(),
-          piecesPerImportUnit: variant.piecesPerImportUnit || 1,
-          sellPrice: variant.sellPrice, costPrice: variant.costPrice,
-          stock: variant.stock, minStock: variant.minStock,
-          expiryDays: variant.expiryDays, isDefault: index === 0,
-          isSellable: variant.isSellable !== false && !variant.isSellableInvalid,
+    const refreshCategoryCache = async () => {
+      const refreshed = await categoryService.list({ includeInactive: true });
+      catCache = refreshed.items;
+    };
+
+    try {
+      for (const draft of activeDrafts) {
+        let category = findCategoryByImportedName(catCache, draft.category);
+        if (!category) {
+          try {
+            const created = await categoryService.create({
+              name: draft.category.trim(),
+              description: "Tạo từ import Excel",
+            });
+            catCache.push(created);
+            category = created;
+            createdCategories += 1;
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            await refreshCategoryCache();
+            category = findCategoryByImportedName(catCache, draft.category);
+            if (!category) {
+              toast.error(`Không thể tạo hoặc tìm danh mục "${draft.category.trim()}". ${msg}`, { id: PRODUCT_IMPORT_SAVE_TOAST_ID });
+              return;
+            }
+          }
+        }
+        if (!category.active) {
+          toast.error(`Danh mục "${category.name}" đang ngưng hoạt động — không thể import (dòng ${draft.sourceRow}).`, { id: PRODUCT_IMPORT_SAVE_TOAST_ID });
+          return;
+        }
+        const productCode = draft.code.trim()
+          ? draft.code.trim().toUpperCase()
+          : generateProductCode(draft.name, draft.category, usedCodes);
+        const upper = productCode.toUpperCase();
+        if (usedCodes.has(upper)) {
+          toast.error(`Mã sản phẩm "${productCode}" trùng trong phiên lưu — có thể vừa được tạo hoặc trùng dòng khác (Excel #${draft.sourceRow}).`, { id: PRODUCT_IMPORT_SAVE_TOAST_ID });
+          return;
+        }
+        usedCodes.add(upper);
+
+        const variantsPayload = buildVariantsForProductImportCreate(productCode, draft.name, draft.variants);
+
+        await productService.create({
+          code: productCode,
+          name: draft.name.trim(),
+          categoryId: category.id,
+          categoryName: category.name,
+          image: "",
+          active: draft.variants.some((v) => v.active),
+          type: draft.variants.length > 1 ? "multi" : "single",
+          variants: variantsPayload,
         });
-        createdVariants += 1;
+        createdProducts += 1;
+        createdVariants += draft.variants.length;
       }
-    }
 
-    toast.success(`Đã tạo ${createdProducts} sản phẩm · ${createdVariants} phân loại${createdCategories ? ` · ${createdCategories} danh mục mới` : ""}.`);
-    onSaved();
-    navigate("/admin/products", { replace: true });
+      toast.success(`Đã tạo ${createdProducts} sản phẩm · ${createdVariants} phân loại${createdCategories ? ` · ${createdCategories} danh mục mới` : ""}.`, { id: PRODUCT_IMPORT_SAVE_TOAST_ID });
+      onSaved();
+      navigate("/admin/products", { replace: true });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Đã tạo ${createdProducts}/${stats.total} sản phẩm trước khi lỗi. ${msg}`, { id: PRODUCT_IMPORT_SAVE_TOAST_ID });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const Chip = ({ active, tone, label, count, onClick }: { active: boolean; tone: "all" | "error" | "warning" | "ok" | "edited"; label: string; count: number; onClick: () => void }) => (
@@ -345,19 +417,27 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
         description="Sửa lỗi từng sản phẩm/phân loại, revalidate rồi lưu hàng loạt."
         actions={
           <div className="flex flex-wrap gap-2">
-            <button onClick={collapseAll} className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">Thu gọn tất cả</button>
-            <button onClick={expandErrors} className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">Mở nhóm lỗi</button>
-            <button onClick={handleRevalidate} className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">
+            <button onClick={collapseAll} disabled={isSaving} className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50">Thu gọn tất cả</button>
+            <button onClick={expandErrors} disabled={isSaving} className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50">Mở nhóm lỗi</button>
+            <button onClick={handleRevalidate} disabled={isSaving} className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50">
               <RefreshCw className="h-3.5 w-3.5" /> Revalidate
             </button>
-            <button onClick={onCancel} className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">Hủy import</button>
+            <button onClick={onCancel} disabled={isSaving} className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50">Hủy import</button>
             <button
               onClick={handleSaveAll}
-              disabled={stats.err > 0 || stats.total === 0}
+              disabled={stats.err > 0 || stats.total === 0 || isSaving}
               title={stats.err > 0 ? `Còn ${stats.err} sản phẩm lỗi` : ""}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Save className="h-3.5 w-3.5" /> Lưu import ({stats.total})
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Đang lưu… ({stats.total})
+                </>
+              ) : (
+                <>
+                  <Save className="h-3.5 w-3.5" /> Lưu import ({stats.total})
+                </>
+              )}
             </button>
           </div>
         }
@@ -414,6 +494,7 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
           const variantErr = issue.variants.reduce((s, v) => s + v.errors.length, 0);
           const variantWarn = issue.variants.reduce((s, v) => s + v.warnings.length, 0);
           const issueCount = issue.errors.length + issue.warnings.length + variantErr + variantWarn;
+          const catHit = draft.category.trim() ? findCategoryByImportedName(categories, draft.category) : null;
 
           return (
             <div
@@ -428,8 +509,9 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
               {/* Header */}
               <button
                 type="button"
+                disabled={isSaving}
                 onClick={() => setExpanded((p) => ({ ...p, [draft.key]: !isOpen }))}
-                className="flex w-full items-center gap-3 border-b bg-muted/30 px-3 py-2 text-left hover:bg-muted/50"
+                className="flex w-full items-center gap-3 border-b bg-muted/30 px-3 py-2 text-left hover:bg-muted/50 disabled:pointer-events-none disabled:opacity-60"
               >
                 {isOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
                 <Package className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -456,8 +538,15 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
                 {draft.edited && <span className="rounded-full bg-info-soft px-2 py-0.5 text-[10px] font-medium text-info">Đã sửa</span>}
                 <span
                   role="button"
-                  onClick={(e) => { e.stopPropagation(); updateDraft(draft.key, { removed: true }); }}
-                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-danger"
+                  onClick={(e) => {
+                    if (isSaving) return;
+                    e.stopPropagation();
+                    updateDraft(draft.key, { removed: true });
+                  }}
+                  className={cn(
+                    "rounded p-1 text-muted-foreground hover:bg-muted hover:text-danger",
+                    isSaving && "pointer-events-none opacity-50",
+                  )}
                   title="Bỏ khỏi import"
                 >
                   <Trash2 className="h-3 w-3" />
@@ -490,11 +579,23 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
                       <select
                         value={draft.category}
                         onChange={(e) => updateDraft(draft.key, { category: e.target.value })}
-                        className={cn("mt-0.5 h-7 w-full rounded-md border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring", !draft.category.trim() && "border-danger")}
+                        className={cn(
+                          "mt-0.5 h-7 w-full rounded-md border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring",
+                          (!draft.category.trim() || (catHit && !catHit.active)) && "border-danger",
+                        )}
                       >
                         <option value="">Chọn danh mục</option>
-                        {categories.filter((c) => c.active).map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                        {draft.category && !categories.some((c) => c.name === draft.category) && <option value={draft.category}>{draft.category} (mới)</option>}
+                        {categories.filter((c) => c.active).map((c) => (
+                          <option key={c.id} value={c.name}>{c.name}</option>
+                        ))}
+                        {catHit && !catHit.active && (
+                          <option key={`inactive-${catHit.id}`} value={catHit.name} disabled>
+                            {catHit.name} (đã ngưng hoạt động)
+                          </option>
+                        )}
+                        {draft.category.trim() && isImportedCategoryNew(categories, draft.category) && (
+                          <option value={draft.category.trim()}>{draft.category.trim()} (mới)</option>
+                        )}
                       </select>
                     </div>
                   </div>
@@ -562,7 +663,7 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
                                 </td>
                                 <td className="px-1 py-1.5 text-center">
                                   {draft.variants.length > 1 && (
-                                    <button onClick={() => removeVariant(draft.key, index)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-danger"><Trash2 className="h-3 w-3" /></button>
+                                    <button type="button" disabled={isSaving} onClick={() => removeVariant(draft.key, index)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-danger disabled:opacity-50"><Trash2 className="h-3 w-3" /></button>
                                   )}
                                 </td>
                               </tr>
@@ -585,7 +686,7 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
 
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] text-muted-foreground">{draft.variants.length} phân loại</span>
-                    <button onClick={() => addVariant(draft.key)} className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline">
+                    <button onClick={() => addVariant(draft.key)} disabled={isSaving} className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline disabled:pointer-events-none disabled:opacity-50">
                       <Plus className="h-3 w-3" /> Thêm phân loại
                     </button>
                   </div>
@@ -608,11 +709,19 @@ export function ProductImportReview({ filename, rows, onCancel, onSaved }: Props
           <strong>{stats.total}</strong> SP · <span className="text-success">{stats.ok} OK</span> · <span className="text-warning">{stats.warn} cảnh báo</span> · <span className="text-danger">{stats.err} lỗi</span>
         </div>
         <div className="ml-auto flex gap-2">
-          <button onClick={handleRevalidate} className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
+          <button onClick={handleRevalidate} disabled={isSaving} className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50">
             <RefreshCw className="h-3.5 w-3.5" /> Revalidate
           </button>
-          <button onClick={handleSaveAll} disabled={stats.err > 0 || stats.total === 0} title={stats.err > 0 ? `Còn ${stats.err} lỗi blocking` : ""} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50">
-            <Save className="h-3.5 w-3.5" /> Lưu import
+          <button onClick={handleSaveAll} disabled={stats.err > 0 || stats.total === 0 || isSaving} title={stats.err > 0 ? `Còn ${stats.err} lỗi blocking` : ""} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50">
+            {isSaving ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Đang lưu…
+              </>
+            ) : (
+              <>
+                <Save className="h-3.5 w-3.5" /> Lưu import
+              </>
+            )}
           </button>
         </div>
       </div>

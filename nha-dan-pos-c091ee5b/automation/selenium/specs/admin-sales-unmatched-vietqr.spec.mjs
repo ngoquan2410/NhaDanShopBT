@@ -46,7 +46,8 @@ export default {
     await driver.sleep(400);
 
     const qrBtnXp = '//button[contains(normalize-space(.),"Mở QR cho khách quét")]';
-    const qrBtn = await driver.wait(until.elementLocated(By.xpath(qrBtnXp)), 28000);
+    const qrBtn = await driver.wait(until.elementLocated(By.xpath(qrBtnXp)), 45000);
+    await driver.executeScript("arguments[0].scrollIntoView({block:'center'});", qrBtn);
     await driver.wait(until.elementIsVisible(qrBtn), 8000);
     await qrBtn.click();
 

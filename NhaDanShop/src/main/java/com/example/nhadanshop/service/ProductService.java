@@ -42,6 +42,8 @@ public class ProductService {
     @org.springframework.context.annotation.Lazy
     private final ProductVariantService variantService;
 
+    private final StockedCatalogGuardService stockedCatalogGuardService;
+
     public List<ProductResponse> findAll() {
         return toResponsesWithVariants(productRepository.findByActiveTrue());
     }
@@ -193,7 +195,11 @@ public class ProductService {
         p.setCode(newCode);
         p.setName(req.name());
         p.setCategory(category);
-        p.setActive(req.active() == null ? p.getActive() : req.active());
+        boolean newActive = req.active() == null ? p.getActive() : req.active();
+        if (!newActive && Boolean.TRUE.equals(p.getActive())) {
+            stockedCatalogGuardService.assertProductMayArchiveOrDeactivate(p);
+        }
+        p.setActive(newActive);
         p.setImageUrl(req.imageUrl());
         p.setUpdatedAt(LocalDateTime.now());
 
@@ -216,7 +222,13 @@ public class ProductService {
                     .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy category ID: " + req.categoryId()));
             p.setCategory(category);
         }
-        if (req.active() != null) p.setActive(req.active());
+        if (req.active() != null) {
+            boolean turningOff = Boolean.FALSE.equals(req.active()) && Boolean.TRUE.equals(p.getActive());
+            if (turningOff) {
+                stockedCatalogGuardService.assertProductMayArchiveOrDeactivate(p);
+            }
+            p.setActive(req.active());
+        }
         if (req.imageUrl() != null) p.setImageUrl(req.imageUrl());
         if (req.productType() != null && !req.productType().isBlank()) {
             try {
@@ -231,6 +243,7 @@ public class ProductService {
     public void deleteOrArchive(Long id) {
         Product p = findEntityById(id);
         if (isProductStructurallyUsed(id)) {
+            stockedCatalogGuardService.assertProductMayArchiveOrDeactivate(p);
             p.setActive(false);
             p.setUpdatedAt(LocalDateTime.now());
             productRepository.save(p);

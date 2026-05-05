@@ -1,3 +1,5 @@
+import { dispatchSessionExpired } from "@/lib/sessionExpiryEvents";
+
 type AuthSession = {
   accessToken: string;
   refreshToken?: string | null;
@@ -78,6 +80,10 @@ async function ensureSession(): Promise<AuthSession> {
   throw new Error("Bạn cần đăng nhập tại /login để gọi API backend");
 }
 
+function notifySessionLikelyExpired() {
+  dispatchSessionExpired({ nextPath: window.location.pathname + window.location.search });
+}
+
 export async function adminFetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   let session = await ensureSession();
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -102,10 +108,85 @@ export async function adminFetchJson<T>(path: string, init?: RequestInit): Promi
       continue;
     }
     writeSession(null);
+    notifySessionLikelyExpired();
     throw new Error("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại tại /login");
   }
 
   throw new Error("Không thể xác thực admin để gọi API backend");
+}
+
+/** Download binary (e.g. Excel) with same refresh + 401 handling as {@link adminFetchJson}. */
+export async function downloadAdminBlob(path: string, fallbackFilename: string): Promise<void> {
+  let session = await ensureSession();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const res = await fetch(path, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+        Accept: "*/*",
+      },
+    });
+    if (res.status !== 401 && res.status !== 403) {
+      if (!res.ok) {
+        const data = await parseJsonSafe(res);
+        throw new Error(errorMessage(data, res.status));
+      }
+      const blob = await res.blob();
+      let name = fallbackFilename;
+      const cd = res.headers.get("Content-Disposition");
+      if (cd) {
+        const m = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)/i);
+        if (m?.[1]) name = decodeURIComponent(m[1].replace(/["']/g, ""));
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    const refreshed = await refreshSession(session);
+    if (refreshed) {
+      session = refreshed;
+      continue;
+    }
+    writeSession(null);
+    notifySessionLikelyExpired();
+    throw new Error("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại tại /login");
+  }
+  throw new Error("Không thể tải file từ máy chủ");
+}
+
+/** Multipart image upload for {@code POST /api/images/upload}. */
+export async function adminUploadImage(file: File): Promise<{ url: string }> {
+  let session = await ensureSession();
+  const body = new FormData();
+  body.append("file", file);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const res = await fetch("/api/images/upload", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      body,
+    });
+    if (res.status !== 401 && res.status !== 403) {
+      const data = await parseJsonSafe(res);
+      if (!res.ok) throw new Error(errorMessage(data, res.status));
+      const url = data?.url != null ? String(data.url) : "";
+      if (!url) throw new Error("Máy chủ không trả về URL ảnh");
+      return { url };
+    }
+    const refreshed = await refreshSession(session);
+    if (refreshed) {
+      session = refreshed;
+      continue;
+    }
+    writeSession(null);
+    notifySessionLikelyExpired();
+    throw new Error("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại tại /login");
+  }
+  throw new Error("Không thể upload ảnh");
 }
 
 export function clearAdminSession() {

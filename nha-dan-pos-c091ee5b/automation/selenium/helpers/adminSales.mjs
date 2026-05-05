@@ -104,30 +104,27 @@ export function pendingOpenFromDashboardSlice(pendingOrdersPagePayload) {
 
 /**
  * @param {unknown[]} projections from `GET /api/inventory/projections`
+ * @param {{ minAvail?: number }} [opts] default `minAvail: 1` — use `2` for POS qty-stress paths under `AUTOMATION_NO_SKIP`.
  */
-export function pickSellableVariantScan(projections) {
+export function pickSellableVariantScan(projections, opts = {}) {
+  const minAvail = typeof opts.minAvail === "number" && opts.minAvail > 0 ? opts.minAvail : 1;
   for (const raw of projections) {
     /** @type {Record<string, unknown>} */
     const p =
       typeof raw === "object" && raw !== null ? /** @type {Record<string, unknown>} */ (raw) : {};
 
+    // COMBO rows use sellableQty=null (virtual stock). Barcode/POS/guest-quote flows need a SINGLE SKU.
+    if (p.sellableQty === null || p.sellableQty === undefined) continue;
+
     const code = String(p.variantCode ?? "").trim();
     const pid = Number(p.productId ?? 0);
     const vid = Number(p.variantId ?? 0);
-    const avail = Number(p.available ?? p.onHand ?? 0);
+    const avail = Number(p.sellableQty ?? p.available ?? p.onHand ?? 0);
 
-    let batchId = null;
-    const batches = Array.isArray(p.byBatch) ? p.byBatch : [];
-    const firstBatch = batches[0];
-    if (firstBatch && typeof firstBatch === "object" && firstBatch !== null) {
-      const bid = /** @type {Record<string, unknown>} */ (firstBatch).batchId;
-      const qty = Number(/** @type {Record<string, unknown>} */ (firstBatch).qty ?? 0);
-      if (bid != null && Number(bid) > 0 && qty > 0) {
-        batchId = Number(bid);
-      }
-    }
+    /** Prefer server FEFO — avoids combo+batchId rejection and stale first-batch coupling on storefront quote. */
+    const batchId = null;
 
-    if (code && vid > 0 && pid > 0 && avail > 0) {
+    if (code && vid > 0 && pid > 0 && avail >= minAvail) {
       return { productId: pid, variantId: vid, variantCode: code, batchId };
     }
   }
@@ -177,7 +174,7 @@ export async function createGuestPendingViaQuote(api, projectionPick, suffix) {
       variantId: projectionPick.variantId,
       quantity: 1,
       discountPercent: 0,
-      batchId: projectionPick.batchId ?? null,
+      batchId: null,
       rewardLine: false,
     };
 

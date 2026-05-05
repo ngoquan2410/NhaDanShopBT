@@ -108,6 +108,9 @@ export class LocalGoodsReceiptAdapter implements GoodsReceiptService {
   async confirm(_id: ID): Promise<CanonicalGoodsReceipt> {
     throw new Error("confirm: not implemented in FE skeleton — BE will own batch creation");
   }
+  async voidReceipt(_id: ID, _body?: { reason?: string; voidedBy?: string }): Promise<CanonicalGoodsReceipt> {
+    throw new Error("voidReceipt: use backend adapter — mock receipts cannot void");
+  }
   async remove(id: ID): Promise<void> {
     this.removedIds.add(id);
   }

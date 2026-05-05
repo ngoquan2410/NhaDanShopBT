@@ -1,5 +1,7 @@
 package com.example.nhadanshop.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
@@ -40,6 +42,7 @@ public record InventoryStockReportRow(
         /** Tồn cuối kỳ = openingStock + totalReceived - totalSold */
         int closingStock,
         /** Giá vốn tồn kho cuối kỳ */
+        @JsonProperty("closingValue")
         BigDecimal closingStockValue,
         /** [Sprint 0 - P0-4] Ngưỡng tồn tối thiểu của variant — cảnh báo khi closingStock <= này */
         Integer minStockQty,

@@ -25,6 +25,7 @@ public class ProductVariantService {
 
     private final ProductVariantRepository variantRepo;
     private final ProductRepository productRepo;
+    private final StockedCatalogGuardService stockedCatalogGuardService;
 
     // ── Query ─────────────────────────────────────────────────────────────────
 
@@ -167,6 +168,9 @@ public class ProductVariantService {
         if (req.isDefault() != null) v.setIsDefault(req.isDefault());
         if (req.imageUrl() != null) v.setImageUrl(req.imageUrl());
         if (req.conversionNote() != null) v.setConversionNote(req.conversionNote());
+        if (req.active() != null && Boolean.FALSE.equals(req.active()) && Boolean.TRUE.equals(v.getActive())) {
+            stockedCatalogGuardService.assertVariantMayArchiveOrDeactivate(v);
+        }
         if (req.active() != null) v.setActive(req.active());
         if (req.isSellable() != null) v.setIsSellable(req.isSellable());
         v.setUpdatedAt(LocalDateTime.now());
@@ -202,6 +206,9 @@ public class ProductVariantService {
         if (p.isDefault() != null) v.setIsDefault(p.isDefault());
         if (p.imageUrl() != null) v.setImageUrl(p.imageUrl().isEmpty() ? null : p.imageUrl());
         if (p.conversionNote() != null) v.setConversionNote(p.conversionNote().isEmpty() ? null : p.conversionNote());
+        if (p.active() != null && Boolean.FALSE.equals(p.active()) && Boolean.TRUE.equals(v.getActive())) {
+            stockedCatalogGuardService.assertVariantMayArchiveOrDeactivate(v);
+        }
         if (p.active() != null) v.setActive(p.active());
         if (p.isSellable() != null) v.setIsSellable(p.isSellable());
         v.setUpdatedAt(LocalDateTime.now());
@@ -235,6 +242,7 @@ public class ProductVariantService {
         }
 
         boolean used = variantRepo.isVariantStructurallyUsed(variantId);
+        stockedCatalogGuardService.assertVariantMayArchiveOrDeactivate(v);
         if (used) {
             v.setActive(false);
             v.setUpdatedAt(LocalDateTime.now());
