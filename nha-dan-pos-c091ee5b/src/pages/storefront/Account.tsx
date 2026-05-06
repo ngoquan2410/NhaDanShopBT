@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { formatVND, formatDateTime } from "@/lib/format";
-import { LogOut, Save, Loader2, User as UserIcon, Coins } from "lucide-react";
+import { LogOut, Save, Loader2, User as UserIcon, Coins, Clock } from "lucide-react";
 import { TotpSettingsPanel } from "@/components/auth/TotpSettingsPanel";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/admin-auth";
 import { accountApi, type AccountMe, type AccountOrder, type PointHistoryRow } from "@/services/account/accountApi";
+import type { PendingOrder } from "@/services/types";
 
 export default function AccountPage() {
   const auth = useAuth();
@@ -17,17 +18,19 @@ export default function AccountPage() {
   const [address, setAddress] = useState("");
   const [saving, setSaving] = useState(false);
   const [orders, setOrders] = useState<AccountOrder[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [history, setHistory] = useState<PointHistoryRow[]>([]);
 
   useEffect(() => {
     if (!auth.session) return;
     let alive = true;
     setLoading(true);
-    Promise.all([accountApi.me(), accountApi.orders(), accountApi.history()])
-      .then(([m, o, h]) => {
+    Promise.all([accountApi.me(), accountApi.orders(), accountApi.pendingOrders(), accountApi.history()])
+      .then(([m, o, p, h]) => {
         if (!alive) return;
         setMe(m);
         setOrders(o);
+        setPendingOrders(p);
         setHistory(h);
         setName(m.customerName ?? m.fullName ?? "");
         setPhone(m.phone ?? "");
@@ -127,6 +130,29 @@ export default function AccountPage() {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="bg-card rounded-lg border">
+        <div className="px-4 py-3 border-b flex items-center gap-2"><Clock className="h-4 w-4 text-warning" /><h2 className="font-semibold text-sm">Đơn chờ thanh toán</h2></div>
+        {pendingOrders.length === 0 ? <div className="px-4 py-6 text-center text-xs text-muted-foreground">Không có đơn chờ thanh toán.</div> : (
+          <div className="divide-y">
+            {pendingOrders.slice(0, 5).map((o) => (
+              <div key={o.id} className="px-4 py-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-mono text-xs font-medium truncate">{o.code}</p>
+                  <p className="text-xs text-muted-foreground">{formatDateTime(o.createdAt)} · {o.paymentMethod}</p>
+                  {o.expiresAt && <p className="text-[11px] text-warning">Hết hạn {formatDateTime(o.expiresAt)}</p>}
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="font-bold text-sm">{formatVND(o.pricingBreakdownSnapshot.total)}</p>
+                  <Link to={`/pending-payment/${o.id}`} className="mt-1 inline-flex items-center justify-center h-8 px-3 rounded-full bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary-hover">
+                    Thanh toán tiếp
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="bg-card rounded-lg border">

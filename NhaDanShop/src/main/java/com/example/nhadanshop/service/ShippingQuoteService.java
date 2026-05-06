@@ -66,7 +66,7 @@ public class ShippingQuoteService {
                         height,
                         insuranceValue
                 );
-                BigDecimal fee = applyFreeShip(carrierQuote.fee(), request.subtotal(), address.provinceCode(), cfg);
+                BigDecimal fee = carrierQuote.fee().setScale(0, RoundingMode.HALF_UP);
                 result = new ShippingQuoteResponse(
                         "quoted",
                         "carrier_api",
@@ -74,7 +74,7 @@ public class ShippingQuoteService {
                         fee,
                         new ShippingQuoteResponse.EtaDaysDto(carrierQuote.etaDays().min(), carrierQuote.etaDays().max()),
                         null,
-                        isFreeShip(request.subtotal(), address.provinceCode(), cfg),
+                        false,
                         null,
                         null,
                         carrierQuote.latencyMs(),
@@ -161,18 +161,14 @@ public class ShippingQuoteService {
         int weight = request.weightGrams() != null ? request.weightGrams() : cfg.parcelDefaults().weightGrams();
         int surcharge = Math.max(0, (int) Math.ceil((weight - 1000) / 500.0)) * 3000;
         BigDecimal fee = BigDecimal.valueOf(rule.baseFee() + surcharge);
-        boolean freeShipApplied = isFreeShip(request.subtotal(), request.address().provinceCode(), cfg);
-        if (freeShipApplied) {
-            fee = BigDecimal.ZERO;
-        }
         return new ShippingQuoteResponse(
                 "quoted",
                 "zone_fallback",
                 rule.zoneCode(),
-                fee,
+                fee.setScale(0, RoundingMode.HALF_UP),
                 new ShippingQuoteResponse.EtaDaysDto(rule.etaDays().min(), rule.etaDays().max()),
                 null,
-                freeShipApplied,
+                false,
                 true,
                 reason,
                 latencyMs,
@@ -211,18 +207,6 @@ public class ShippingQuoteService {
             return p.declaredValueFixed().min(BigDecimal.valueOf(5_000_000L));
         }
         return BigDecimal.ZERO;
-    }
-
-    private BigDecimal applyFreeShip(BigDecimal fee, BigDecimal subtotal, String provinceCode,
-            ShippingSettingsService.ResolvedShippingQuoteConfig cfg) {
-        return isFreeShip(subtotal, provinceCode, cfg) ? BigDecimal.ZERO : fee.setScale(0, RoundingMode.HALF_UP);
-    }
-
-    private boolean isFreeShip(BigDecimal subtotal, String provinceCode,
-            ShippingSettingsService.ResolvedShippingQuoteConfig cfg) {
-        ShippingSettingsService.ResolvedZoneRule zone = pickZone(provinceCode, cfg.zoneRules());
-        return zone != null && zone.freeShipThreshold() != null
-                && subtotal.compareTo(BigDecimal.valueOf(zone.freeShipThreshold())) >= 0;
     }
 
     private ShippingSettingsService.ResolvedZoneRule pickZone(

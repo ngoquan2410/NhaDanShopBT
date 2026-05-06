@@ -215,7 +215,7 @@ export function validatePromotion(p: Promotion): ValidationResult {
       }
       if (p.giftItems.length === 0) errors.giftItems = "Cần ít nhất 1 sản phẩm quà";
       if (p.giftItems.some((g) => !(g.quantity > 0))) errors.giftItems = "Số lượng quà phải lớn hơn 0";
-      if (p.giftStockLimit != null && p.giftStockLimit < 0) errors.giftStockLimit = "Tồn kho quà không được âm";
+      if (p.giftStockLimit != null && p.giftStockLimit < 0) errors.giftStockLimit = "Giới hạn số lần tặng không được âm";
       break;
     case "free-shipping":
       if (p.minOrder != null && p.minOrder < 0) errors.minOrder = "Đơn tối thiểu không được âm";
@@ -250,7 +250,7 @@ export function formatPromotionSummary(p: Promotion): string {
       if (p.triggerType === "min-order") trigger = `Đơn từ ${formatVND(p.triggerValue)}`;
       else if (p.triggerType === "buy-product") trigger = `Mua ${p.triggerProductName ?? "?"}`;
       else trigger = `Mua ${p.triggerValue} ${p.triggerProductName ?? "?"}`;
-      const limit = p.giftStockLimit ? ` (còn ${p.giftStockLimit} quà)` : "";
+      const limit = p.giftStockLimit ? ` (tối đa ${p.giftStockLimit} lần tặng)` : "";
       return `${trigger} tặng ${gifts}${limit}`;
     }
     case "free-shipping": {

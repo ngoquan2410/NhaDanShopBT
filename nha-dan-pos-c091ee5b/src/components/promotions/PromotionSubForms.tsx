@@ -182,7 +182,7 @@ export function GiftForm({ value, onChange, validation }: { value: GiftPromotion
         error={e.giftItems}
       />
 
-      <Field label="Giới hạn tồn kho quà" error={e.giftStockLimit} hint="Tùy chọn — để trống nếu không giới hạn">
+      <Field label="Giới hạn số lần tặng" error={e.giftStockLimit} hint="Tùy chọn — để trống nếu không giới hạn">
         {numberInput(value.giftStockLimit, (n) => onChange({ ...value, giftStockLimit: n }), { placeholder: "Không giới hạn" })}
       </Field>
     </div>

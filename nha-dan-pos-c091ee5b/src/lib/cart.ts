@@ -18,22 +18,23 @@ export interface CartItem extends CartLine {
 
 interface CartState {
   items: CartItem[];
+  selectedPromotionId?: string | null;
 }
 
 function loadInitial(): CartState {
   if (typeof window === "undefined") return { items: [] };
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { items: [] };
+    if (!raw) return { items: [], selectedPromotionId: null };
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.items)) return { items: [] };
     const valid = parsed.items.filter(isBackendCartLine);
     if (valid.length !== parsed.items.length) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ items: valid }));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ items: valid, selectedPromotionId: parsed.selectedPromotionId ?? null }));
     }
-    return { items: valid };
+    return { items: valid, selectedPromotionId: typeof parsed.selectedPromotionId === "string" ? parsed.selectedPromotionId : null };
   } catch {
-    return { items: [] };
+    return { items: [], selectedPromotionId: null };
   }
 }
 
@@ -82,6 +83,10 @@ export function getCartSnapshot(): CartItem[] {
   return state.items;
 }
 
+export function getSelectedPromotionId(): string | null {
+  return state.selectedPromotionId ?? null;
+}
+
 export const cartActions = {
   add(input: Omit<CartItem, "id" | "lineSubtotal">) {
     if (!isBackendCartLine({ ...input, id: "check", lineSubtotal: 0 })) {
@@ -93,6 +98,7 @@ export const cartActions = {
       );
       if (existing) {
         return {
+          ...s,
           items: s.items.map((i) =>
             i === existing
               ? recompute({ ...i, qty: Math.min((i.stock || Infinity), i.qty + input.qty) })
@@ -101,24 +107,36 @@ export const cartActions = {
         };
       }
       const item: CartItem = recompute({ ...input, id: uid(), lineSubtotal: 0 });
-      return { items: [...s.items, item] };
+      return { ...s, items: [...s.items, item] };
     });
   },
   setQty(id: string, qty: number) {
     setState((s) => ({
+      ...s,
       items: s.items.map((i) =>
         i.id === id ? recompute({ ...i, qty: Math.max(1, qty) }) : i,
       ),
     }));
   },
   remove(id: string) {
-    setState((s) => ({ items: s.items.filter((i) => i.id !== id) }));
+    setState((s) => ({ ...s, items: s.items.filter((i) => i.id !== id) }));
   },
   clear() {
-    setState(() => ({ items: [] }));
+    setState(() => ({ items: [], selectedPromotionId: null }));
+  },
+  replace(items: CartItem[]) {
+    const valid = items.filter(isBackendCartLine);
+    setState((s) => ({ ...s, items: valid.map(recompute) }));
+  },
+  setSelectedPromotionId(promotionId: string | null) {
+    setState((s) => ({ ...s, selectedPromotionId: promotionId }));
   },
 };
 
 export function useCart(): CartItem[] {
   return useSyncExternalStore(subscribe, () => state.items, () => state.items);
+}
+
+export function useSelectedPromotionId(): string | null {
+  return useSyncExternalStore(subscribe, () => state.selectedPromotionId ?? null, () => state.selectedPromotionId ?? null);
 }

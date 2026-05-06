@@ -15,12 +15,13 @@ import {
   Gift,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useCart, cartActions, type CartItem } from "@/lib/cart";
+import { useCart, useSelectedPromotionId, cartActions, type CartItem } from "@/lib/cart";
 import { promotions } from "@/services";
 import type { CartContext, EvaluatedPromotion } from "@/services/types";
 
 export default function CartPage() {
   const items = useCart();
+  const persistedPromoId = useSelectedPromotionId();
 
   const subtotal = useMemo(
     () => items.reduce((s, i) => s + i.lineSubtotal, 0),
@@ -30,7 +31,6 @@ export default function CartPage() {
   // Evaluate ALL promotions so users can pick the one they want instead of being
   // locked into the auto-best. Voucher discounts apply later on Checkout.
   const [allPromos, setAllPromos] = useState<EvaluatedPromotion[]>([]);
-  const [chosenPromoId, setChosenPromoId] = useState<string | null>(null);
   useEffect(() => {
     let cancel = false;
     if (!items.length) {
@@ -58,20 +58,28 @@ export default function CartPage() {
     [eligiblePromos],
   );
   const bestPromo: EvaluatedPromotion | null = useMemo(() => {
-    if (chosenPromoId) {
-      return sortedEligible.find((p) => p.promotionId === chosenPromoId) ?? sortedEligible[0] ?? null;
+    if (persistedPromoId) {
+      return sortedEligible.find((p) => p.promotionId === persistedPromoId) ?? sortedEligible[0] ?? null;
     }
     return sortedEligible[0] ?? null;
-  }, [sortedEligible, chosenPromoId]);
+  }, [sortedEligible, persistedPromoId]);
+
+  useEffect(() => {
+    if (!sortedEligible.length) {
+      if (persistedPromoId) cartActions.setSelectedPromotionId(null);
+      return;
+    }
+    if (!persistedPromoId || !sortedEligible.some((p) => p.promotionId === persistedPromoId)) {
+      cartActions.setSelectedPromotionId(sortedEligible[0].promotionId);
+    }
+  }, [persistedPromoId, sortedEligible]);
 
   const promoDiscount = bestPromo?.discountAmount ?? 0;
-  const baseShipping = subtotal >= 200000 ? 0 : 20000;
   const promoShipFree = bestPromo?.type === "free_shipping";
-  const shippingFee = promoShipFree ? 0 : baseShipping;
-  const total = Math.max(0, subtotal - promoDiscount + shippingFee);
+  const total = Math.max(0, subtotal - promoDiscount);
   const hasStockIssue = items.some((i) => i.qty > i.stock);
   const hasInvalidBackendLine = items.some((i) => i.catalogSource !== "backend" || i.schemaVersion !== 2 || !/^\d+$/.test(String(i.productId)) || !/^\d+$/.test(String(i.variantId)));
-  const freeShippingGap = Math.max(0, 200000 - subtotal);
+  const freeShippingGap = 0;
 
   const removeItem = (id: string, name: string) => {
     cartActions.remove(id);
@@ -109,7 +117,7 @@ export default function CartPage() {
         </div>
 
         {/* Free shipping progress */}
-        {freeShippingGap > 0 && !promoShipFree && (
+        {false && promoShipFree && (
           <div className="mb-5 p-3 rounded-xl bg-primary-soft border border-primary/20 flex items-center gap-3">
             <Truck className="h-4 w-4 text-primary shrink-0" />
             <div className="flex-1 min-w-0">
@@ -150,7 +158,7 @@ export default function CartPage() {
                       <button
                         key={p.promotionId}
                         type="button"
-                        onClick={() => setChosenPromoId(p.promotionId)}
+                        onClick={() => cartActions.setSelectedPromotionId(p.promotionId)}
                         className={`w-full text-left p-2.5 rounded-xl border-2 transition-all ${
                           selected ? "border-success bg-card" : "border-transparent bg-card/60 hover:border-success/40"
                         }`}
@@ -206,10 +214,10 @@ export default function CartPage() {
                     <span className="font-semibold">−{formatVND(promoDiscount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Phí giao hàng (tạm tính)</span>
-                  <span className="font-semibold">
-                    {shippingFee === 0 ? <span className="text-success">Miễn phí</span> : formatVND(shippingFee)}
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">Phí giao hàng</span>
+                  <span className="font-semibold text-right">
+                    {promoShipFree ? <span className="text-success">Miễn phí</span> : "Tính ở bước thanh toán"}
                   </span>
                 </div>
                 <div className="border-t pt-3 mt-3 flex justify-between items-baseline">

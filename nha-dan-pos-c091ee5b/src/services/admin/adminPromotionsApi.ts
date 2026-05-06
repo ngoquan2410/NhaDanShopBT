@@ -152,17 +152,24 @@ export function adminPromotionRowToUi(row: AdminPromotionRow): Promotion {
       return {
         ...base,
         type: "buy-x-get-y",
-        buyItems: [{ productId: row.productIds[0]?.toString() ?? "", productName: row.productNames[0] ?? "", quantity: row.buyQty ?? 1 }],
+        buyItems: row.productIds.length > 0
+          ? row.productIds.map((id, i) => ({ productId: id.toString(), productName: row.productNames[i] ?? "", quantity: row.buyQty ?? 1 }))
+          : [{ productId: "", productName: "", quantity: row.buyQty ?? 1 }],
         getItems: [{ productId: row.getProductId?.toString() ?? "", productName: row.getProductName ?? "", quantity: row.getQty ?? 1 }],
         mode: "different",
         repeatable: true,
       };
     case "gift":
+      const triggerType: "min-order" | "buy-product" | "buy-quantity" = row.minOrderValue > 0
+        ? "min-order"
+        : row.productIds.length > 0 && (row.minBuyQty ?? 1) <= 1
+          ? "buy-product"
+          : "buy-quantity";
       return {
         ...base,
         type: "gift",
-        triggerType: "buy-quantity",
-        triggerValue: row.minBuyQty ?? 1,
+        triggerType,
+        triggerValue: triggerType === "min-order" ? row.minOrderValue : row.minBuyQty ?? 1,
         triggerProductId: row.productIds[0]?.toString(),
         triggerProductName: row.productNames[0],
         giftItems: [{ productId: row.getProductId?.toString() ?? "", productName: row.getProductName ?? "", quantity: row.getQty ?? 1 }],
@@ -208,7 +215,7 @@ export function buildPromotionUpsertBody(promo: Promotion): Record<string, unkno
       return {
         ...common,
         appliesTo: "PRODUCT",
-        productIds: buy?.productId ? [Number(buy.productId)] : [],
+        productIds: promo.buyItems.map((item) => Number(item.productId)).filter((id) => Number.isFinite(id)),
         buyQty: buy?.quantity ?? 1,
         getProductId: gift?.productId ? Number(gift.productId) : null,
         getQty: gift?.quantity ?? 1,
@@ -216,11 +223,14 @@ export function buildPromotionUpsertBody(promo: Promotion): Record<string, unkno
     }
     case "gift": {
       const gift = promo.giftItems[0];
+      const triggerProductId = promo.triggerProductId ? Number(promo.triggerProductId) : null;
+      const triggerProductIds = triggerProductId != null && Number.isFinite(triggerProductId) ? [triggerProductId] : [];
       return {
         ...common,
-        appliesTo: promo.triggerProductId ? "PRODUCT" : scope.appliesTo,
-        productIds: promo.triggerProductId ? [Number(promo.triggerProductId)] : scope.productIds,
-        minBuyQty: promo.triggerType === "buy-quantity" ? promo.triggerValue : 1,
+        appliesTo: promo.triggerType === "min-order" ? "ALL" : triggerProductIds.length > 0 ? "PRODUCT" : scope.appliesTo,
+        productIds: promo.triggerType === "min-order" ? [] : triggerProductIds.length > 0 ? triggerProductIds : scope.productIds,
+        minOrderValue: promo.triggerType === "min-order" ? promo.triggerValue : 0,
+        minBuyQty: promo.triggerType === "buy-quantity" ? promo.triggerValue : promo.triggerType === "buy-product" ? 1 : null,
         maxBuyQty: promo.giftStockLimit ?? null,
         getProductId: gift?.productId ? Number(gift.productId) : null,
         getQty: gift?.quantity ?? 1,

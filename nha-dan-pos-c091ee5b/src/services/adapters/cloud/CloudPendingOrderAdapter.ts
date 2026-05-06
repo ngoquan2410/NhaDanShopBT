@@ -19,7 +19,7 @@ import type {
 } from "@/services/types";
 import { LocalPendingOrderAdapter } from "../local/LocalPendingOrderAdapter";
 import { adminFetchJson } from "@/services/auth/adminApi";
-import { storefrontAuthHeaders } from "@/lib/storefrontAuthHeaders";
+import { storefrontAuthHeaders, storefrontFetch } from "@/lib/storefrontAuthHeaders";
 
 type BackendPendingOrder = {
   id: string | number;
@@ -145,7 +145,7 @@ export class CloudPendingOrderAdapter implements PendingOrderService {
     init?: RequestInit,
     opts?: { allow404?: boolean },
   ): Promise<T | null> {
-    const res = await fetch(path, {
+    const res = await storefrontFetch(path, {
       ...init,
       headers: {
         Accept: "application/json",

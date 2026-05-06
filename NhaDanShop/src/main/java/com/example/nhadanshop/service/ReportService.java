@@ -102,14 +102,36 @@ public class ReportService {
         return getProfitReport(firstDay, lastDay);
     }
 
+    public List<ProfitReportResponse> getDailyReport(LocalDate from, LocalDate to) {
+        return getDailyReport(from, to, null);
+    }
+
+    public List<ProfitReportResponse> getDailyReport(LocalDate from, LocalDate to, Collection<Long> productIds) {
+        List<Long> distinct = productIds == null ? List.of() : productIds.stream().distinct().toList();
+        List<ProfitReportResponse> result = new ArrayList<>();
+        LocalDate day = from;
+        while (!day.isAfter(to)) {
+            result.add(distinct.isEmpty() ? getProfitReport(day, day) : getProfitReportForProducts(day, day, distinct));
+            day = day.plusDays(1);
+        }
+        return result;
+    }
+
     /** Thống kê từng tuần trong khoảng thời gian */
     public List<ProfitReportResponse> getWeeklyReport(LocalDate from, LocalDate to) {
+        return getWeeklyReport(from, to, null);
+    }
+
+    public List<ProfitReportResponse> getWeeklyReport(LocalDate from, LocalDate to, Collection<Long> productIds) {
+        List<Long> distinct = productIds == null ? List.of() : productIds.stream().distinct().toList();
         List<ProfitReportResponse> result = new ArrayList<>();
         LocalDate weekStart = from.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
         while (!weekStart.isAfter(to)) {
             LocalDate weekEnd = weekStart.plusDays(6);
             if (weekEnd.isAfter(to)) weekEnd = to;
-            result.add(getProfitReport(weekStart, weekEnd));
+            result.add(distinct.isEmpty()
+                    ? getProfitReport(weekStart, weekEnd)
+                    : getProfitReportForProducts(weekStart, weekEnd, distinct));
             weekStart = weekStart.plusWeeks(1);
         }
         return result;
@@ -117,12 +139,19 @@ public class ReportService {
 
     /** Thống kê từng tháng trong khoảng thời gian */
     public List<ProfitReportResponse> getMonthlyReport(LocalDate from, LocalDate to) {
+        return getMonthlyReport(from, to, null);
+    }
+
+    public List<ProfitReportResponse> getMonthlyReport(LocalDate from, LocalDate to, Collection<Long> productIds) {
+        List<Long> distinct = productIds == null ? List.of() : productIds.stream().distinct().toList();
         List<ProfitReportResponse> result = new ArrayList<>();
         LocalDate monthStart = from.with(TemporalAdjusters.firstDayOfMonth());
         while (!monthStart.isAfter(to)) {
             LocalDate monthEnd = monthStart.with(TemporalAdjusters.lastDayOfMonth());
             if (monthEnd.isAfter(to)) monthEnd = to;
-            result.add(getProfitReport(monthStart, monthEnd));
+            result.add(distinct.isEmpty()
+                    ? getProfitReport(monthStart, monthEnd)
+                    : getProfitReportForProducts(monthStart, monthEnd, distinct));
             monthStart = monthStart.plusMonths(1);
         }
         return result;

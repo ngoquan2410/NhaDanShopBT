@@ -82,6 +82,7 @@ public class RevenueService {
         }
 
         List<Object[]> rawDays = invoiceRepo.dailyRevenue(fromDt, toDt);
+        List<Object[]> rawCounts = invoiceRepo.dailySalesCounts(fromDt, toDt);
 
         Map<LocalDate, BigDecimal> dayMap = new LinkedHashMap<>();
         for (Object[] r : rawDays) {
@@ -89,13 +90,22 @@ public class RevenueService {
             BigDecimal amt = r[1] != null ? new BigDecimal(r[1].toString()) : BigDecimal.ZERO;
             dayMap.put(d, amt);
         }
+        Map<LocalDate, Long> dayInvoices = new LinkedHashMap<>();
+        Map<LocalDate, Long> dayQty = new LinkedHashMap<>();
+        for (Object[] r : rawCounts) {
+            LocalDate d = parseRowLocalDate(r[0]);
+            long inv = r[1] instanceof Number n ? n.longValue() : 0L;
+            long qty = r[2] instanceof Number n ? n.longValue() : 0L;
+            dayInvoices.put(d, inv);
+            dayQty.put(d, qty);
+        }
 
         List<RevenueRowDto> rows = switch (period.toLowerCase(Locale.ROOT)) {
-            case "daily"   -> buildDailyRows(from, to, dayMap);
-            case "weekly"  -> buildWeeklyRows(from, to, dayMap);
-            case "monthly" -> buildMonthlyRows(from, to, dayMap);
-            case "yearly"  -> buildYearlyRows(from, to, dayMap);
-            default        -> buildDailyRows(from, to, dayMap);
+            case "daily"   -> buildDailyRowsFiltered(from, to, dayMap, dayInvoices, dayQty);
+            case "weekly"  -> buildWeeklyRowsFiltered(from, to, dayMap, dayInvoices, dayQty);
+            case "monthly" -> buildMonthlyRowsFiltered(from, to, dayMap, dayInvoices, dayQty);
+            case "yearly"  -> buildYearlyRowsFiltered(from, to, dayMap, dayInvoices, dayQty);
+            default        -> buildDailyRowsFiltered(from, to, dayMap, dayInvoices, dayQty);
         };
 
         BigDecimal total = rows.stream()

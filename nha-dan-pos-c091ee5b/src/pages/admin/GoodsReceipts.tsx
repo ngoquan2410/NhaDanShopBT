@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTableToolbar } from "@/components/shared/DataTableToolbar";
@@ -21,7 +21,7 @@ import { useTableControls } from "@/hooks/useTableControls";
 import { Plus, FileInput, Eye, Trash2, Printer, ShieldAlert, Upload, FileText } from "lucide-react";
 import { toast } from "sonner";
 
-type SortKey = "number" | "date" | "supplier" | "items" | "total";
+type SortKey = "number" | "date" | "supplier" | "items" | "total" | "actual";
 
 export default function AdminGoodsReceipts() {
   const [search, setSearch] = useState('');
@@ -55,6 +55,7 @@ export default function AdminGoodsReceipts() {
       supplier: (r) => r.supplierName,
       items: (r) => r.itemCount,
       total: (r) => r.totalCost + r.shippingFee + r.vat,
+      actual: (r) => r.subtotal + r.shippingFee + r.vat,
     },
     resetToken: `${search}|${period.preset}|${period.from}|${period.to}`,
   });
@@ -147,6 +148,7 @@ export default function AdminGoodsReceipts() {
                   <SortableTh label="Nhà cung cấp" sortKey="supplier" sort={tc.sort} onSort={tc.toggleSort} />
                   <SortableTh label="Mặt hàng" sortKey="items" sort={tc.sort} onSort={tc.toggleSort} align="center" />
                   <SortableTh label="Tổng tiền" sortKey="total" sort={tc.sort} onSort={tc.toggleSort} align="right" />
+                  <SortableTh label="Tong thuc tra" sortKey="actual" sort={tc.sort} onSort={tc.toggleSort} align="right" />
                   <th className="text-right px-3 py-2 font-medium text-muted-foreground w-[110px]">Thao tác</th>
                 </tr>
               </thead>
@@ -160,6 +162,7 @@ export default function AdminGoodsReceipts() {
                     <td className="px-3 py-2.5">{r.supplierName}</td>
                     <td className="px-3 py-2.5 text-center">{r.itemCount}</td>
                     <td className="px-3 py-2.5 text-right font-medium">{formatVND(r.totalCost + r.shippingFee + r.vat)}</td>
+                    <td className="px-3 py-2.5 text-right font-semibold">{formatVND(r.subtotal + r.shippingFee + r.vat)}</td>
                     <td className="px-3 py-2.5">
                       <div className="inline-flex items-center justify-end gap-0.5 w-full">
                         <button onClick={() => setDetail(r)} className="p-1.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted" title="Xem chi tiết"><Eye className="h-3.5 w-3.5" /></button>

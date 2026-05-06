@@ -23,8 +23,11 @@ interface CostRow {
   line: GoodsReceiptLine;
   unitGross: number;
   afterDiscount: number;
+  unitAfterDiscount: number;
   shippingAlloc: number;
+  unitShippingAlloc: number;
   vatAlloc: number;
+  unitVatAlloc: number;
   finalUnitCost: number;
   finalLineCost: number;
 }
@@ -71,12 +74,16 @@ function buildCostRows(receipt: GoodsReceipt, lines: GoodsReceiptLine[]): CostRo
     const vat = vatAllocs[i];
     const finalLineCost = afterDiscount + ship + vat;
     const finalUnitCost = l.finalUnitCost ?? (l.quantity > 0 ? finalLineCost / l.quantity : 0);
+    const qty = l.quantity > 0 ? l.quantity : 1;
     return {
       line: l,
       unitGross: l.unitCost,
       afterDiscount,
+      unitAfterDiscount: afterDiscount / qty,
       shippingAlloc: ship,
+      unitShippingAlloc: ship / qty,
       vatAlloc: vat,
+      unitVatAlloc: vat / qty,
       finalUnitCost,
       finalLineCost,
     };
@@ -222,9 +229,10 @@ export function GoodsReceiptDetailDrawer({ receipt, onClose, onReceiptChanged }:
                       <th className="p-2 font-medium">Sản phẩm</th>
                       <th className="p-2 font-medium text-center">SL</th>
                       <th className="p-2 font-medium text-right">Đơn giá gốc</th>
-                      <th className="p-2 font-medium text-right">Sau CK</th>
-                      <th className="p-2 font-medium text-right">+ Ship</th>
-                      <th className="p-2 font-medium text-right">+ VAT</th>
+                      <th className="p-2 font-medium text-right">CK %</th>
+                  <th className="p-2 font-medium text-right">Sau CK / ĐV</th>
+                  <th className="p-2 font-medium text-right">+ Ship / ĐV</th>
+                  <th className="p-2 font-medium text-right">+ VAT / ĐV</th>
                       <th className="p-2 font-medium text-right">Giá vốn cuối</th>
                     </tr>
                   </thead>
@@ -243,12 +251,13 @@ export function GoodsReceiptDetailDrawer({ receipt, onClose, onReceiptChanged }:
                           {r.line.quantity} {r.line.importUnit}
                         </td>
                         <td className="p-2 text-right whitespace-nowrap">{formatVND(r.unitGross)}</td>
-                        <td className="p-2 text-right whitespace-nowrap">{formatVND(r.afterDiscount)}</td>
+                        <td className="p-2 text-right whitespace-nowrap">{r.line.discountPercent}%</td>
+                        <td className="p-2 text-right whitespace-nowrap">{formatVND(r.unitAfterDiscount)}</td>
                         <td className="p-2 text-right whitespace-nowrap text-muted-foreground">
-                          {formatVND(r.shippingAlloc)}
+                          {formatVND(r.unitShippingAlloc)}
                         </td>
                         <td className="p-2 text-right whitespace-nowrap text-muted-foreground">
-                          {formatVND(r.vatAlloc)}
+                          {formatVND(r.unitVatAlloc)}
                         </td>
                         <td className="p-2 text-right whitespace-nowrap font-semibold text-primary">
                           {formatVND(r.finalUnitCost)}

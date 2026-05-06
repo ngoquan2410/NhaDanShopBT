@@ -33,7 +33,7 @@ interface AdminAuthState {
   loading: boolean;
   signIn: (username: string, password: string) => Promise<{ error?: string; totpRequired?: boolean; preAuthToken?: string }>;
   verifyTotp: (preAuthToken: string, otp: string) => Promise<{ error?: string }>;
-  signUp: (username: string, password: string, fullName?: string) => Promise<{ error?: string }>;
+  signUp: (username: string, password: string, fullName?: string, phone?: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   refreshRole: () => Promise<void>;
   refreshSession: () => Promise<AuthSession | null>;
@@ -97,8 +97,8 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     return {};
   }, [normalize, persist]);
 
-  const signUp = useCallback(async (username: string, password: string, fullName?: string) => {
-    const res = await fetch("/api/auth/signup", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ username, password, fullName }) });
+  const signUp = useCallback(async (username: string, password: string, fullName?: string, phone?: string) => {
+    const res = await fetch("/api/auth/signup", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ username, password, fullName, phone }) });
     const data = await parse(res);
     if (!res.ok) return { error: data?.detail ?? data?.message ?? `HTTP ${res.status}` };
     persist(normalize(data));
@@ -118,6 +118,47 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     persist(next);
     return next;
   }, [normalize, persist, session?.refreshToken]);
+
+  useEffect(() => {
+    if (!session?.accessToken || !session.expiresAt) return;
+    let cancelled = false;
+    const nextPath = () => window.location.pathname + window.location.search;
+    const expireNow = async () => {
+      if (cancelled) return;
+      if (session.refreshToken) {
+        const refreshed = await refreshSession();
+        if (refreshed || cancelled) return;
+      }
+      persist(null);
+      dispatchSessionExpired({ nextPath: nextPath() });
+    };
+    const delay = Math.max(0, session.expiresAt - Date.now());
+    const timeout = window.setTimeout(() => void expireNow(), delay);
+    const checkOnFocus = () => {
+      if (Date.now() >= session.expiresAt) void expireNow();
+    };
+    window.addEventListener("focus", checkOnFocus);
+    document.addEventListener("visibilitychange", checkOnFocus);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      window.removeEventListener("focus", checkOnFocus);
+      document.removeEventListener("visibilitychange", checkOnFocus);
+    };
+  }, [persist, refreshSession, session?.accessToken, session?.expiresAt, session?.refreshToken]);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== AUTH_SESSION_KEY) return;
+      try {
+        setSessionState(event.newValue ? JSON.parse(event.newValue) as AuthSession : null);
+      } catch {
+        setSessionState(null);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   const signOut = useCallback(async () => {
     const accessToken = session?.accessToken;

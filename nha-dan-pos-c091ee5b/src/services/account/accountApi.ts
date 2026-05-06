@@ -1,4 +1,5 @@
 import { adminFetchJson } from "@/services/auth/adminApi";
+import type { PendingOrder } from "@/services/types";
 
 export interface AccountMe {
   userId: number;
@@ -57,6 +58,9 @@ export const accountApi = {
   updateProfile: (body: { fullName?: string; phone?: string; email?: string; address?: string }) =>
     adminFetchJson<AccountMe>("/api/account/profile", { method: "PUT", body: JSON.stringify(body) }),
   orders: async () => (await adminFetchJson<Page<AccountOrder>>("/api/account/orders?page=0&size=50")).content ?? [],
+  pendingOrders: () => adminFetchJson<PendingOrder[]>("/api/account/pending-orders"),
+  cancelPendingOrderForEdit: (id: string) =>
+    adminFetchJson<PendingOrder>(`/api/account/pending-orders/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   points: () => adminFetchJson<CustomerPointsSummary>("/api/account/points"),
   history: async () => (await adminFetchJson<Page<PointHistoryRow>>("/api/account/points/history?page=0&size=50")).content ?? [],
 };

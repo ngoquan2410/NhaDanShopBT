@@ -2,14 +2,19 @@ import { useMemo, useState, useRef, useEffect } from "react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatCard } from "@/components/shared/StatCard";
 import { DateInput } from "@/components/shared/DateInput";
+import { FilterChip } from "@/components/shared/DataTableToolbar";
 import { useService } from "@/hooks/useService";
 import { adminReports, products as productService } from "@/services";
 import { formatVND, formatPercent, formatNumber } from "@/lib/format";
 import { DollarSign, TrendingUp, Download, Receipt, Search, X, Check } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Area, AreaChart, CartesianGrid, Legend, Tooltip, XAxis, YAxis } from "recharts";
+import { ChartContainer } from "@/components/ui/chart";
 
 type BeProductRow = Record<string, unknown>;
+type ProfitGroup = "daily" | "weekly" | "monthly";
+const profitGroupLabel: Record<ProfitGroup, string> = { daily: "Ngày", weekly: "Tuần", monthly: "Tháng" };
 
 function numFromRow(row: BeProductRow | undefined, keys: string[]): number | null {
   if (!row) return null;
@@ -33,6 +38,7 @@ function mapRowToMetrics(row: BeProductRow | undefined) {
 }
 
 export default function AdminProfitReport() {
+  const [groupBy, setGroupBy] = useState<ProfitGroup>("daily");
   const [from, setFrom] = useState("2026-04-01");
   const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
   const [excelBusy, setExcelBusy] = useState(false);
@@ -54,25 +60,25 @@ export default function AdminProfitReport() {
 
   const { data: reportData, loading, error } = useService(async () => {
     const [profitRows, productRowsRaw, productPage] = await Promise.all([
-      adminReports.profit(from, to, productIdsArg),
+      adminReports.profitSeries(from, to, groupBy, productIdsArg),
       adminReports.revenueByProduct(from, to, "daily", productIdsArg),
       productService.list({ page: 1, pageSize: 100 }),
     ]);
     return { profitRows, productRowsRaw, products: productPage.items };
-  }, [from, to, selectedKey]);
+  }, [from, to, groupBy, selectedKey]);
 
   const products = reportData?.products ?? [];
   const backendProductRows = (reportData?.productRowsRaw ?? []) as BeProductRow[];
-  const profitAgg = reportData?.profitRows?.[0];
+  const profitSeries = reportData?.profitRows ?? [];
 
   const isFiltered = selected.length > 0;
 
-  const headerRevenue = profitAgg?.revenue ?? 0;
-  const headerCost = profitAgg?.cost ?? 0;
-  const headerProfit = profitAgg?.profit ?? 0;
+  const headerRevenue = profitSeries.reduce((s, r) => s + r.revenue, 0);
+  const headerCost = profitSeries.reduce((s, r) => s + r.cost, 0);
+  const headerProfit = profitSeries.reduce((s, r) => s + r.profit, 0);
   /** Backend trả profitMarginPct dạng 0–100 */
   const headerMarginFraction =
-    profitAgg?.margin != null ? profitAgg.margin / 100 : headerRevenue > 0 ? headerProfit / headerRevenue : 0;
+    headerRevenue > 0 ? headerProfit / headerRevenue : 0;
 
   /** SL bán (đơn vị dòng hàng) — từ báo cáo doanh thu theo SP backend, không suy diễn. */
   const totalSoldQty = useMemo(() => {
@@ -131,7 +137,17 @@ export default function AdminProfitReport() {
   const money = (n: number | null | undefined) => (n == null || Number.isNaN(n) ? "—" : formatVND(n));
   const pct = (n: number | null | undefined) => (n == null || Number.isNaN(n) ? "—" : formatPercent(n));
 
-  const pickerProducts = products.filter((p) => !pickerSearch || p.name.toLowerCase().includes(pickerSearch.toLowerCase()));
+  const pickerProducts = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; code?: string }>();
+    for (const p of products) map.set(p.id, { id: p.id, name: p.name, code: p.code });
+    for (const r of backendProductRows) {
+      const id = String(r.productId ?? r.id ?? "");
+      if (!id || map.has(id)) continue;
+      map.set(id, { id, name: String(r.productName ?? r.name ?? id), code: String(r.productCode ?? r.code ?? "") });
+    }
+    const q = pickerSearch.trim().toLowerCase();
+    return [...map.values()].filter((p) => !q || p.name.toLowerCase().includes(q) || String(p.code ?? "").toLowerCase().includes(q));
+  }, [backendProductRows, pickerSearch, products]);
   const toggle = (id: string) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
@@ -184,6 +200,10 @@ export default function AdminProfitReport() {
         <DateInput value={from} onChange={setFrom} />
         <span className="text-xs text-muted-foreground">—</span>
         <DateInput value={to} onChange={setTo} />
+        <span className="ml-2 text-xs text-muted-foreground">Nhóm theo:</span>
+        {(["daily", "weekly", "monthly"] as ProfitGroup[]).map((g) => (
+          <FilterChip key={g} label={profitGroupLabel[g]} active={groupBy === g} onClick={() => setGroupBy(g)} />
+        ))}
 
         <div className="relative ml-auto" ref={pickerRef}>
           <button
@@ -255,7 +275,7 @@ export default function AdminProfitReport() {
       {isFiltered && (
         <div className="flex flex-wrap gap-1.5">
           {selected.map((id) => {
-            const p = products.find((x) => x.id === id);
+            const p = pickerProducts.find((x) => x.id === id) ?? products.find((x) => x.id === id);
             if (!p) return null;
             return (
               <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] bg-primary-soft text-primary rounded-full">
@@ -307,6 +327,52 @@ export default function AdminProfitReport() {
           </div>
         </div>
       )}
+
+      <div className="bg-card rounded-lg border p-4">
+        <h3 className="font-semibold text-sm mb-3">Lợi nhuận theo {profitGroupLabel[groupBy].toLowerCase()}</h3>
+        <ChartContainer
+          config={{
+            revenue: { label: "Doanh thu", color: "hsl(var(--primary))" },
+            profit: { label: "Lợi nhuận", color: "hsl(var(--success))" },
+          }}
+          className="h-72 w-full"
+        >
+          <AreaChart data={profitSeries} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
+            <defs>
+              <linearGradient id="profRev" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0.02} />
+              </linearGradient>
+              <linearGradient id="profProf" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="hsl(var(--success))" stopOpacity={0.35} />
+                <stop offset="100%" stopColor="hsl(var(--success))" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border))" />
+            <XAxis dataKey="period" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+            <YAxis tickLine={false} axisLine={false} tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`} width={48} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+            <Tooltip
+              cursor={{ stroke: "hsl(var(--primary))", strokeWidth: 1, strokeDasharray: "3 3" }}
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null;
+                const row = payload[0].payload as typeof profitSeries[number];
+                return (
+                  <div className="rounded-lg border bg-background px-3 py-2 text-xs shadow-xl">
+                    <p className="font-semibold">{label}</p>
+                    <p>Doanh thu: <b>{formatVND(row.revenue)}</b></p>
+                    <p>Giá vốn: <b>{formatVND(row.cost)}</b></p>
+                    <p>Lợi nhuận: <b>{formatVND(row.profit)}</b></p>
+                    <p>Biên LN: <b>{formatPercent((row.margin ?? 0) / 100)}</b></p>
+                  </div>
+                );
+              }}
+            />
+            <Legend verticalAlign="top" height={28} wrapperStyle={{ fontSize: 11 }} iconType="circle" />
+            <Area type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2.5} fill="url(#profRev)" name="Doanh thu" activeDot={{ r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }} />
+            <Area type="monotone" dataKey="profit" stroke="hsl(var(--success))" strokeWidth={2.5} fill="url(#profProf)" name="Lợi Nhuận" activeDot={{ r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }} />
+          </AreaChart>
+        </ChartContainer>
+      </div>
 
       <div className="bg-card rounded-lg border p-4">
         <h3 className="font-semibold text-sm mb-3">

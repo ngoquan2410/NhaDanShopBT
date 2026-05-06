@@ -35,6 +35,8 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     /** Tìm theo SĐT (để nhanh chọn KH tại quầy) */
     Optional<Customer> findByPhoneAndActiveTrue(String phone);
 
+    List<Customer> findAllByPhoneAndActiveTrue(String phone);
+
     /**
      * Tìm kiếm đa tiêu chí: tên (hỗ trợ không dấu tiếng Việt), SĐT, mã KH.
      * VD: "manh" → "Mạnh Hùng", "nguyen" → "Nguyễn Văn A"

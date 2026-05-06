@@ -9,6 +9,7 @@ import com.example.nhadanshop.entity.User;
 import com.example.nhadanshop.repository.RefreshTokenRepository;
 import com.example.nhadanshop.repository.PasswordResetTokenRepository;
 import com.example.nhadanshop.repository.CustomerRepository;
+import com.example.nhadanshop.repository.SalesInvoiceRepository;
 import com.example.nhadanshop.repository.RoleRepository;
 import com.example.nhadanshop.repository.UserRepository;
 import com.example.nhadanshop.security.CustomUserDetailsService;
@@ -33,6 +34,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -49,6 +52,7 @@ public class AuthService {
     private final TotpService totpService;
     private final PasswordEncoder passwordEncoder;
     private final CustomerRepository customerRepository;
+    private final SalesInvoiceRepository salesInvoiceRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepo;
     private final JavaMailSender mailSender;
 
@@ -79,16 +83,43 @@ public class AuthService {
         user.setActive(true);
         user.getRoles().add(userRole);
 
-        Customer customer = new Customer();
-        customer.setCode(nextCustomerCode());
-        customer.setName(user.getFullName());
-        customer.setActive(true);
-        user.setCustomer(customerRepository.save(customer));
+        Customer customer = resolveSignupCustomer(req, user.getFullName());
+        user.setCustomer(customer);
         userRepo.save(user);
 
         // Tự động login sau khi đăng ký thành công
         Set<String> roles = Set.of("ROLE_USER");
         return issueFullTokens(user, roles);
+    }
+
+    private Customer resolveSignupCustomer(SignUpRequest req, String fullName) {
+        String phone = normalizePhone(req.phone());
+        if (phone != null) {
+            List<Customer> matches = customerRepository.findAllByPhoneAndActiveTrue(phone);
+            if (!matches.isEmpty()) {
+                if (matches.size() > 1) {
+                    log.warn("Signup phone {} matched {} active customers; linking to customer with latest completed invoice", phone, matches.size());
+                }
+                return matches.stream()
+                        .max(Comparator.comparing(c -> {
+                            LocalDateTime last = salesInvoiceRepository.lastCompletedAtForCustomerIdentity(c.getId(), phone);
+                            return last != null ? last : LocalDateTime.MIN;
+                        }))
+                        .orElse(matches.get(0));
+            }
+        }
+        Customer customer = new Customer();
+        customer.setCode(nextCustomerCode());
+        customer.setName(fullName);
+        customer.setPhone(phone);
+        customer.setActive(true);
+        return customerRepository.save(customer);
+    }
+
+    private String normalizePhone(String phone) {
+        if (phone == null) return null;
+        String p = phone.replaceAll("\\D", "");
+        return p.isBlank() ? null : p;
     }
 
     // ── Step 1: Login với username/password ──────────────────────────────────────────

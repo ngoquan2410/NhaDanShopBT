@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type DragEvent } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -388,24 +388,26 @@ function AdminProductDetail() {
                   );
                 })}
                 <div className="flex items-end">
-                  <label className="flex items-center gap-2 text-xs font-medium cursor-pointer">
-                    <input type="checkbox" checked={variantForm.isDefault} onChange={e => setVariantForm({ ...variantForm, isDefault: e.target.checked })} className="h-3.5 w-3.5" />
+                  <label className="flex items-center gap-2 text-xs font-medium cursor-pointer rounded-md border bg-muted/30 px-3 py-2 w-full hover:bg-muted/50 transition-colors h-9">
+                    <input type="checkbox" checked={variantForm.isDefault} onChange={e => setVariantForm({ ...variantForm, isDefault: e.target.checked })} className="h-4 w-4 rounded border-input accent-primary" />
                     Đặt làm phân loại mặc định
                   </label>
                 </div>
-                <div className="rounded-md border bg-muted/20 p-2">
-                  <label className="flex items-center gap-2 text-xs font-medium cursor-pointer">
+                <div className="rounded-md border bg-muted/30 p-3 sm:col-span-2 lg:col-span-1">
+                  <label className="flex items-start gap-2 text-xs font-medium cursor-pointer">
                     <input
                       type="checkbox"
                       checked={variantForm.isSellable !== false}
                       onChange={(e) => setVariantForm({ ...variantForm, isSellable: e.target.checked })}
-                      className="h-3.5 w-3.5"
+                      className="h-4 w-4 mt-0.5 rounded border-input accent-primary shrink-0"
                     />
-                    Bán lẻ / hiển thị cửa hàng
+                    <span className="flex-1">
+                      <span className="block">Bán lẻ / hiển thị cửa hàng</span>
+                      <span className="mt-1 block text-[11px] font-normal text-muted-foreground leading-snug">
+                        Tắt nếu đây là NVL/quy cách chỉ nhập kho; khi tắt có thể để giá bán bằng 0.
+                      </span>
+                    </span>
                   </label>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    Tắt nếu đây là NVL/quy cách chỉ nhập kho; khi tắt có thể để giá bán bằng 0.
-                  </p>
                 </div>
               </div>
               <div className="flex gap-2 mt-3 items-center">
@@ -525,14 +527,7 @@ function AdminProductDetail() {
 }
 
 // ===== Images Tab =====
-function ImagesTab({
-  product,
-  reloadProduct,
-}: {
-  product: { id: string; name: string; image: string; variants: ProductVariant[] };
-  reloadProduct: () => void;
-}) {
-  const productInputRef = useRef<HTMLInputElement>(null);
+function ImagesTab({ product, reloadProduct }: { product: ProductDetailData; reloadProduct: () => void }) {
   const [uploadingProductImage, setUploadingProductImage] = useState(false);
   const [uploadingVariantId, setUploadingVariantId] = useState<string | null>(null);
   const [productImageBroken, setProductImageBroken] = useState(false);
@@ -541,10 +536,20 @@ function ImagesTab({
     setProductImageBroken(false);
   }, [product.image]);
 
+  const validateImageFile = (file: File) => {
+    if (file.size > MAX_IMAGE_BYTES) {
+      toast.error("Ảnh vượt quá 5MB");
+      return false;
+    }
+    if (!file.type.startsWith("image/")) {
+      toast.error("Chỉ chấp nhận file ảnh");
+      return false;
+    }
+    return true;
+  };
+
   const handleProductFile = async (file: File | null) => {
-    if (!file) return;
-    if (file.size > MAX_IMAGE_BYTES) { toast.error("Ảnh vượt quá 5MB"); return; }
-    if (!file.type.startsWith("image/")) { toast.error("Chỉ chấp nhận file ảnh"); return; }
+    if (!file || !validateImageFile(file)) return;
     setUploadingProductImage(true);
     try {
       const { url } = await adminUploadImage(file);
@@ -556,14 +561,11 @@ function ImagesTab({
       toast.error(msg.includes("503") || msg.includes("R2") ? `${msg} — nhập URL ảnh thủ công ở tab Thông tin chung.` : msg);
     } finally {
       setUploadingProductImage(false);
-      if (productInputRef.current) productInputRef.current.value = "";
     }
   };
 
   const handleVariantFile = async (variantId: string, file: File | null) => {
-    if (!file) return;
-    if (file.size > MAX_IMAGE_BYTES) { toast.error("Ảnh vượt quá 5MB"); return; }
-    if (!file.type.startsWith("image/")) { toast.error("Chỉ chấp nhận file ảnh"); return; }
+    if (!file || !validateImageFile(file)) return;
     setUploadingVariantId(variantId);
     try {
       const { url } = await adminUploadImage(file);
@@ -585,82 +587,66 @@ function ImagesTab({
 
   const clearVariantImage = (variantId: string) => {
     void productService.updateVariant(product.id, variantId, { image: "" }).then(() => { reloadProduct(); });
-    toast.success("Đã xóa ảnh override");
+    toast.success("Đã xóa ảnh riêng");
   };
 
   return (
     <div className="space-y-4">
-      {/* Product-level image */}
-      <div className="bg-card rounded-lg border p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="font-semibold text-sm">Ảnh sản phẩm (mặc định)</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Dùng cho mọi phân loại trừ khi phân loại đó có ảnh riêng. Khuyến nghị tỉ lệ vuông, tối đa 5MB.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-3 flex items-center gap-4">
-          <div className="h-32 w-32 rounded-md border bg-muted/30 overflow-hidden flex items-center justify-center shrink-0">
-            {product.image && !productImageBroken ? (
-              <img
-                src={product.image}
-                alt={product.name}
-                onError={() => setProductImageBroken(true)}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <ImageIcon className="h-8 w-8 text-muted-foreground/40" />
-            )}
-          </div>
-          <div className="flex flex-col gap-2">
-            <input
-              ref={productInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => handleProductFile(e.target.files?.[0] ?? null)}
+      <div className="bg-card rounded-lg border p-5">
+        <div className="mx-auto max-w-xl text-center">
+          <h3 className="font-semibold text-sm">Ảnh sản phẩm (mặc định)</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Dùng cho mọi phân loại trừ khi phân loại có ảnh riêng. Khuyến nghị tỉ lệ vuông, tối đa 5MB.
+          </p>
+          <div className="mt-4">
+            <ImageUploadDropzone
+              title={product.image ? "Thay ảnh sản phẩm" : "Tải ảnh sản phẩm"}
+              imageUrl={product.image}
+              alt={product.name}
+              uploading={uploadingProductImage}
+              broken={productImageBroken}
+              onBroken={() => setProductImageBroken(true)}
+              onUpload={handleProductFile}
+              onClear={product.image ? clearProductImage : undefined}
             />
-            <button
-              onClick={() => productInputRef.current?.click()}
-              disabled={uploadingProductImage}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover w-fit disabled:opacity-50"
-            >
-              {uploadingProductImage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-              {uploadingProductImage ? "Đang tải..." : product.image ? "Thay ảnh" : "Tải ảnh lên"}
-            </button>
-            {product.image && (
-              <button onClick={clearProductImage} disabled={uploadingProductImage} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted w-fit text-danger disabled:opacity-50">
-                <Trash2 className="h-3.5 w-3.5" /> Xóa ảnh
-              </button>
-            )}
           </div>
         </div>
       </div>
 
-      {/* Variant overrides */}
-      <div className="bg-card rounded-lg border p-4">
-        <h3 className="font-semibold text-sm">Ảnh riêng cho phân loại (tùy chọn)</h3>
-        <p className="text-xs text-muted-foreground mt-0.5 mb-3">
-          Nếu phân loại có ảnh riêng — sẽ ưu tiên dùng. Ngược lại sẽ dùng ảnh sản phẩm phía trên.
-        </p>
-        {product.variants.length === 0 ? (
-          <p className="text-xs text-muted-foreground">Chưa có phân loại nào.</p>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {product.variants.map((v) => (
-              <VariantImageCard
-                key={v.id}
-                variant={v}
-                fallback={product.image}
-                onUpload={(file) => handleVariantFile(v.id, file)}
-                onClear={() => clearVariantImage(v.id)}
-                uploading={uploadingVariantId === v.id}
-              />
-            ))}
+      <div className="bg-card rounded-lg border p-5">
+        <div className="mx-auto max-w-5xl">
+          <div className="text-center">
+            <h3 className="font-semibold text-sm">Ảnh riêng cho phân loại (tùy chọn)</h3>
+            <p className="text-xs text-muted-foreground mt-1 mb-4">
+              Nếu phân loại có ảnh riêng, hệ thống sẽ ưu tiên ảnh này. Nếu không, phân loại dùng ảnh sản phẩm mặc định.
+            </p>
           </div>
-        )}
+          {product.variants.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center">Chưa có phân loại nào.</p>
+          ) : (
+            <div
+              className={cn(
+                "grid gap-4 justify-center",
+                product.variants.length === 1
+                  ? "grid-cols-1 max-w-xs mx-auto"
+                  : product.variants.length === 2
+                  ? "grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto"
+                  : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+              )}
+            >
+              {product.variants.map((v) => (
+                <VariantImageCard
+                  key={v.id}
+                  variant={v}
+                  fallback={product.image}
+                  onUpload={(file) => handleVariantFile(v.id, file)}
+                  onClear={() => clearVariantImage(v.id)}
+                  uploading={uploadingVariantId === v.id}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -679,7 +665,6 @@ function VariantImageCard({
   onClear: () => void;
   uploading: boolean;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const hasOverride = !!variant.image;
   const display = variant.image || fallback;
   const [broken, setBroken] = useState(false);
@@ -689,34 +674,98 @@ function VariantImageCard({
   }, [display]);
 
   return (
-    <div className="border rounded-md p-3 bg-background">
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="min-w-0">
-          <p className="text-xs font-medium truncate">{variant.name}</p>
-          <p className="text-[10px] font-mono text-muted-foreground truncate">{variant.code}</p>
+    <div className="rounded-lg border bg-background p-3">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="min-w-0 text-left">
+          <p className="truncate text-xs font-medium">{variant.name}</p>
+          <p className="truncate font-mono text-[10px] text-muted-foreground">{variant.code}</p>
         </div>
         <span className={cn(
-          "text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0",
+          "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
           hasOverride ? "bg-info-soft text-info" : "bg-muted text-muted-foreground"
         )}>
           {hasOverride ? "Riêng" : "Mặc định"}
         </span>
       </div>
-      <div className="aspect-square rounded border bg-muted/30 overflow-hidden flex items-center justify-center mb-2">
-        {display && !broken ? (
-          <img
-            src={display}
-            alt={variant.name}
-            onError={() => setBroken(true)}
-            className="h-full w-full object-cover"
-          />
+      <ImageUploadDropzone
+        title={hasOverride ? "Thay ảnh" : "Tải ảnh"}
+        imageUrl={display}
+        alt={variant.name}
+        uploading={uploading}
+        broken={broken}
+        onBroken={() => setBroken(true)}
+        onUpload={onUpload}
+        onClear={hasOverride ? onClear : undefined}
+        compact
+      />
+    </div>
+  );
+}
+
+function ImageUploadDropzone({
+  title,
+  imageUrl,
+  alt,
+  uploading,
+  broken,
+  onBroken,
+  onUpload,
+  onClear,
+  compact = false,
+}: {
+  title: string;
+  imageUrl?: string;
+  alt: string;
+  uploading: boolean;
+  broken: boolean;
+  onBroken: () => void;
+  onUpload: (file: File | null) => void;
+  onClear?: () => void;
+  compact?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const chooseFile = () => inputRef.current?.click();
+  const handleDrop = (event: DragEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    onUpload(event.dataTransfer.files?.[0] ?? null);
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={chooseFile}
+        onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+        disabled={uploading}
+        className={cn(
+          "group relative flex w-full flex-col items-center justify-center overflow-hidden rounded-lg border border-dashed bg-muted/20 text-center transition focus:outline-none focus:ring-2 focus:ring-primary/30",
+          compact ? "aspect-square" : "aspect-square max-h-[320px] min-h-[220px]",
+          dragging ? "border-primary bg-primary/5" : "hover:border-primary hover:bg-muted/30",
+          uploading && "cursor-wait opacity-70"
+        )}
+      >
+        {imageUrl && !broken ? (
+          <img src={imageUrl} alt={alt} onError={onBroken} className="h-full w-full object-cover" />
         ) : (
-          <div className="flex flex-col items-center gap-1 text-muted-foreground/50">
-            <ImageIcon className="h-6 w-6" />
-            {display && <span className="text-[10px]">Không tải được ảnh</span>}
+          <div className="flex flex-col items-center gap-2 px-4 text-muted-foreground">
+            {uploading ? <Loader2 className="h-8 w-8 animate-spin" /> : <ImageIcon className="h-8 w-8" />}
+            <span className="text-xs font-medium text-foreground">{uploading ? "Đang tải ảnh..." : title}</span>
+            <span className="text-[11px]">Click hoặc kéo thả ảnh vào khung</span>
+            {imageUrl && broken ? <span className="text-[11px] text-danger">Không tải được ảnh hiện tại</span> : null}
           </div>
         )}
-      </div>
+        {imageUrl && !broken && !uploading ? (
+          <span className="absolute inset-x-0 bottom-0 bg-black/55 px-2 py-2 text-[11px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+            Click để thay ảnh
+          </span>
+        ) : null}
+      </button>
       <input
         ref={inputRef}
         type="file"
@@ -727,20 +776,26 @@ function VariantImageCard({
           e.currentTarget.value = "";
         }}
       />
-      <div className="flex items-center gap-1.5">
+      <div className="flex justify-center gap-2">
         <button
-          onClick={() => inputRef.current?.click()}
+          type="button"
+          onClick={chooseFile}
           disabled={uploading}
-          className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-medium border rounded hover:bg-muted disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
         >
-          {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-          {uploading ? "Đang tải" : hasOverride ? "Thay" : "Tải lên"}
+          {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+          {uploading ? "Đang tải" : title}
         </button>
-        {hasOverride && (
-          <button onClick={onClear} disabled={uploading} className="px-2 py-1.5 text-[11px] font-medium border rounded hover:bg-muted text-danger disabled:opacity-50" title="Xóa override">
-            <X className="h-3 w-3" />
+        {onClear ? (
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={uploading}
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium text-danger hover:bg-muted disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Xóa ảnh
           </button>
-        )}
+        ) : null}
       </div>
     </div>
   );

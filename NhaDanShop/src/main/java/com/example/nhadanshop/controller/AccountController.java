@@ -1,7 +1,9 @@
 package com.example.nhadanshop.controller;
 
 import com.example.nhadanshop.dto.*;
+import com.example.nhadanshop.entity.Customer;
 import com.example.nhadanshop.service.AccountService;
+import com.example.nhadanshop.service.PendingOrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -15,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class AccountController {
     private final AccountService accountService;
+    private final PendingOrderService pendingOrderService;
 
     @GetMapping("/me")
     public AccountMeResponse me(Authentication auth) {
@@ -29,6 +32,18 @@ public class AccountController {
     @GetMapping("/orders")
     public Page<AccountOrderResponse> orders(Authentication auth, @PageableDefault(size = 20) Pageable pageable) {
         return accountService.orders(auth.getName(), pageable);
+    }
+
+    @GetMapping("/pending-orders")
+    public java.util.List<PendingOrderResponse> pendingOrders(Authentication auth) {
+        Customer c = accountService.ensureLinkedCustomer(auth.getName());
+        return pendingOrderService.listRecoverableForCustomer(c.getId());
+    }
+
+    @PostMapping("/pending-orders/{id}/cancel")
+    public PendingOrderResponse cancelOwnPendingOrder(@PathVariable Long id, Authentication auth) {
+        Customer c = accountService.ensureLinkedCustomer(auth.getName());
+        return pendingOrderService.cancelRecoverableForCustomer(id, c.getId(), "Khách sửa đơn");
     }
 
     @GetMapping("/points")

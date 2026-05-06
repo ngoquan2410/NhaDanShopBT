@@ -19,7 +19,9 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.time.LocalDate;
@@ -33,6 +35,7 @@ public class PendingOrderService {
     private final PendingOrderRepository pendingOrderRepo;
     private final SalesInvoiceRepository salesInvoiceRepo;
     private final ProductRepository productRepo;
+    private final ProductVariantRepository variantRepository;
     private final UserRepository userRepo;
     private final InvoiceService invoiceService;
     private final ProductVariantService variantService; // Sprint 0
@@ -185,6 +188,7 @@ public class PendingOrderService {
             }
             order.getItems().add(item);
         }
+        assertPendingVariantDemandAvailable(order.getItems());
 
         return toResponse(pendingOrderRepo.save(order));
     }
@@ -321,6 +325,7 @@ public class PendingOrderService {
             }
             order.getItems().add(item);
         }
+        assertPendingVariantDemandAvailable(order.getItems());
 
         PendingOrder savedOrder = pendingOrderRepo.save(order);
         SalesQuote locked = salesQuoteRepository.findByPublicIdForUpdate(req.quotePublicId().trim())
@@ -337,6 +342,25 @@ public class PendingOrderService {
         return toResponse(savedOrder);
     }
 
+    private void assertPendingVariantDemandAvailable(List<PendingOrderItem> items) {
+        Map<Long, Integer> demandByVariant = new HashMap<>();
+        for (PendingOrderItem item : items) {
+            if (item.getVariant() == null || item.getVariant().getId() == null) {
+                continue;
+            }
+            demandByVariant.merge(item.getVariant().getId(), item.getQuantity(), Integer::sum);
+        }
+        for (Map.Entry<Long, Integer> entry : demandByVariant.entrySet()) {
+            ProductVariant variant = variantRepository.findById(entry.getKey()).orElseThrow();
+            int stockQty = variant.getStockQty() != null ? variant.getStockQty() : 0;
+            if (stockQty < entry.getValue()) {
+                throw new IllegalArgumentException(
+                        "Khong du ton cho don hang va qua tang [" + variant.getVariantCode()
+                                + "]. Can " + entry.getValue() + ", con " + stockQty);
+            }
+        }
+    }
+
     @Transactional
     public Page<PendingOrderResponse> listPage(Pageable pageable) {
         return pendingOrderRepo.findAllByOrderByCreatedAtDesc(pageable).map(this::toResponse);
@@ -346,6 +370,21 @@ public class PendingOrderService {
     public List<PendingOrderResponse> listAll() {
         return pendingOrderRepo.findAllByOrderByCreatedAtDesc()
                 .stream().map(this::toResponse).toList();
+    }
+
+    @Transactional
+    public List<PendingOrderResponse> listRecoverableForCustomer(Long customerId) {
+        if (customerId == null) return List.of();
+        return pendingOrderRepo.findByCustomerIdAndStatusInAndExpiresAtAfterOrderByCreatedAtDesc(
+                        String.valueOf(customerId),
+                        List.of(
+                                PendingOrder.Status.PENDING_PAYMENT,
+                                PendingOrder.Status.WAITING_CONFIRM,
+                                PendingOrder.Status.PAID_AUTO),
+                        LocalDateTime.now(clock))
+                .stream()
+                .map(this::toResponse)
+                .toList();
     }
 
     @Transactional
@@ -447,6 +486,19 @@ public class PendingOrderService {
         order.setCancelReason(reason);
         loyaltyService.releaseForPendingOrder(order, CustomerPointReservation.Status.RELEASED);
         return toResponse(pendingOrderRepo.save(order));
+    }
+
+    @Transactional
+    public PendingOrderResponse cancelRecoverableForCustomer(Long id, Long customerId, String reason) {
+        PendingOrder order = pendingOrderRepo.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("KhÃ´ng tÃ¬m tháº¥y Ä‘Æ¡n hÃ ng ID: " + id));
+        if (customerId == null || order.getCustomerId() == null || !order.getCustomerId().equals(String.valueOf(customerId))) {
+            throw new IllegalArgumentException("KhÃ´ng thá»ƒ há»§y Ä‘Æ¡n khÃ´ng thuá»™c tÃ i khoáº£n hiá»‡n táº¡i");
+        }
+        if (order.getStatus() != PendingOrder.Status.PENDING_PAYMENT) {
+            throw new IllegalStateException("Chá»‰ cÃ³ thá»ƒ sá»­a Ä‘Æ¡n Ä‘ang chá» thanh toÃ¡n");
+        }
+        return cancelOrder(id, reason);
     }
 
     @Scheduled(fixedDelay = 120_000)

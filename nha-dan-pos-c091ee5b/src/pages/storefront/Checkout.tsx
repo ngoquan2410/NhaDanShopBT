@@ -16,6 +16,7 @@ import {
   Loader2,
   Tag,
   X,
+  Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -27,8 +28,9 @@ import type {
   PaymentMethod,
   ShippingAddress,
   ShippingQuote,
+  PendingOrder,
 } from "@/services/types";
-import { useCart, cartActions } from "@/lib/cart";
+import { useCart, useSelectedPromotionId, cartActions } from "@/lib/cart";
 import { AddressSelect, type AddressSelectValue } from "@/components/shared/AddressSelect";
 import { AddressAutocomplete, type GoongResolvedAddress, type FallbackReason, clearSessionFallback } from "@/components/shared/AddressAutocomplete";
 import { useAuth } from "@/lib/admin-auth";
@@ -55,8 +57,10 @@ const EMPTY_ADDR: AddressSelectValue = {
 export default function CheckoutPage() {
   const navigate = useNavigate();
   const cartItems = useCart();
+  const selectedPromotionId = useSelectedPromotionId();
   const auth = useAuth();
   const [accountPoints, setAccountPoints] = useState<CustomerPointsSummary | null>(null);
+  const [recoverableOrders, setRecoverableOrders] = useState<PendingOrder[]>([]);
   const [payment, setPayment] = useState<PaymentId>("cash_on_delivery");
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -74,8 +78,9 @@ export default function CheckoutPage() {
   const [requestedRedeemPoints, setRequestedRedeemPoints] = useState(0);
 
   useEffect(() => {
-    if (!auth.session) { setAccountPoints(null); return; }
+    if (!auth.session) { setAccountPoints(null); setRecoverableOrders([]); return; }
     accountApi.points().then(setAccountPoints).catch(() => setAccountPoints(null));
+    accountApi.pendingOrders().then(setRecoverableOrders).catch(() => setRecoverableOrders([]));
   }, [auth.session]);
 
   // One-shot pre-fill from the persistent customer profile.
@@ -178,6 +183,7 @@ export default function CheckoutPage() {
   // Promotion engine reads cart lines directly — they already carry the real
   // productId / variantId / categoryId from the shared cart store.
   const [bestPromo, setBestPromo] = useState<EvaluatedPromotion | null>(null);
+  const [promoFallbackNotice, setPromoFallbackNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let cancel = false;
@@ -192,17 +198,33 @@ export default function CheckoutPage() {
       shippingQuote: quote,
       voucherCode: appliedVoucherCode ?? undefined,
     };
-    void promotions.pickBest(ctx)
-      .then((p) => {
-        if (!cancel) setBestPromo(p);
+    void promotions.evaluateAll(ctx)
+      .then((list) => {
+        if (cancel) return;
+        const eligible = list.filter((p) => p.eligible);
+        const sorted = [...eligible].sort(
+          (a, b) => b.discountAmount + b.shippingDiscountAmount - (a.discountAmount + a.shippingDiscountAmount),
+        );
+        const selected = selectedPromotionId
+          ? sorted.find((p) => p.promotionId === selectedPromotionId) ?? null
+          : null;
+        setBestPromo(selected ?? sorted[0] ?? null);
+        setPromoFallbackNotice(
+          selectedPromotionId && !selected && sorted.length > 0
+            ? "Khuyến mãi đã chọn không còn hợp lệ sau khi tính phí ship, hệ thống đang dùng ưu đãi phù hợp nhất."
+            : null,
+        );
       })
       .catch(() => {
-        if (!cancel) setBestPromo(null);
+        if (!cancel) {
+          setBestPromo(null);
+          setPromoFallbackNotice(null);
+        }
       });
     return () => {
       cancel = true;
     };
-  }, [cartItems, subtotal, shippingAddress, quote, appliedVoucherCode]);
+  }, [cartItems, subtotal, shippingAddress, quote, appliedVoucherCode, selectedPromotionId]);
 
   useEffect(() => {
     if (import.meta.env.MODE === "test") {
@@ -373,6 +395,51 @@ export default function CheckoutPage() {
   };
 
   if (cartItems.length === 0) {
+    const latestRecoverable = recoverableOrders[0];
+    if (latestRecoverable) {
+      const restoreForEdit = async () => {
+        cartActions.replace(latestRecoverable.lines.filter((line) => !line.rewardLine).map((line) => ({
+          id: line.id,
+          productId: line.productId,
+          variantId: line.variantId,
+          productName: line.productName,
+          variantName: line.variantName,
+          qty: line.qty,
+          unitPrice: line.unitPrice,
+          lineSubtotal: line.lineSubtotal,
+          batchId: line.batchId,
+          stock: Number.MAX_SAFE_INTEGER,
+          catalogSource: "backend",
+          schemaVersion: 2,
+        })));
+        try {
+          await accountApi.cancelPendingOrderForEdit(latestRecoverable.id);
+          toast.success("Đã đưa sản phẩm về giỏ để chỉnh sửa đơn");
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Không hủy được đơn chờ cũ");
+        }
+      };
+      return (
+        <div className="max-w-xl mx-auto px-4 py-16 text-center">
+          <Clock className="h-12 w-12 text-warning mx-auto mb-3" />
+          <h1 className="text-lg font-bold">Bạn có đơn chờ thanh toán</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Đơn {latestRecoverable.code} vẫn đang được giữ. Bạn có thể thanh toán tiếp hoặc sửa lại đơn.
+          </p>
+          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+            <Link to={`/pending-payment/${latestRecoverable.id}`} className="inline-flex items-center justify-center gap-2 h-10 rounded-full bg-primary text-primary-foreground text-sm font-semibold">
+              Thanh toán tiếp
+            </Link>
+            <button type="button" onClick={() => void restoreForEdit()} className="inline-flex items-center justify-center gap-2 h-10 rounded-full border text-sm font-semibold hover:bg-muted">
+              Sửa đơn
+            </button>
+          </div>
+          <Link to="/products" className="mt-3 inline-flex items-center justify-center text-xs text-muted-foreground hover:text-foreground">
+            Tiếp tục mua sắm
+          </Link>
+        </div>
+      );
+    }
     return (
       <div className="max-w-xl mx-auto px-4 py-16 text-center">
         <Package className="h-12 w-12 text-muted-foreground/40 mx-auto mb-3" />
@@ -651,6 +718,11 @@ export default function CheckoutPage() {
                     label={`Khuyến mãi: ${bestPromo.name}`}
                     value={<span className="text-success">−{formatVND(rowPromoDisc)}</span>}
                   />
+                )}
+                {promoFallbackNotice && (
+                  <p className="rounded-lg bg-warning-soft px-3 py-2 text-[11px] text-warning">
+                    {promoFallbackNotice}
+                  </p>
                 )}
                 {vs && rowVoucherDisc > 0 && (
                   <Row

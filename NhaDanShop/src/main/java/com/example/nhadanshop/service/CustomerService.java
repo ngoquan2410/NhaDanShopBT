@@ -4,6 +4,7 @@ import com.example.nhadanshop.dto.CustomerRequest;
 import com.example.nhadanshop.dto.CustomerResponse;
 import com.example.nhadanshop.entity.Customer;
 import com.example.nhadanshop.repository.CustomerRepository;
+import com.example.nhadanshop.repository.SalesInvoiceRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ import java.util.List;
 public class CustomerService {
 
     private final CustomerRepository customerRepository;
+    private final SalesInvoiceRepository salesInvoiceRepository;
 
     // ── Queries ───────────────────────────────────────────────────────────────
 
@@ -138,13 +140,24 @@ public class CustomerService {
     }
 
     public CustomerResponse toResponse(Customer c) {
+        String phone = normalizePhone(c.getPhone());
+        BigDecimal totalSpend = salesInvoiceRepository.sumCompletedTotalForCustomerIdentity(c.getId(), phone);
+        long orderCount = salesInvoiceRepository.countCompletedForCustomerIdentity(c.getId(), phone);
         return new CustomerResponse(
                 c.getId(), c.getCode(), c.getName(), c.getPhone(),
                 c.getAddress(), c.getEmail(),
                 c.getGroup() != null ? c.getGroup().name() : "RETAIL",
-                c.getTotalSpend(), c.getDebt(),
+                totalSpend, c.getDebt(),
+                orderCount,
+                salesInvoiceRepository.lastCompletedAtForCustomerIdentity(c.getId(), phone),
                 c.getNote(), c.getActive(),
                 c.getCreatedAt(), c.getUpdatedAt()
         );
+    }
+
+    private String normalizePhone(String phone) {
+        if (phone == null) return null;
+        String p = phone.replaceAll("\\D", "");
+        return p.isBlank() ? null : p;
     }
 }

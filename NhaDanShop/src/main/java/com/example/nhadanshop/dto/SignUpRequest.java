@@ -10,5 +10,6 @@ import jakarta.validation.constraints.Size;
 public record SignUpRequest(
         @NotBlank @Size(min = 3, max = 100, message = "Tên đăng nhập phải từ 3-100 ký tự") String username,
         @NotBlank @Size(min = 10, max = 100, message = "Mật khẩu phải từ 10–100 ký tự") String password,
-        @Size(max = 150) String fullName
+        @Size(max = 150) String fullName,
+        @Size(max = 30) String phone
 ) {}

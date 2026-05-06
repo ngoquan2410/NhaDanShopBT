@@ -12,6 +12,7 @@ export default function SignupPage() {
   const [showPw, setShowPw] = useState(false);
   const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
@@ -34,7 +35,7 @@ export default function SignupPage() {
     }
     setLoading(true);
     try {
-      const res = await auth.signUp(username.trim(), password, fullName.trim() || undefined);
+      const res = await auth.signUp(username.trim(), password, fullName.trim() || undefined, phone.trim() || undefined);
       if (res.error) return toast.error(res.error);
       toast.success("Đăng ký thành công");
       navigate("/account", { replace: true });
@@ -71,6 +72,16 @@ export default function SignupPage() {
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               placeholder="Nhập họ tên (tùy chọn)"
+              className="mt-1 w-full h-10 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Số điện thoại</label>
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="Nhập SĐT đã mua hàng tại cửa hàng"
+              autoComplete="tel"
               className="mt-1 w-full h-10 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>

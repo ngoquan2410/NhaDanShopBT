@@ -260,6 +260,24 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
 
+    /**
+     * Daily invoice/item counts for revenue dashboard cards. Kept separate from
+     * {@link #dailyRevenue} so invoice-level revenue is not duplicated by item joins.
+     */
+    @Query("""
+            SELECT CAST(item.invoice.invoiceDate AS date),
+                   COUNT(DISTINCT item.invoice.id),
+                   COALESCE(SUM(item.quantity), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
+            GROUP BY CAST(item.invoice.invoiceDate AS date)
+            ORDER BY CAST(item.invoice.invoiceDate AS date)
+            """)
+    List<Object[]> dailySalesCounts(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
+
     /** Merchandise net revenue Σ per calendar day filtered by sold product IDs (persisted lines). */
     @Query("""
             SELECT CAST(item.invoice.invoiceDate AS date),
@@ -371,6 +389,39 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
             @Param("productIds") Collection<Long> productIds);
 
     Page<SalesInvoice> findByCustomerIdOrderByInvoiceDateDesc(Long customerId, Pageable pageable);
+
+    @Query("""
+            SELECT COALESCE(SUM(i.totalAmount), 0)
+            FROM SalesInvoice i
+            WHERE i.status = 'COMPLETED'
+              AND (i.customer.id = :customerId
+                   OR (:phone IS NOT NULL AND :phone <> '' AND i.customerPhone = :phone))
+            """)
+    BigDecimal sumCompletedTotalForCustomerIdentity(
+            @Param("customerId") Long customerId,
+            @Param("phone") String phone);
+
+    @Query("""
+            SELECT COUNT(i)
+            FROM SalesInvoice i
+            WHERE i.status = 'COMPLETED'
+              AND (i.customer.id = :customerId
+                   OR (:phone IS NOT NULL AND :phone <> '' AND i.customerPhone = :phone))
+            """)
+    long countCompletedForCustomerIdentity(
+            @Param("customerId") Long customerId,
+            @Param("phone") String phone);
+
+    @Query("""
+            SELECT MAX(i.invoiceDate)
+            FROM SalesInvoice i
+            WHERE i.status = 'COMPLETED'
+              AND (i.customer.id = :customerId
+                   OR (:phone IS NOT NULL AND :phone <> '' AND i.customerPhone = :phone))
+            """)
+    LocalDateTime lastCompletedAtForCustomerIdentity(
+            @Param("customerId") Long customerId,
+            @Param("phone") String phone);
 
     @Query("""
             SELECT sii.variant.id,

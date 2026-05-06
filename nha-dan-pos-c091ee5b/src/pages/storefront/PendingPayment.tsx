@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { formatVND, formatDateTime } from "@/lib/format";
 import { Clock, CheckCircle, XCircle, AlertTriangle, ArrowLeft, Package, Copy, QrCode, RefreshCw, Bug, Loader2 } from "lucide-react";
 import { pendingOrders as pendingOrdersService, storeSettings, vietQr } from "@/services";
@@ -11,6 +11,8 @@ import type {
   VietQrResult,
 } from "@/services/types";
 import { toast } from "sonner";
+import { cartActions } from "@/lib/cart";
+import { accountApi } from "@/services/account/accountApi";
 
 const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   cash: "Tiền mặt",
@@ -19,8 +21,18 @@ const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   zalopay: "ZaloPay",
 };
 
+const QR_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+
+function formatDuration(totalSeconds: number) {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(safe / 60);
+  const seconds = safe % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 export default function PendingPaymentPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [order, setOrder] = useState<PendingOrder | null>(null);
   const [loading, setLoading] = useState(true);
   const [bank, setBank] = useState<StorePaymentSettings | null>(null);
@@ -30,6 +42,7 @@ export default function PendingPaymentPage() {
   const [qrAttempt, setQrAttempt] = useState(0);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrLastGeneratedAt, setQrLastGeneratedAt] = useState<number | null>(null);
+  const [qrCountdownTick, setQrCountdownTick] = useState(Date.now());
   const [showDebug, setShowDebug] = useState(false);
   const [confirming, setConfirming] = useState(false);
   // Bumping this re-mounts the wallet <img> so a failed/missing static QR
@@ -40,7 +53,7 @@ export default function PendingPaymentPage() {
   const autoRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Centralized QR (re)generator. Used by initial load, manual retry, and
-  // the 45s auto-refresh. Sets loading/error states so the UI can disable
+  // the timed auto-refresh. Sets loading/error states so the UI can disable
   // confirm/cancel buttons while a fresh payload is being built.
   const regenerateQr = async (
     o: PendingOrder,
@@ -141,7 +154,7 @@ export default function PendingPaymentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, qrAttempt]);
 
-  // Auto-refresh VietQR every 45s while still in pending_payment so banking
+  // Auto-refresh VietQR every 15 minutes while still in pending_payment so banking
   // apps that cache an "expired" payload always have a fresh code to scan.
   useEffect(() => {
     if (autoRefreshTimer.current) {
@@ -162,7 +175,7 @@ export default function PendingPaymentPage() {
         void regenerateQr(order, bank, next);
         return next;
       });
-    }, 45_000);
+    }, QR_REFRESH_INTERVAL_MS);
     return () => {
       if (autoRefreshTimer.current) {
         clearInterval(autoRefreshTimer.current);
@@ -171,6 +184,20 @@ export default function PendingPaymentPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id, order?.status, order?.paymentMethod, bank?.qrEnabled]);
+
+  useEffect(() => {
+    if (
+      !order ||
+      order.paymentMethod !== "bank_transfer" ||
+      order.status !== "pending_payment" ||
+      !qrLastGeneratedAt
+    ) {
+      return;
+    }
+    setQrCountdownTick(Date.now());
+    const timer = window.setInterval(() => setQrCountdownTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [order?.id, order?.status, order?.paymentMethod, qrLastGeneratedAt]);
 
   if (loading) {
     return <div className="max-w-xl mx-auto px-4 py-16 text-center text-sm text-muted-foreground">Đang tải...</div>;
@@ -232,6 +259,31 @@ export default function PendingPaymentPage() {
       toast.error("Không gửi được xác nhận, vui lòng thử lại");
     } finally {
       setConfirming(false);
+    }
+  };
+
+  const restoreOrderForEdit = async () => {
+    if (!order || order.status !== "pending_payment") return;
+    cartActions.replace(order.lines.filter((line) => !line.rewardLine).map((line) => ({
+      id: line.id,
+      productId: line.productId,
+      variantId: line.variantId ?? "",
+      productName: line.productName,
+      variantName: line.variantName,
+      qty: line.qty,
+      unitPrice: line.unitPrice,
+      lineSubtotal: line.lineSubtotal,
+      batchId: line.batchId,
+      stock: Number.MAX_SAFE_INTEGER,
+      catalogSource: "backend",
+      schemaVersion: 2,
+    })));
+    try {
+      await accountApi.cancelPendingOrderForEdit(order.id);
+      toast.success("Đã đưa sản phẩm về giỏ để chỉnh sửa đơn");
+      navigate("/checkout");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Không hủy được đơn chờ cũ");
     }
   };
 
@@ -398,7 +450,7 @@ export default function PendingPaymentPage() {
                       </button>
                       {qrLastGeneratedAt && (
                         <p className="text-[10px] text-muted-foreground">
-                          QR mới {Math.max(0, Math.floor((Date.now() - qrLastGeneratedAt) / 1000))}s trước · tự làm mới mỗi 45s
+                          QR mới {Math.max(0, Math.floor((qrCountdownTick - qrLastGeneratedAt) / 1000))}s trước · tự làm mới sau {formatDuration((QR_REFRESH_INTERVAL_MS - (qrCountdownTick - qrLastGeneratedAt)) / 1000)}
                         </p>
                       )}
                     </>
@@ -638,6 +690,11 @@ export default function PendingPaymentPage() {
       )}
 
       <div className="flex flex-col sm:flex-row gap-2">
+        {order.status === "pending_payment" && (
+          <button onClick={() => void restoreOrderForEdit()} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md border text-sm font-medium hover:bg-muted transition-colors">
+            Sửa đơn
+          </button>
+        )}
         <Link to="/" className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md border text-sm font-medium text-muted-foreground hover:bg-muted transition-colors">
           <ArrowLeft className="h-4 w-4" /> Quay lại mua sắm
         </Link>

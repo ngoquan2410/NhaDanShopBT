@@ -17,8 +17,10 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -181,6 +183,7 @@ public class SalesQuoteService {
         }
 
         capturedRewards.addAll(buildPromotionRewardLines(promo, req.lines(), merchandiseSubtotal));
+        assertVariantDemandAvailable(capturedBillableBare, capturedRewards);
 
         BigDecimal manual = req.manualDiscount() != null ? req.manualDiscount() : BigDecimal.ZERO;
         BigDecimal shipFee;
@@ -500,21 +503,45 @@ public class SalesQuoteService {
         Integer maxB = promo.getMaxBuyQty();
         Integer yQty = promo.getGetQty();
         Long giftPid = promo.getGetProductId();
-        if (minB == null || minB <= 0 || yQty == null || yQty <= 0 || giftPid == null) {
+        if (yQty == null || yQty <= 0 || giftPid == null) {
             throw new IllegalArgumentException(
-                    "Khuyen mai QUANTITY_GIFT thieu min_buy_qty / get_qty / get_product_id hop le");
+                    "Khuyen mai QUANTITY_GIFT thieu get_qty / get_product_id hop le");
         }
-        if (maxB != null && maxB < minB) {
+        if (minB != null && minB <= 0) {
+            throw new IllegalArgumentException("Khuyen mai QUANTITY_GIFT: min_buy_qty khong hop le");
+        }
+        if (maxB != null && minB != null && maxB < minB) {
             throw new IllegalArgumentException("Khuyen mai QUANTITY_GIFT: max_buy_qty < min_buy_qty");
         }
         int eligible = eligiblePromoUnits(promo, reqLines);
-        if (eligible < minB) {
+        if (minB != null && eligible < minB) {
             return List.of();
         }
         if (maxB != null && eligible > maxB) {
             return List.of();
         }
         return List.of(mkRewardCapturedLine(giftPid, yQty));
+    }
+
+    private void assertVariantDemandAvailable(
+            List<SalesQuoteCapturedLineDto> billableLines,
+            List<SalesQuoteCapturedLineDto> rewardLines) {
+        Map<Long, Integer> demandByVariant = new HashMap<>();
+        for (SalesQuoteCapturedLineDto line : billableLines) {
+            demandByVariant.merge(line.variantId(), line.quantity(), Integer::sum);
+        }
+        for (SalesQuoteCapturedLineDto line : rewardLines) {
+            demandByVariant.merge(line.variantId(), line.quantity(), Integer::sum);
+        }
+        for (Map.Entry<Long, Integer> entry : demandByVariant.entrySet()) {
+            ProductVariant variant = variantRepo.findById(entry.getKey()).orElseThrow();
+            int stockQty = variant.getStockQty() != null ? variant.getStockQty() : 0;
+            if (stockQty < entry.getValue()) {
+                throw new IllegalArgumentException(
+                        "Khong du ton cho don hang va qua tang [" + variant.getVariantCode()
+                                + "]. Can " + entry.getValue() + ", con " + stockQty);
+            }
+        }
     }
 
     private SalesQuoteCapturedLineDto mkRewardCapturedLine(Long giftProductId, int rewardQty) {

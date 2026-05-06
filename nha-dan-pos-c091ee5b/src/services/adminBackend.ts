@@ -282,6 +282,7 @@ export const adminReports = {
       variantCode: asString(r.variantCode),
       productName: asString(r.productName),
       variantName: asString(r.variantName),
+      categoryName: asString(r.categoryName),
       unit: asString(r.unit, asString(r.sellUnit)),
       openingStock: asNumber(r.openingStock),
       received: asNumber(r.received, asNumber(r.totalReceived)),
@@ -331,6 +332,32 @@ export const adminReports = {
       ...(margin !== undefined ? { margin } : {}),
       invoiceCount,
     }];
+  },
+  async profitSeries(from: string, to: string, group: "daily" | "weekly" | "monthly", productIds?: string[]): Promise<ProfitRow[]> {
+    if (group === "daily" || group === "weekly" || group === "monthly") {
+      const params = new URLSearchParams({ from, to });
+      appendNumericProductIds(params, productIds);
+      const raw = await adminFetchJson<Record<string, unknown>[]>(`/api/reports/profit/${group}?${params}`);
+      return raw.map((r) => {
+        const revenue = asNumber(r.totalRevenue);
+        const profit = asNumber(r.totalProfit);
+        const invoiceCount = asNumber(r.totalInvoices, asNumber(r.invoiceCount));
+        const margin = invoiceCount > 0 || revenue !== 0 || profit !== 0
+          ? asNumber(r.profitMarginPct, asNumber(r.margin, asNumber(r.profitMargin)))
+          : undefined;
+        const fromDate = asString(r.fromDate, from);
+        const toDate = asString(r.toDate, to);
+        return {
+          period: `${fromDate} - ${toDate}`,
+          revenue,
+          cost: asNumber(r.totalCost, asNumber(r.totalCogs)),
+          profit,
+          ...(margin !== undefined ? { margin } : {}),
+          invoiceCount,
+        };
+      });
+    }
+    return this.profit(from, to, productIds);
   },
   async downloadInventoryExcel(from: string, to: string): Promise<void> {
     await downloadAdminBlob(

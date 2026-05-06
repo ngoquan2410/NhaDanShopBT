@@ -292,6 +292,7 @@ export interface InventoryReportRow {
   variantCode: string;
   productName: string;
   variantName: string;
+  categoryName?: string;
   unit: string;
   openingStock: number;
   received: number;

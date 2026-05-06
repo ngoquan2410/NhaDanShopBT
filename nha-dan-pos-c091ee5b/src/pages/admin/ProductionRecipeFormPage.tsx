@@ -7,6 +7,7 @@ import { products as productService } from "@/services";
 import type { Product } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 import { Loader2, ArrowLeft, Plus, Trash2, Save, AlertTriangle } from "lucide-react";
+import { SearchableSelect, type SearchableSelectOption } from "@/components/shared/SearchableSelect";
 
 /** Full-page recipe create — breadcrumb, metadata card, và bảng dòng NL giống phiếu điều chỉnh tồn kho. */
 export default function ProductionRecipeFormPage() {
@@ -96,9 +97,9 @@ export default function ProductionRecipeFormPage() {
   };
 
   return (
-    <div className="admin-dense">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
-        <Link to="/admin/production" className="flex items-center gap-1 hover:text-foreground">
+    <div className="admin-dense space-y-4 pb-24 lg:pb-4">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Link to="/admin/production" className="flex items-center gap-1 hover:text-foreground transition-colors">
           <ArrowLeft className="h-3.5 w-3.5" /> Sản xuất
         </Link>
         <span>/</span>
@@ -113,7 +114,7 @@ export default function ProductionRecipeFormPage() {
             <button
               type="button"
               onClick={() => void navigate("/admin/production")}
-              className="px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted"
+              className="inline-flex items-center px-3 h-9 text-sm font-medium border rounded-md hover:bg-muted transition-colors"
             >
               Hủy
             </button>
@@ -121,17 +122,17 @@ export default function ProductionRecipeFormPage() {
               type="button"
               disabled={saving || loadingProducts}
               onClick={() => void submit()}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 h-9 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover disabled:opacity-50 transition-colors"
             >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Lưu quy trình
             </button>
           </div>
         }
       />
 
-      <div className="flex items-center gap-2 p-3 bg-info-soft rounded-lg border border-info/20 text-sm text-info mt-3">
-        <AlertTriangle className="h-4 w-4 shrink-0" />
+      <div className="flex items-start gap-2 p-3 bg-info-soft rounded-lg border border-info/20 text-sm text-info">
+        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
         <span>
           Recipe chỉ lưu cấu trúc BOM; chạy lệnh sản xuất và trừ kho thực hiện tại tab{" "}
           <strong>Preview / tạo lệnh</strong> sau khi lưu.
@@ -139,20 +140,20 @@ export default function ProductionRecipeFormPage() {
       </div>
 
       {loadingProducts ? (
-        <p className="text-sm text-muted-foreground mt-3">Đang tải sản phẩm...</p>
+        <p className="text-sm text-muted-foreground">Đang tải sản phẩm...</p>
       ) : (
         <>
-          {/* Metadata — mirrors StockAdjustmentCreate “Metadata” card */}
-          <div className="bg-card rounded-lg border p-4 mt-3">
-            <h3 className="font-semibold text-sm mb-3">Thông tin quy trình</h3>
-            <div className="grid gap-3 sm:grid-cols-2">
+          {/* Metadata card */}
+          <div className="bg-card rounded-lg border p-4 sm:p-5">
+            <h3 className="font-semibold text-sm mb-4">Thông tin quy trình</h3>
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="text-xs font-medium text-muted-foreground">Mã quy trình *</label>
                 <input
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
                   placeholder="VD: RCP-BANH-01"
-                  className="mt-1 w-full h-8 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+                  className="mt-1 w-full h-9 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring font-mono"
                 />
               </div>
               <div>
@@ -161,7 +162,7 @@ export default function ProductionRecipeFormPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="VD: Đóng gói bánh tráng"
-                  className="mt-1 w-full h-8 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="mt-1 w-full h-9 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
                 />
               </div>
               <div>
@@ -174,38 +175,36 @@ export default function ProductionRecipeFormPage() {
                     + Tạo sản phẩm mới
                   </Link>
                 </div>
-                <select
+                <SearchableSelect
                   value={outPid}
-                  onChange={(e) => {
-                    setOutPid(e.target.value);
+                  onChange={(v) => {
+                    setOutPid(v);
                     setOutVid("");
                   }}
-                  className="mt-1 w-full h-8 px-2 text-sm border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option value="">Chọn sản phẩm</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.code} — {p.name}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Chọn sản phẩm"
+                  className="mt-1"
+                  options={products.map((p) => ({
+                    value: String(p.id),
+                    label: `${p.code} — ${p.name}`,
+                    searchText: `${p.code} ${p.name}`,
+                  }))}
+                />
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground">Phân loại output *</label>
-                <select
+                <SearchableSelect
                   value={outVid}
-                  onChange={(e) => setOutVid(e.target.value)}
+                  onChange={(v) => setOutVid(v)}
                   disabled={!outputProduct}
-                  className="mt-1 w-full h-8 px-2 text-sm border rounded-md bg-background disabled:opacity-60 focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option value="">Chọn phân loại</option>
-                  {(outputProduct?.variants ?? []).map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.code} — {v.name}
-                      {!v.isSellable ? " (không bán)" : ""}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Chọn phân loại"
+                  className="mt-1"
+                  options={(outputProduct?.variants ?? []).map((v) => ({
+                    value: String(v.id),
+                    label: `${v.code} — ${v.name}`,
+                    hint: !v.isSellable ? "(không bán)" : undefined,
+                    searchText: `${v.code} ${v.name}`,
+                  }))}
+                />
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground">SL chuẩn output / recipe</label>
@@ -214,16 +213,16 @@ export default function ProductionRecipeFormPage() {
                   min={1}
                   value={outQty}
                   onChange={(e) => setOutQty(Number(e.target.value) || 1)}
-                  className="mt-1 w-full max-w-[10rem] h-8 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="mt-1 w-full sm:max-w-[12rem] h-9 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
                 />
               </div>
-              <div className="flex items-end pb-1">
-                <label className="flex items-center gap-2 text-xs font-medium cursor-pointer">
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer rounded-md border bg-muted/30 px-3 py-2 w-full hover:bg-muted/50 transition-colors">
                   <input
                     type="checkbox"
                     checked={mustSell}
                     onChange={(e) => setMustSell(e.target.checked)}
-                    className="h-3.5 w-3.5 rounded border-input"
+                    className="h-4 w-4 rounded border-input accent-primary"
                   />
                   Thành phẩm phải bán được ở POS / gian hàng
                 </label>
@@ -231,135 +230,136 @@ export default function ProductionRecipeFormPage() {
             </div>
           </div>
 
-          {/* Line items — table like StockAdjustmentCreate */}
-          <div className="flex items-center justify-between mt-4 mb-2">
-            <div>
-              <p className="text-sm font-medium">Nguyên liệu</p>
-              <p className="text-xs text-muted-foreground">
-                Hệ số tiêu hao cho mỗi đơn vị output của recipe (không phải cho cả lô SX).
-              </p>
+          {/* Line items */}
+          <div className="bg-card rounded-lg border overflow-hidden">
+            <div className="flex items-center justify-between gap-2 p-4 border-b">
+              <div>
+                <p className="text-sm font-semibold">Nguyên liệu</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Hệ số tiêu hao cho mỗi đơn vị output của recipe (không phải cho cả lô SX).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setRows([...rows, { productId: "", variantId: "", qty: 1, unit: "u" }])
+                }
+                className="inline-flex items-center gap-1 px-3 h-8 text-xs font-medium border rounded-md hover:bg-muted shrink-0 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" /> Thêm dòng
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() =>
-                setRows([...rows, { productId: "", variantId: "", qty: 1, unit: "u" }])
-              }
-              className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted"
-            >
-              <Plus className="h-3.5 w-3.5" /> Thêm dòng
-            </button>
-          </div>
 
-          <div className="bg-card rounded-lg border overflow-x-auto mt-1">
-            <table className="w-full text-sm min-w-[640px]">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left px-3 py-2 font-medium text-muted-foreground w-10">#</th>
-                  <th className="text-left px-3 py-2 font-medium text-muted-foreground min-w-[180px]">
-                    Sản phẩm
-                  </th>
-                  <th className="text-left px-3 py-2 font-medium text-muted-foreground min-w-[160px]">
-                    Phân loại
-                  </th>
-                  <th className="text-center px-3 py-2 font-medium text-muted-foreground w-[100px]">
-                    SL / output
-                  </th>
-                  <th className="text-center px-3 py-2 font-medium text-muted-foreground w-[72px]">
-                    Đ.vị
-                  </th>
-                  <th className="w-10" />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, idx) => (
-                  <tr key={idx} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-3 py-2 text-muted-foreground text-xs">{idx + 1}</td>
-                    <td className="px-3 py-2">
-                      <select
-                        value={row.productId}
-                        onChange={(e) => {
-                          const next = [...rows];
-                          next[idx] = { ...next[idx], productId: e.target.value, variantId: "" };
-                          setRows(next);
-                        }}
-                        className="w-full h-8 px-2 text-xs border rounded-md bg-background"
-                      >
-                        <option value="">Chọn SP</option>
-                        {products.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.code}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-3 py-2">
-                      <select
-                        value={row.variantId}
-                        onChange={(e) => {
-                          const next = [...rows];
-                          next[idx] = { ...next[idx], variantId: e.target.value };
-                          setRows(next);
-                        }}
-                        disabled={!row.productId}
-                        className="w-full h-8 px-2 text-xs border rounded-md bg-background disabled:opacity-60"
-                      >
-                        <option value="">Chọn PL</option>
-                        {variantsFor(row.productId).map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {v.code}
-                            {!v.isSellable ? " · NS" : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <input
-                        type="number"
-                        min={1}
-                        value={row.qty}
-                        onChange={(e) => {
-                          const next = [...rows];
-                          next[idx] = { ...next[idx], qty: Number(e.target.value) || 1 };
-                          setRows(next);
-                        }}
-                        className="w-20 h-8 text-center text-xs border rounded-md bg-background mx-auto"
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <input
-                        value={row.unit}
-                        onChange={(e) => {
-                          const next = [...rows];
-                          next[idx] = { ...next[idx], unit: e.target.value };
-                          setRows(next);
-                        }}
-                        className="w-14 h-8 text-center text-xs border rounded-md bg-background mx-auto font-mono"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => setRows(rows.filter((_, i) => i !== idx))}
-                        className={cn(
-                          "p-1 rounded hover:bg-muted text-muted-foreground hover:text-danger",
-                          rows.length <= 1 && "opacity-40 pointer-events-none",
-                        )}
-                        title="Xóa dòng"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[640px]">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="text-left px-3 py-2.5 font-medium text-muted-foreground w-10">#</th>
+                    <th className="text-left px-3 py-2.5 font-medium text-muted-foreground min-w-[200px]">
+                      Sản phẩm
+                    </th>
+                    <th className="text-left px-3 py-2.5 font-medium text-muted-foreground min-w-[180px]">
+                      Phân loại
+                    </th>
+                    <th className="text-center px-3 py-2.5 font-medium text-muted-foreground w-[110px]">
+                      SL / output
+                    </th>
+                    <th className="text-center px-3 py-2.5 font-medium text-muted-foreground w-[80px]">
+                      Đ.vị
+                    </th>
+                    <th className="w-12" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {rows.map((row, idx) => (
+                    <tr key={idx} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="px-3 py-2 text-muted-foreground text-xs tabular-nums">{idx + 1}</td>
+                      <td className="px-3 py-2">
+                        <SearchableSelect
+                          value={row.productId}
+                          onChange={(v) => {
+                            const next = [...rows];
+                            next[idx] = { ...next[idx], productId: v, variantId: "" };
+                            setRows(next);
+                          }}
+                          placeholder="Chọn SP"
+                          size="sm"
+                          options={products.map((p) => ({
+                            value: String(p.id),
+                            label: p.code,
+                            hint: p.name,
+                            searchText: `${p.code} ${p.name}`,
+                          }))}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <SearchableSelect
+                          value={row.variantId}
+                          onChange={(v) => {
+                            const next = [...rows];
+                            next[idx] = { ...next[idx], variantId: v };
+                            setRows(next);
+                          }}
+                          disabled={!row.productId}
+                          placeholder="Chọn PL"
+                          size="sm"
+                          options={variantsFor(row.productId).map((v) => ({
+                            value: String(v.id),
+                            label: v.code,
+                            hint: !v.isSellable ? "· NS" : v.name,
+                            searchText: `${v.code} ${v.name}`,
+                          }))}
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <input
+                          type="number"
+                          min={1}
+                          value={row.qty}
+                          onChange={(e) => {
+                            const next = [...rows];
+                            next[idx] = { ...next[idx], qty: Number(e.target.value) || 1 };
+                            setRows(next);
+                          }}
+                          className="w-20 h-9 text-center text-xs border rounded-md bg-background mx-auto focus:outline-none focus:ring-2 focus:ring-ring/40 tabular-nums"
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <input
+                          value={row.unit}
+                          onChange={(e) => {
+                            const next = [...rows];
+                            next[idx] = { ...next[idx], unit: e.target.value };
+                            setRows(next);
+                          }}
+                          className="w-16 h-9 text-center text-xs border rounded-md bg-background mx-auto font-mono focus:outline-none focus:ring-2 focus:ring-ring/40"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => setRows(rows.filter((_, i) => i !== idx))}
+                          className={cn(
+                            "inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-danger-soft text-muted-foreground hover:text-danger transition-colors",
+                            rows.length <= 1 && "opacity-40 pointer-events-none",
+                          )}
+                          title="Xóa dòng"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          <div className="fixed bottom-0 left-0 right-0 p-3 bg-card border-t lg:hidden z-30 flex gap-2">
+          <div className="fixed bottom-0 left-0 right-0 p-3 bg-card border-t lg:hidden z-30 flex gap-2 shadow-lg">
             <button
               type="button"
               onClick={() => void navigate("/admin/production")}
-              className="flex-1 py-2 text-sm font-medium border rounded-md hover:bg-muted"
+              className="flex-1 h-10 text-sm font-medium border rounded-md hover:bg-muted"
             >
               Hủy
             </button>
@@ -367,7 +367,7 @@ export default function ProductionRecipeFormPage() {
               type="button"
               disabled={saving}
               onClick={() => void submit()}
-              className="flex-1 flex items-center justify-center gap-2 py-2 text-sm font-semibold bg-primary text-primary-foreground rounded-md disabled:opacity-50"
+              className="flex-1 flex items-center justify-center gap-2 h-10 text-sm font-semibold bg-primary text-primary-foreground rounded-md disabled:opacity-50"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Lưu

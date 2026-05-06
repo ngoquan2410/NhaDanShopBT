@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -19,6 +20,11 @@ public interface PendingOrderRepository extends JpaRepository<PendingOrder, Long
     List<PendingOrder> findAllByOrderByCreatedAtDesc();
 
     Page<PendingOrder> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    List<PendingOrder> findByCustomerIdAndStatusInAndExpiresAtAfterOrderByCreatedAtDesc(
+            String customerId,
+            Collection<PendingOrder.Status> statuses,
+            LocalDateTime now);
 
     /** Scheduler: tìm đơn PENDING đã quá hạn để tự hủy */
     List<PendingOrder> findByStatusAndExpiresAtBefore(PendingOrder.Status status, LocalDateTime now);

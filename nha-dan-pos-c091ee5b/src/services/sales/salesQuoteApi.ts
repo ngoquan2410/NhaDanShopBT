@@ -3,6 +3,7 @@
  */
 
 import { adminFetchJson } from "@/services/auth/adminApi";
+import { storefrontFetch } from "@/lib/storefrontAuthHeaders";
 import type { PricingBreakdownSnapshot, ShippingAddress, ShippingQuoteSnapshot } from "@/services/types";
 
 export type SalesQuoteLinePayload = {
@@ -153,11 +154,9 @@ function mapQuoteResponse(j: Record<string, unknown>): SalesQuoteApiResult {
 }
 
 export async function postSalesQuote(req: SalesQuoteRequestPayload): Promise<SalesQuoteApiResult> {
-  let accessToken: string | undefined;
-  try { accessToken = JSON.parse(window.localStorage.getItem("nhadan.auth.session.v1") || "{}")?.accessToken; } catch { /* ignore */ }
-  const res = await fetch("/api/sales/quote", {
+  const res = await storefrontFetch("/api/sales/quote", {
     method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json", ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify(req),
   });
   if (!res.ok) {

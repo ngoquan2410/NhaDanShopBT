@@ -13,6 +13,8 @@ public record CustomerResponse(
         String group,
         BigDecimal totalSpend,
         BigDecimal debt,
+        Long orderCount,
+        LocalDateTime lastPurchaseAt,
         String note,
         Boolean active,
         LocalDateTime createdAt,

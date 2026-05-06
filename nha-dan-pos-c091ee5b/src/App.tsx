@@ -51,6 +51,8 @@ import AdminGhnQuoteLogs from "@/pages/admin/GhnQuoteLogs";
 import AdminGoongTest from "@/pages/admin/GoongTestPage";
 import AdminProduction from "@/pages/admin/Production";
 import AdminProductionRecipeForm from "@/pages/admin/ProductionRecipeFormPage";
+import AdminProductionRecipeDetail from "@/pages/admin/ProductionRecipeDetailPage";
+
 
 import PlaceholderPage from "@/pages/PlaceholderPage";
 import NotFound from "@/pages/NotFound";
@@ -111,6 +113,7 @@ const App = () => (
               <Route path="goods-receipts/create" element={<AdminGoodsReceiptCreate />} />
               <Route path="stock-adjustments" element={<AdminStockAdjustments />} />
               <Route path="stock-adjustments/create" element={<AdminStockAdjustmentCreate />} />
+              <Route path="production/recipes/:id" element={<AdminProductionRecipeDetail />} />
               <Route path="inventory-report" element={<AdminInventoryReport />} />
               <Route path="production/recipes/new" element={<AdminProductionRecipeForm />} />
               <Route path="production" element={<AdminProduction />} />

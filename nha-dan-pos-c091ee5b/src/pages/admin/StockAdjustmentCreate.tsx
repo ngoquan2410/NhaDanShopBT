@@ -47,6 +47,10 @@ export default function AdminStockAdjustmentCreate() {
   };
 
   const handleConfirm = async () => {
+    if (hasDirectionViolation) {
+      toast.error("Lý do Hàng hỏng chỉ được giảm tồn, không được tăng số lượng.");
+      return;
+    }
     try {
       const created = await adminFetchJson<{ id: number }>("/api/stock-adjustments", {
         method: "POST",
@@ -164,6 +168,15 @@ export default function AdminStockAdjustmentCreate() {
 
   const totalPositive = lines.filter(l => l.difference > 0).reduce((s, l) => s + l.difference, 0);
   const totalNegative = lines.filter(l => l.difference < 0).reduce((s, l) => s + l.difference, 0);
+  const isDamageReason = reason === "Hàng hỏng";
+  const hasDirectionViolation = isDamageReason && lines.some((l) => l.difference > 0);
+  const updateLineActualQty = (lineId: string, rawValue: number) => {
+    setLines((prev) => prev.map((line) => {
+      if (line.id !== lineId) return line;
+      const actualQty = isDamageReason ? Math.min(rawValue, line.systemQty) : rawValue;
+      return { ...line, actualQty, difference: actualQty - line.systemQty };
+    }));
+  };
 
   return (
     <div className="admin-dense">
@@ -189,7 +202,9 @@ export default function AdminStockAdjustmentCreate() {
                   type="button"
                   data-testid="stock-adj-confirm-open"
                   onClick={() => setShowConfirm(true)}
-                  className="px-3 py-1.5 text-xs font-medium bg-success text-success-foreground rounded-md hover:bg-success/90"
+                  disabled={hasDirectionViolation}
+                  title={hasDirectionViolation ? "Hàng hỏng chỉ được giảm tồn" : undefined}
+                  className="px-3 py-1.5 text-xs font-medium bg-success text-success-foreground rounded-md hover:bg-success/90 disabled:opacity-50"
                 >
                   <Check className="h-3.5 w-3.5 inline mr-1" /> Xác nhận
                 </button>
@@ -218,7 +233,21 @@ export default function AdminStockAdjustmentCreate() {
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="text-xs font-medium text-muted-foreground">Lý do</label>
-            <select value={reason} onChange={e => setReason(e.target.value)} disabled={status === 'confirmed'} className="mt-1 w-full h-8 px-2 text-sm border rounded-md bg-background disabled:opacity-60">
+            <select
+              value={reason}
+              onChange={e => {
+                const nextReason = e.target.value;
+                setReason(nextReason);
+                if (nextReason === "Hàng hỏng") {
+                  setLines((prev) => prev.map((line) => {
+                    const actualQty = Math.min(line.actualQty, line.systemQty);
+                    return { ...line, actualQty, difference: actualQty - line.systemQty };
+                  }));
+                }
+              }}
+              disabled={status === 'confirmed'}
+              className="mt-1 w-full h-8 px-2 text-sm border rounded-md bg-background disabled:opacity-60"
+            >
               <option>Kiểm kho định kỳ</option>
               <option>Hàng hỏng</option>
               <option>Sai lệch hệ thống</option>
@@ -281,6 +310,11 @@ export default function AdminStockAdjustmentCreate() {
       {savedAt && status === 'draft' && (
         <div className="mt-2 text-xs text-muted-foreground">Đã lưu nháp lúc {new Date(savedAt).toLocaleTimeString('vi-VN')}</div>
       )}
+      {hasDirectionViolation && (
+        <div className="mt-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-medium text-danger">
+          Hàng hỏng là nghiệp vụ giảm tồn. Vui lòng nhập số thực tế nhỏ hơn hoặc bằng tồn hệ thống.
+        </div>
+      )}
 
       {/* Summary strip */}
       <div className="grid grid-cols-3 gap-3 mt-3">
@@ -321,7 +355,15 @@ export default function AdminStockAdjustmentCreate() {
                 <td className="px-3 py-2.5 text-center font-medium">{l.systemQty}</td>
                 <td className="px-3 py-2.5 text-center">
                   {status === 'draft' ? (
-                    <input type="number" data-testid="stock-adj-line-actual-qty" value={l.actualQty} onChange={e => setLines(prev => prev.map(x => x.id === l.id ? { ...x, actualQty: +e.target.value, difference: +e.target.value - x.systemQty } : x))} className="w-16 h-7 text-center text-xs border rounded bg-background" />
+                    <input
+                      type="number"
+                      min={0}
+                      max={isDamageReason ? l.systemQty : undefined}
+                      data-testid="stock-adj-line-actual-qty"
+                      value={l.actualQty}
+                      onChange={e => updateLineActualQty(l.id, Number(e.target.value))}
+                      className="w-16 h-7 text-center text-xs border rounded bg-background"
+                    />
                   ) : (
                     <span className="font-medium">{l.actualQty}</span>
                   )}

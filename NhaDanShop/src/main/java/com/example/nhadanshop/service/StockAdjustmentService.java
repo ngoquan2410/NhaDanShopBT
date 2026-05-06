@@ -178,6 +178,8 @@ public class StockAdjustmentService {
 
             item.setActualQty(ir.actualQty());
 
+            assertReasonAllowsDiff(adj.getReason(), ir.actualQty() - systemQty, "tao phieu " + adj.getAdjNo());
+
             if (ir.actualQty() > systemQty) {
 
                 assertProductAndVariantActiveForStockIncrease(
@@ -247,6 +249,8 @@ public class StockAdjustmentService {
             }
 
             int diff = item.getActualQty() - snapshotSystemQty; // diff_qty
+
+            assertReasonAllowsDiff(adj.getReason(), diff, "xac nhan phieu " + adj.getAdjNo());
 
 
 
@@ -884,6 +888,18 @@ public class StockAdjustmentService {
 
         return adjRepo.findAllByOrderByAdjDateDesc(pageable).map(this::toResponse);
 
+    }
+
+    private void assertReasonAllowsDiff(StockAdjustment.Reason reason, int diff, String context) {
+        if (diff <= 0) {
+            return;
+        }
+        if (reason == StockAdjustment.Reason.DAMAGED
+                || reason == StockAdjustment.Reason.EXPIRED
+                || reason == StockAdjustment.Reason.LOST) {
+            throw new IllegalArgumentException(
+                    "Ly do " + reason + " chi duoc giam ton. Khong duoc tang ton khi " + context + ".");
+        }
     }
 
 

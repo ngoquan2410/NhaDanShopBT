@@ -9,8 +9,11 @@ import { formatVND, formatNumber } from "@/lib/format";
 import { TrendingUp, Download, ShoppingCart, BarChart3, Search, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, Tooltip, XAxis, YAxis } from "recharts";
+import { ChartContainer } from "@/components/ui/chart";
 
 type Group = "daily" | "weekly" | "monthly" | "yearly";
+const CATEGORY_COLORS = ["#2563eb", "#16a34a", "#f97316", "#dc2626", "#7c3aed", "#0891b2", "#ca8a04", "#be123c"];
 
 const groupLabel: Record<Group, string> = { daily: "Ngày", weekly: "Tuần", monthly: "Tháng", yearly: "Năm" };
 
@@ -68,6 +71,13 @@ export default function AdminRevenueReport() {
     [backendCategoryRows],
   );
 
+  const pieCategorySlices = useMemo(() => {
+    const categoryRows = [...unfilteredCategorySlices].sort((a, b) => b.revenue - a.revenue);
+    if (categoryRows.length <= 7) return categoryRows;
+    const rest = categoryRows.slice(7).reduce((s, r) => s + r.revenue, 0);
+    return rest > 0 ? [...categoryRows.slice(0, 7), { name: "Khác", revenue: rest }] : categoryRows.slice(0, 7);
+  }, [unfilteredCategorySlices]);
+
   const productTableRows = useMemo(
     () =>
       backendProductRows.map((r, i) => ({
@@ -86,7 +96,17 @@ export default function AdminRevenueReport() {
   const totalInvoices = rows.reduce((s, r) => s + r.invoiceCount, 0);
   const totalItems = rows.reduce((s, r) => s + r.itemsSold, 0);
 
-  const pickerProducts = products.filter((p) => !pickerSearch || p.name.toLowerCase().includes(pickerSearch.toLowerCase()));
+  const pickerProducts = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; code?: string }>();
+    for (const p of products) map.set(p.id, { id: p.id, name: p.name, code: p.code });
+    for (const r of backendProductRows) {
+      const id = String(r.productId ?? r.id ?? "");
+      if (!id || map.has(id)) continue;
+      map.set(id, { id, name: String(r.productName ?? r.name ?? id), code: String(r.productCode ?? r.code ?? "") });
+    }
+    const q = pickerSearch.trim().toLowerCase();
+    return [...map.values()].filter((p) => !q || p.name.toLowerCase().includes(q) || String(p.code ?? "").toLowerCase().includes(q));
+  }, [backendProductRows, pickerSearch, products]);
   const toggle = (id: string) => setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const handleExportExcel = async () => {
@@ -212,7 +232,7 @@ export default function AdminRevenueReport() {
       {isFiltered && (
         <div className="flex flex-wrap gap-1.5">
           {selected.map((id) => {
-            const p = products.find((x) => x.id === id);
+            const p = pickerProducts.find((x) => x.id === id) ?? products.find((x) => x.id === id);
             if (!p) return null;
             return (
               <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] bg-primary-soft text-primary rounded-full">
@@ -234,7 +254,36 @@ export default function AdminRevenueReport() {
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="bg-card rounded-lg border p-4">
           <h3 className="font-semibold text-sm mb-3">Doanh thu theo {groupLabel[groupBy].toLowerCase()}</h3>
-          <div className="space-y-2">
+          <ChartContainer config={{ revenue: { label: "Doanh thu", color: "hsl(var(--primary))" } }} className="h-72 w-full">
+            <AreaChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
+              <defs>
+                <linearGradient id="revFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="period" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+              <YAxis tickLine={false} axisLine={false} tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`} width={48} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+              <Tooltip
+                cursor={{ stroke: "hsl(var(--primary))", strokeWidth: 1, strokeDasharray: "3 3" }}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  const row = payload[0].payload as typeof rows[number];
+                  return (
+                    <div className="rounded-lg border bg-background px-3 py-2 text-xs shadow-xl">
+                      <p className="font-semibold">{label}</p>
+                      <p>Doanh thu: <b>{formatVND(row.revenue)}</b></p>
+                      <p>Hóa đơn: <b>{formatNumber(row.invoiceCount)}</b></p>
+                      <p>SP bán: <b>{formatNumber(row.itemsSold)}</b></p>
+                    </div>
+                  );
+                }}
+              />
+              <Area type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2.5} fill="url(#revFill)" activeDot={{ r: 5, strokeWidth: 2, stroke: "hsl(var(--background))" }} />
+            </AreaChart>
+          </ChartContainer>
+          <div className="hidden">
             {rows.map((r, i) => {
               const maxRev = Math.max(...rows.map((x) => x.revenue), 1);
               const pct = (r.revenue / maxRev) * 100;
@@ -253,7 +302,58 @@ export default function AdminRevenueReport() {
 
         <div className="bg-card rounded-lg border p-4">
           <h3 className="font-semibold text-sm mb-3">{isFiltered ? "Doanh thu theo sản phẩm đã chọn" : "Doanh thu theo danh mục"}</h3>
-          <div className="space-y-2">
+          <ChartContainer config={{ revenue: { label: "Doanh thu", color: "hsl(var(--success))" } }} className="h-72 w-full">
+            {isFiltered ? (
+            <BarChart data={filteredProductSlices.slice(0, 10)} layout="vertical" margin={{ left: 8, right: 24, top: 8, bottom: 8 }}>
+              <defs>
+                <linearGradient id="prodBarFill" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="hsl(var(--success))" stopOpacity={0.7} />
+                  <stop offset="100%" stopColor="hsl(var(--success))" stopOpacity={1} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis type="number" tickLine={false} axisLine={false} tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+              <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} width={120} tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }} />
+              <Tooltip
+                cursor={{ fill: "hsl(var(--muted) / 0.5)" }}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  const row = payload[0].payload as { name: string; revenue: number; qty?: number };
+                  return (
+                    <div className="rounded-lg border bg-background px-3 py-2 text-xs shadow-xl">
+                      <p className="font-semibold">{row.name || label}</p>
+                      <p>Doanh thu hàng hóa: <b>{formatVND(row.revenue)}</b></p>
+                      {row.qty != null && <p>SL bán: <b>{formatNumber(row.qty)}</b></p>}
+                    </div>
+                  );
+                }}
+              />
+              <Bar dataKey="revenue" fill="url(#prodBarFill)" radius={[0, 6, 6, 0]} />
+            </BarChart>
+            ) : (
+            <PieChart margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null;
+                  const row = payload[0].payload as { name: string; revenue: number };
+                  return (
+                    <div className="rounded-lg border bg-background px-3 py-2 text-xs shadow-xl">
+                      <p className="font-semibold">{row.name}</p>
+                      <p>Doanh thu hàng hóa: <b>{formatVND(row.revenue)}</b></p>
+                    </div>
+                  );
+                }}
+              />
+              <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: 11 }} iconType="circle" />
+              <Pie data={pieCategorySlices} dataKey="revenue" nameKey="name" innerRadius={58} outerRadius={96} paddingAngle={3} stroke="hsl(var(--background))" strokeWidth={2}>
+                {pieCategorySlices.map((entry, index) => (
+                  <Cell key={entry.name} fill={CATEGORY_COLORS[index % CATEGORY_COLORS.length]} />
+                ))}
+              </Pie>
+            </PieChart>
+            )}
+          </ChartContainer>
+          <div className="hidden">
             {(isFiltered ? filteredProductSlices : unfilteredCategorySlices).map((r, i) => {
               const list = isFiltered
                 ? filteredProductSlices

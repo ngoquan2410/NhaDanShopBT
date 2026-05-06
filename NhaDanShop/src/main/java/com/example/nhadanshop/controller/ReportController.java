@@ -26,6 +26,10 @@ public class ReportController {
     private final ReportService reportService;
     private final InventoryStockService stockService;
 
+    private List<Long> distinct(List<Long> ids) {
+        return ids == null ? List.of() : ids.stream().distinct().collect(Collectors.toList());
+    }
+
     // ════════════════════════════════════════════════════════════════
     // PROFIT REPORTS
     // ════════════════════════════════════════════════════════════════
@@ -72,8 +76,17 @@ public class ReportController {
     @GetMapping("/profit/weekly")
     public List<ProfitReportResponse> profitWeekly(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        return reportService.getWeeklyReport(from, to);
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) List<Long> productIds) {
+        return reportService.getWeeklyReport(from, to, distinct(productIds));
+    }
+
+    @GetMapping("/profit/daily")
+    public List<ProfitReportResponse> profitDaily(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) List<Long> productIds) {
+        return reportService.getDailyReport(from, to, distinct(productIds));
     }
 
     /**
@@ -83,8 +96,9 @@ public class ReportController {
     @GetMapping("/profit/monthly")
     public List<ProfitReportResponse> profitMonthly(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        return reportService.getMonthlyReport(from, to);
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) List<Long> productIds) {
+        return reportService.getMonthlyReport(from, to, distinct(productIds));
     }
 
     /**
