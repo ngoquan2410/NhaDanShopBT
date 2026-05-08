@@ -1,10 +1,13 @@
 package com.example.nhadanshop.service;
 
+import com.example.nhadanshop.dto.PromotionBuyItemRequest;
+import com.example.nhadanshop.dto.PromotionBuyItemResponse;
 import com.example.nhadanshop.dto.PromotionRequest;
 import com.example.nhadanshop.dto.PromotionResponse;
 import com.example.nhadanshop.entity.Category;
 import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.entity.Promotion;
+import com.example.nhadanshop.entity.PromotionBuyItem;
 import com.example.nhadanshop.repository.CategoryRepository;
 import com.example.nhadanshop.repository.ProductRepository;
 import com.example.nhadanshop.repository.PendingOrderRepository;
@@ -18,6 +21,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -39,23 +43,25 @@ public class PromotionService {
     public PromotionResponse create(PromotionRequest req) {
         Promotion p = new Promotion();
         applyRequest(p, req);
-        return toResponse(promotionRepo.save(p));
+        Promotion saved = promotionRepo.save(p);
+        return toResponse(promotionRepo.findByIdWithDetails(saved.getId()).orElse(saved));
     }
 
     public PromotionResponse update(Long id, PromotionRequest req) {
         Promotion p = promotionRepo.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy khuyến mãi ID: " + id));
         applyRequest(p, req);
-        return toResponse(promotionRepo.save(p));
+        Promotion saved = promotionRepo.save(p);
+        return toResponse(promotionRepo.findByIdWithDetails(saved.getId()).orElse(saved));
     }
 
     public PromotionResponse getOne(Long id) {
-        return toResponse(promotionRepo.findById(id)
+        return toResponse(promotionRepo.findByIdWithDetails(id)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy khuyến mãi ID: " + id)));
     }
 
     public Page<PromotionResponse> list(Pageable pageable) {
-        return promotionRepo.findAllByOrderByStartDateDesc(pageable).map(this::toResponse);
+        return promotionRepo.findByActiveTrueOrderByStartDateDesc(pageable).map(this::toResponse);
     }
 
     public List<PromotionResponse> listActive() {
@@ -91,7 +97,8 @@ public class PromotionService {
         Promotion p = promotionRepo.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy khuyến mãi ID: " + id));
         p.setActive(!p.getActive());
-        return toResponse(promotionRepo.save(p));
+        Promotion saved = promotionRepo.save(p);
+        return toResponse(promotionRepo.findByIdWithDetails(saved.getId()).orElse(saved));
     }
 
     // ─────────────────── Helpers ─────────────────────────────────────────────
@@ -106,16 +113,58 @@ public class PromotionService {
         p.setStartDate(req.startDate());
         p.setEndDate(req.endDate());
         p.setAppliesTo(req.appliesTo() != null ? req.appliesTo() : "ALL");
+        p.setMinOrderScope(req.minOrderScope() != null ? req.minOrderScope() : "ELIGIBLE_ITEMS");
         if (req.active() != null) p.setActive(req.active());
+
+        if (req.repeatable() != null) {
+            p.setRepeatable(req.repeatable());
+        } else if (p.getRepeatable() == null) {
+            p.setRepeatable(true);
+        }
 
         // BUY_X_GET_Y + QUANTITY_GIFT fields
         p.setBuyQty(req.buyQty());
         p.setGetProductId(req.getProductId());
         p.setGetQty(req.getQty());
         p.setMinBuyQty(req.minBuyQty());
-        p.setMaxBuyQty(req.maxBuyQty());
+        if ("QUANTITY_GIFT".equals(req.type())) {
+            if (req.maxGiftApplications() != null) {
+                p.setMaxBuyQty(req.maxGiftApplications());
+            } else {
+                p.setMaxBuyQty(req.maxBuyQty());
+            }
+        } else {
+            p.setMaxBuyQty(req.maxBuyQty());
+        }
 
-        // Danh mục áp dụng
+        p.getBuyItems().clear();
+        if ("BUY_X_GET_Y".equals(req.type())) {
+            if (req.buyItems() != null && !req.buyItems().isEmpty()) {
+                int order = 0;
+                for (PromotionBuyItemRequest bi : req.buyItems()) {
+                    if (bi.productId() == null || bi.buyQty() == null || bi.buyQty() <= 0) {
+                        continue;
+                    }
+                    PromotionBuyItem row = new PromotionBuyItem();
+                    row.setPromotion(p);
+                    row.setProduct(productRepo.getReferenceById(bi.productId()));
+                    row.setBuyQty(bi.buyQty());
+                    row.setSortOrder(bi.sortOrder() != null ? bi.sortOrder() : order++);
+                    p.getBuyItems().add(row);
+                }
+            } else if (req.productIds() != null && !req.productIds().isEmpty()) {
+                int x = req.buyQty() != null && req.buyQty() > 0 ? req.buyQty() : 1;
+                int order = 0;
+                for (Long pid : req.productIds()) {
+                    PromotionBuyItem row = new PromotionBuyItem();
+                    row.setPromotion(p);
+                    row.setProduct(productRepo.getReferenceById(pid));
+                    row.setBuyQty(x);
+                    row.setSortOrder(order++);
+                    p.getBuyItems().add(row);
+                }
+            }
+        }
         Set<Category> categories = new HashSet<>();
         if (req.categoryIds() != null && !req.categoryIds().isEmpty()) {
             categories.addAll(categoryRepo.findAllById(req.categoryIds()));
@@ -143,14 +192,30 @@ public class PromotionService {
                     .map(Product::getName).orElse(null);
         }
 
+        Integer maxGiftApplications = "QUANTITY_GIFT".equals(p.getType()) ? p.getMaxBuyQty() : null;
+
+        List<PromotionBuyItemResponse> buyItemRows = p.getBuyItems().stream()
+                .sorted(Comparator.comparing(PromotionBuyItem::getSortOrder)
+                        .thenComparing(bi -> bi.getId() != null ? bi.getId() : 0L))
+                .map(bi -> new PromotionBuyItemResponse(
+                        bi.getProduct().getId(),
+                        bi.getProduct().getName(),
+                        bi.getProduct().getCode(),
+                        bi.getBuyQty(),
+                        bi.getSortOrder() != null ? bi.getSortOrder() : 0))
+                .collect(Collectors.toList());
+
         return new PromotionResponse(
                 p.getId(), p.getName(), p.getDescription(), p.getType(),
                 p.getDiscountValue(), p.getMinOrderValue(), p.getMaxDiscount(),
                 p.getStartDate(), p.getEndDate(), p.getActive(), p.isCurrentlyActive(),
-                p.getAppliesTo(),
+                p.getAppliesTo(), p.getMinOrderScope() != null ? p.getMinOrderScope() : "ELIGIBLE_ITEMS",
                 catIds, catNames, prodIds, prodNames,
                 p.getBuyQty(), p.getGetProductId(), getProductName, p.getGetQty(),
                 p.getMinBuyQty(), p.getMaxBuyQty(),
+                buyItemRows,
+                p.getRepeatable(),
+                maxGiftApplications,
                 p.getCreatedAt(), p.getUpdatedAt()
         );
     }

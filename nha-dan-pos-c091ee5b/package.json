@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run check:utf8 && vite build",
+    "check:utf8": "node scripts/check-utf8-mojibake.mjs src ../NhaDanShop/src/main/java ../NhaDanShop/src/main/resources",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:automation": "node automation/selenium/run-selenium.mjs",
+    "e2e:promo": "cross-env RUN_AUTOMATION=1 AUTOMATION_SCOPE=promotion-checkout AUTOMATION_NO_SKIP=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://localhost:8080 node automation/selenium/run-selenium.mjs --run"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -79,6 +82,7 @@
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "autoprefixer": "^10.4.21",
+    "cross-env": "^10.1.0",
     "eslint": "^9.32.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
@@ -86,6 +90,7 @@
     "jsdom": "^20.0.3",
     "lovable-tagger": "^1.1.13",
     "postcss": "^8.5.6",
+    "selenium-webdriver": "^4.27.1",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",

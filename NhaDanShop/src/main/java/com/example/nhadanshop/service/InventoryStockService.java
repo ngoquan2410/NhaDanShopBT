@@ -81,20 +81,43 @@ public class InventoryStockService {
      * opening/closing reconcile với Slice 6 sản xuất qua ProdNet(xem javadoc class).
      */
     public InventoryStockReport getStockReport(LocalDate from, LocalDate to) {
+        return getStockReport(from, to, null, null, null, null);
+    }
+
+    /**
+     * @param keyword    lọc theo tên SP / variant / mã / tên danh mục (contains)
+     * @param categoryId lọc theo id danh mục (ưu tiên hơn categoryName nếu cả hai có)
+     * @param categoryName tên danh mục như trên UI; đối chiếu với "Không phân loại" khi trống
+     * @param sort       ví dụ {@code product:asc}, {@code closing:desc}
+     */
+    public InventoryStockReport getStockReport(
+            LocalDate from,
+            LocalDate to,
+            String keyword,
+            Long categoryId,
+            String categoryName,
+            String sort
+    ) {
         LocalDate today = LocalDate.now(businessClock);
 
-        // ── Validation ──────────────────────────────────────────────
         if (to.isAfter(today)) {
             log.warn("getStockReport: toDate {} > today {}, clamped to today", to, today);
             to = today;
         }
         if (to.isBefore(from)) {
             throw new IllegalArgumentException(
-                "Đến ngày (" + to + ") không được nhỏ hơn Từ ngày (" + from + ")");
+                    "Đến ngày (" + to + ") không được nhỏ hơn Từ ngày (" + from + ")");
         }
 
+        List<InventoryStockReportRow> rows = buildRowsInternal(from, to);
+        rows = filterInventoryRows(rows, keyword, categoryId, categoryName);
+        rows = sortInventoryRows(rows, sort);
+        return new InventoryStockReport(from, to, rows);
+    }
+
+    private List<InventoryStockReportRow> buildRowsInternal(LocalDate from, LocalDate to) {
         LocalDateTime fromDt = from.atStartOfDay();
-        LocalDateTime toDt   = to.atTime(LocalTime.MAX);
+        LocalDateTime toDt = to.atTime(LocalTime.MAX);
 
         // Ensure ledger rows written in the same persistence transaction are visible to aggregate JPQL
         entityManager.flush();
@@ -158,9 +181,12 @@ public class InventoryStockService {
 
             String sellUnit = v.getSellUnit() != null ? v.getSellUnit() : "cai";
 
+            String displayCat = p.getCategory() != null ? p.getCategory().getName() : "";
+            Long catId = p.getCategory() != null ? p.getCategory().getId() : null;
             rows.add(new InventoryStockReportRow(
                     p.getId(), p.getCode(), p.getName(),
-                    p.getCategory() != null ? p.getCategory().getName() : "",
+                    displayCat,
+                    catId,
                     sellUnit,
                     vid, v.getVariantCode(), v.getVariantName(),
                     openingStock,
@@ -172,7 +198,76 @@ public class InventoryStockService {
                     from, to
             ));
         }
-        return new InventoryStockReport(from, to, rows);
+        return rows;
+    }
+
+    private static String nrm(String s) {
+        return s == null ? "" : s.trim();
+    }
+
+    private List<InventoryStockReportRow> filterInventoryRows(
+            List<InventoryStockReportRow> rows,
+            String keyword,
+            Long categoryId,
+            String categoryName
+    ) {
+        String kw = nrm(keyword).toLowerCase();
+        String catName = nrm(categoryName);
+        List<InventoryStockReportRow> out = new ArrayList<>();
+        for (InventoryStockReportRow r : rows) {
+            if (categoryId != null && (r.categoryId() == null || !categoryId.equals(r.categoryId()))) {
+                continue;
+            }
+            if (!catName.isEmpty()) {
+                String rowCat = r.categoryName() == null || r.categoryName().isEmpty()
+                        ? "Không phân loại" : r.categoryName();
+                if (!catName.equals(rowCat)) {
+                    continue;
+                }
+            }
+            if (!kw.isEmpty()) {
+                String blob = String.join(" ",
+                        r.productName(), r.variantName(), r.variantCode(),
+                        r.categoryName() != null ? r.categoryName() : "").toLowerCase();
+                if (!blob.contains(kw)) {
+                    continue;
+                }
+            }
+            out.add(r);
+        }
+        return out;
+    }
+
+    private List<InventoryStockReportRow> sortInventoryRows(List<InventoryStockReportRow> rows, String sortSpec) {
+        if (sortSpec == null || sortSpec.isBlank()) {
+            return rows;
+        }
+        String[] p = sortSpec.trim().split(":", 2);
+        String key = p[0].trim().toLowerCase();
+        boolean asc = p.length < 2 || !"desc".equalsIgnoreCase(p[1].trim());
+        List<InventoryStockReportRow> copy = new ArrayList<>(rows);
+        java.util.Comparator<InventoryStockReportRow> cmp = switch (key) {
+            case "code" -> java.util.Comparator.comparing(
+                    r -> r.variantCode() != null ? r.variantCode() : "", java.util.Comparator.naturalOrder());
+            case "product" -> java.util.Comparator.comparing(
+                    r -> (r.productName() + " " + r.variantName()).toLowerCase());
+            case "category" -> java.util.Comparator.comparing(
+                    r -> r.categoryName() != null ? r.categoryName() : "", java.util.Comparator.naturalOrder());
+            case "opening" -> java.util.Comparator.comparingInt(InventoryStockReportRow::openingStock);
+            case "received" -> java.util.Comparator.comparingInt(InventoryStockReportRow::totalReceived);
+            case "sold" -> java.util.Comparator.comparingInt(InventoryStockReportRow::totalSold);
+            case "adjusted" -> java.util.Comparator.comparingInt(InventoryStockReportRow::totalAdjusted);
+            case "closing" -> java.util.Comparator.comparingInt(InventoryStockReportRow::closingStock);
+            case "value" -> java.util.Comparator.comparing(
+                    InventoryStockReportRow::closingStockValue, java.util.Comparator.nullsFirst(BigDecimal::compareTo));
+            default -> java.util.Comparator.comparing(
+                    r -> (r.productName() + " " + r.variantName()).toLowerCase());
+        };
+        if (!asc) {
+            cmp = cmp.reversed();
+        }
+        copy.sort(cmp);
+        return copy;
     }
 
     /**
@@ -223,7 +318,18 @@ public class InventoryStockService {
      * Xuất báo cáo tồn kho ra file Excel (.xlsx).
      */
     public byte[] exportStockReportToExcel(LocalDate from, LocalDate to) throws IOException {
-        InventoryStockReport report = getStockReport(from, to);
+        return exportStockReportToExcel(from, to, null, null, null, null);
+    }
+
+    public byte[] exportStockReportToExcel(
+            LocalDate from,
+            LocalDate to,
+            String keyword,
+            Long categoryId,
+            String categoryName,
+            String sort
+    ) throws IOException {
+        InventoryStockReport report = getStockReport(from, to, keyword, categoryId, categoryName, sort);
 
         try (XSSFWorkbook workbook = new XSSFWorkbook();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -249,7 +355,14 @@ public class InventoryStockService {
 
             Row subTitleRow = sheet.createRow(rowIdx++);
             Cell subCell = subTitleRow.createCell(0);
-            subCell.setCellValue("Kỳ: " + from.format(DATE_FMT) + " → " + to.format(DATE_FMT));
+            StringBuilder sub = new StringBuilder("Kỳ: " + from.format(DATE_FMT) + " → " + to.format(DATE_FMT));
+            if (nrm(categoryName).length() > 0) {
+                sub.append(" · Danh mục: ").append(nrm(categoryName));
+            }
+            if (nrm(keyword).length() > 0) {
+                sub.append(" · Lọc: ").append(nrm(keyword));
+            }
+            subCell.setCellValue(sub.toString());
             subCell.setCellStyle(dataStyle);
             sheet.addMergedRegion(new CellRangeAddress(1, 1, 0, 9));
 

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.example.nhadanshop.dto.production.ProductionRecipeDtos;
 import com.example.nhadanshop.dto.production.ProductionRecipeDtos.*;
+import com.example.nhadanshop.exception.ProductionShortageException;
 import com.example.nhadanshop.entity.*;
 import com.example.nhadanshop.repository.*;
 import jakarta.persistence.EntityNotFoundException;
@@ -21,7 +22,6 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.ZoneId;
 import java.util.*;
 
 @Service
@@ -55,9 +55,10 @@ public class ProductionOrderService {
         BigDecimal overhead = overheadFor(recipe, req.overheadCost());
         BigDecimal unit = sim.consumed.add(overhead)
                 .divide(BigDecimal.valueOf(req.outputQty()), 4, RoundingMode.HALF_UP).setScale(2, RoundingMode.HALF_UP);
-        LocalDate mx = sim.minExpiry;
-        ZoneId z = ZoneId.systemDefault();
-        String expIso = (mx != null ? mx : LocalDate.now(z)).toString() + "T00:00:00";
+        LocalDate productionDate = LocalDate.now(clock);
+        ProductVariant outVar = recipe.getOutputVariant();
+        LocalDate outExpDate = resolveOutputExpiryDate(sim.minExpiry, outVar, productionDate);
+        String expIso = outExpDate + "T00:00:00";
         return new ProductionPreviewResponse(
                 recipe.getId(),
                 req.outputQty(),
@@ -79,7 +80,7 @@ public class ProductionOrderService {
 
         Sim cheap = simulate(recipe, req.outputQty(), false);
         if (!cheap.feasible) {
-            throw new IllegalStateException("Không đủ tồn nguyên liệu");
+            throw new ProductionShortageException("Không đủ tồn nguyên liệu", cheap.shortages());
         }
 
         for (Long vid : sortedLockVariantIds(recipe)) {
@@ -88,7 +89,7 @@ public class ProductionOrderService {
 
         Sim locked = simulate(recipe, req.outputQty(), true);
         if (!locked.feasible) {
-            throw new IllegalStateException("Không đủ tồn nguyên liệu (khóa lô)");
+            throw new ProductionShortageException("Không đủ tồn nguyên liệu (khóa lô)", locked.shortages());
         }
 
         validateOutputVariant(recipe.getOutputVariant(), Boolean.TRUE.equals(recipe.getOutputMustBeSellable()));
@@ -96,7 +97,8 @@ public class ProductionOrderService {
         BigDecimal overhead = overheadFor(recipe, req.overheadCost());
         BigDecimal unitCost = locked.consumed.add(overhead)
                 .divide(BigDecimal.valueOf(req.outputQty()), 8, RoundingMode.HALF_UP).setScale(2, RoundingMode.HALF_UP);
-        LocalDate outExp = locked.minExpiry != null ? locked.minExpiry : LocalDate.now(ZoneId.systemDefault());
+        LocalDate productionDate = LocalDate.now(clock);
+        LocalDate outExp = resolveOutputExpiryDate(locked.minExpiry, recipe.getOutputVariant(), productionDate);
 
         ProductionOrder od = new ProductionOrder();
         od.setOrderNo(invoiceNumberGenerator.nextProductionOrderNo());
@@ -115,6 +117,10 @@ public class ProductionOrderService {
 
         applyConsumes(od, locked.consumeLines());
         createOutputBatch(od, recipe, unitCost, outExp);
+
+        ProductVariant costUpdate = variantRepo.findById(recipe.getOutputVariant().getId()).orElseThrow();
+        costUpdate.setCostPrice(unitCost);
+        variantRepo.save(costUpdate);
 
         return mapOrder(orderRepo.findById(od.getId()).orElseThrow(), true);
     }
@@ -252,7 +258,7 @@ public class ProductionOrderService {
         List<ProductionRecipeComponent> rcs =
                 recipeComponentRepo.findByRecipeIdOrderBySortOrderAscIdAsc(recipe.getId());
         if (rcs.isEmpty()) {
-            return new Sim(BigDecimal.ZERO, null, false, 0, List.of(), List.of());
+            return new Sim(BigDecimal.ZERO, null, false, 0, List.of(), List.of(), List.of());
         }
 
         Map<Long, List<MutBatch>> pools = new LinkedHashMap<>();
@@ -287,6 +293,7 @@ public class ProductionOrderService {
         boolean feasible = true;
         List<PreviewComponentDto> previewRows = new ArrayList<>();
         List<ConsumeLine> consumeLines = new ArrayList<>();
+        List<ProductionShortageDetailDto> shortages = new ArrayList<>();
 
         for (ProductionRecipeComponent rc : rcs) {
             long vid = rc.getVariant().getId();
@@ -305,6 +312,20 @@ public class ProductionOrderService {
                 globMin = sr.lineMinExpiry();
             }
             if (!sr.ok()) feasible = false;
+            int missingQty = Math.max(0, need - availableBefore);
+            if (missingQty > 0) {
+                shortages.add(new ProductionShortageDetailDto(
+                        rc.getProduct().getId(),
+                        vid,
+                        rc.getProduct().getName(),
+                        rc.getVariant().getVariantName(),
+                        rc.getVariant().getVariantCode(),
+                        need,
+                        availableBefore,
+                        missingQty,
+                        rc.getUnit()
+                ));
+            }
 
             List<PreviewAllocationDto> allocDtos = new ArrayList<>();
             for (Take t : sr.takes()) {
@@ -320,8 +341,12 @@ public class ProductionOrderService {
             previewRows.add(new PreviewComponentDto(
                     rc.getProduct().getId(),
                     vid,
+                    rc.getProduct().getName(),
+                    rc.getVariant().getVariantName(),
+                    rc.getVariant().getVariantCode(),
                     need,
                     availableBefore,
+                    missingQty,
                     rc.getUnit(),
                     allocDtos
             ));
@@ -329,7 +354,7 @@ public class ProductionOrderService {
             consumeLines.add(new ConsumeLine(rc.getProduct().getId(), vid, rc.getUnit(), need, sr.takes()));
         }
 
-        return new Sim(consumed, globMin, feasible, maxProduce, previewRows, consumeLines);
+        return new Sim(consumed, globMin, feasible, maxProduce, previewRows, consumeLines, shortages);
     }
 
     private MutBatch lookup(List<MutBatch> pool, long batchId) {
@@ -373,8 +398,29 @@ public class ProductionOrderService {
             boolean feasible,
             int maxProduce,
             List<PreviewComponentDto> previewRows,
-            List<ConsumeLine> consumeLines
+            List<ConsumeLine> consumeLines,
+            List<ProductionShortageDetailDto> shortages
     ) {}
+
+    /**
+     * HSD thành phẩm = min(HSD nguyên liệu tiêu hao, ngày SX + HSD chuẩn variant); không sửa {@code expiryDays} trên variant.
+     */
+    private LocalDate resolveOutputExpiryDate(LocalDate rawMinConsumedExpiry, ProductVariant outputVariant, LocalDate productionDate) {
+        Integer shelfDays = outputVariant.getExpiryDays();
+        LocalDate shelfCap = (shelfDays != null && shelfDays > 0)
+                ? productionDate.plusDays(shelfDays.longValue())
+                : null;
+        if (rawMinConsumedExpiry != null && shelfCap != null) {
+            return rawMinConsumedExpiry.isBefore(shelfCap) ? rawMinConsumedExpiry : shelfCap;
+        }
+        if (rawMinConsumedExpiry != null) {
+            return rawMinConsumedExpiry;
+        }
+        if (shelfCap != null) {
+            return shelfCap;
+        }
+        return productionDate;
+    }
 
     private void validateRecipe(ProductionRecipe recipe) {
         if (Boolean.TRUE.equals(recipe.getArchived())) {
@@ -442,11 +488,16 @@ public class ProductionOrderService {
 
     private void applyConsumes(ProductionOrder order, List<ConsumeLine> lines) {
         for (ConsumeLine line : lines) {
+            ProductVariant componentVariant = variantRepo.findById(line.variantId())
+                    .orElseThrow(() -> new EntityNotFoundException("variant " + line.variantId()));
             ProductionOrderComponent oc = new ProductionOrderComponent();
             oc.setOrder(order);
             oc.setProductId(line.productId());
             oc.setVariantId(line.variantId());
             oc.setUnit(line.unit());
+            oc.setProductNameSnapshot(componentVariant.getProduct().getName());
+            oc.setVariantNameSnapshot(componentVariant.getVariantName());
+            oc.setVariantCodeSnapshot(componentVariant.getVariantCode());
             oc.setRequiredQty(line.requiredQty());
             int sum = line.takes().stream().mapToInt(Take::qty).sum();
             oc.setConsumedQty(sum);
@@ -459,13 +510,18 @@ public class ProductionOrderService {
             if (!deltas.isEmpty()) {
                 stockMutationService.updateStockWithBatches(line.variantId(), deltas);
             }
-            for (Take t : line.takes()) {
+            for (int index = 0; index < line.takes().size(); index++) {
+                Take t = line.takes().get(index);
                 ProductBatch batch = batchRepo.findById(t.batchId()).orElseThrow();
                 ProductionOrderAllocation a = new ProductionOrderAllocation();
                 a.setOrderComponent(oc);
                 a.setBatch(batch);
                 a.setQty(t.qty());
-                a.setUnitCost(batch.getCostPrice() != null ? batch.getCostPrice() : BigDecimal.ZERO);
+                BigDecimal unitCost = batch.getCostPrice() != null ? batch.getCostPrice() : BigDecimal.ZERO;
+                a.setUnitCost(unitCost);
+                a.setTotalCostSnapshot(unitCost.multiply(BigDecimal.valueOf(t.qty())).setScale(2, RoundingMode.HALF_UP));
+                a.setBatchCodeSnapshot(batch.getBatchCode());
+                a.setAllocationIndex(index);
                 a.setExpiryDate(batch.getExpiryDate());
                 allocationRepo.save(a);
                 appendMove(line.variantId(), t.batchId(), -t.qty(), M_CONSUME,
@@ -538,16 +594,31 @@ public class ProductionOrderService {
                             .map(a -> new AllocationResponse(
                                     a.getId(),
                                     a.getBatch().getId(),
-                                    a.getBatch().getBatchCode(),
+                                    StringUtils.hasText(a.getBatchCodeSnapshot()) ? a.getBatchCodeSnapshot() : a.getBatch().getBatchCode(),
                                     a.getQty(),
                                     a.getUnitCost(),
+                                    a.getTotalCostSnapshot() != null
+                                            ? a.getTotalCostSnapshot()
+                                            : a.getUnitCost().multiply(BigDecimal.valueOf(a.getQty())).setScale(2, RoundingMode.HALF_UP),
+                                    a.getAllocationIndex(),
                                     a.getExpiryDate() != null ? a.getExpiryDate().toString() + "T00:00:00" : null
                             ))
                             .toList();
+                    ProductVariant variant = variantRepo.findById(oc.getVariantId()).orElse(null);
+                    Product product = variant != null ? variant.getProduct() : null;
                     return new ProductionOrderComponentResponse(
                             oc.getId(),
                             oc.getProductId(),
                             oc.getVariantId(),
+                            StringUtils.hasText(oc.getProductNameSnapshot())
+                                    ? oc.getProductNameSnapshot()
+                                    : (product != null ? product.getName() : null),
+                            StringUtils.hasText(oc.getVariantNameSnapshot())
+                                    ? oc.getVariantNameSnapshot()
+                                    : (variant != null ? variant.getVariantName() : null),
+                            StringUtils.hasText(oc.getVariantCodeSnapshot())
+                                    ? oc.getVariantCodeSnapshot()
+                                    : (variant != null ? variant.getVariantCode() : null),
                             oc.getRequiredQty(),
                             oc.getConsumedQty(),
                             oc.getUnit(),

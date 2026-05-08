@@ -37,6 +37,7 @@ export type AdminPromotionRow = {
   active: boolean;
   currentlyActive: boolean;
   appliesTo: "ALL" | "CATEGORY" | "PRODUCT";
+  minOrderScope?: "ELIGIBLE_ITEMS" | "WHOLE_ORDER";
   categoryIds: number[];
   categoryNames: string[];
   productIds: number[];
@@ -47,6 +48,10 @@ export type AdminPromotionRow = {
   getQty: number | null;
   minBuyQty: number | null;
   maxBuyQty: number | null;
+  /** BUY_X_GET_Y: per-product buy qty from backend */
+  buyItems: { productId: number; buyQty: number; productName?: string; productCode?: string; sortOrder?: number }[];
+  repeatable: boolean;
+  maxGiftApplications: number | null;
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -71,6 +76,24 @@ function strArray(v: unknown): string[] {
 
 function numArray(v: unknown): number[] {
   return Array.isArray(v) ? v.map((x) => num(x)).filter((x) => Number.isFinite(x)) : [];
+}
+
+function parseBuyItems(raw: unknown): AdminPromotionRow["buyItems"] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x) => {
+      const o = x as Record<string, unknown>;
+      const productId = num(o.productId, NaN);
+      if (!Number.isFinite(productId)) return null;
+      return {
+        productId,
+        buyQty: Math.max(1, num(o.buyQty, 1)),
+        productName: o.productName != null ? String(o.productName) : undefined,
+        productCode: o.productCode != null ? String(o.productCode) : undefined,
+        sortOrder: o.sortOrder == null ? undefined : num(o.sortOrder),
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x != null);
 }
 
 function localDate(iso: string | null | undefined): string {
@@ -120,6 +143,7 @@ export function parseAdminPromotionRow(raw: Record<string, unknown>): AdminPromo
     active: raw.active !== false,
     currentlyActive: Boolean(raw.currentlyActive),
     appliesTo: String(raw.appliesTo ?? "ALL") as AdminPromotionRow["appliesTo"],
+    minOrderScope: String(raw.minOrderScope ?? "ELIGIBLE_ITEMS") as AdminPromotionRow["minOrderScope"],
     categoryIds: numArray(raw.categoryIds),
     categoryNames: strArray(raw.categoryNames),
     productIds: numArray(raw.productIds),
@@ -130,6 +154,9 @@ export function parseAdminPromotionRow(raw: Record<string, unknown>): AdminPromo
     getQty: raw.getQty == null ? null : num(raw.getQty),
     minBuyQty: raw.minBuyQty == null ? null : num(raw.minBuyQty),
     maxBuyQty: raw.maxBuyQty == null ? null : num(raw.maxBuyQty),
+    buyItems: parseBuyItems(raw.buyItems),
+    repeatable: raw.repeatable === false ? false : true,
+    maxGiftApplications: raw.maxGiftApplications == null ? null : num(raw.maxGiftApplications),
     createdAt: raw.createdAt != null ? String(raw.createdAt) : null,
     updatedAt: raw.updatedAt != null ? String(raw.updatedAt) : null,
   };
@@ -144,6 +171,7 @@ export function adminPromotionRowToUi(row: AdminPromotionRow): Promotion {
     startDate: localDate(row.startDate),
     endDate: localDate(row.endDate),
     scope: parseScope(row),
+    minOrderBasis: row.minOrderScope === "WHOLE_ORDER" ? "whole-order" : "scoped",
   };
   switch (BACKEND_TO_UI_PROMOTION_TYPE[row.type]) {
     case "fixed":
@@ -152,12 +180,23 @@ export function adminPromotionRowToUi(row: AdminPromotionRow): Promotion {
       return {
         ...base,
         type: "buy-x-get-y",
-        buyItems: row.productIds.length > 0
-          ? row.productIds.map((id, i) => ({ productId: id.toString(), productName: row.productNames[i] ?? "", quantity: row.buyQty ?? 1 }))
-          : [{ productId: "", productName: "", quantity: row.buyQty ?? 1 }],
+        buyItems:
+          row.buyItems.length > 0
+            ? row.buyItems.map((b) => ({
+                productId: b.productId.toString(),
+                productName: b.productName ?? "",
+                quantity: b.buyQty,
+              }))
+            : row.productIds.length > 0
+              ? row.productIds.map((id, i) => ({
+                  productId: id.toString(),
+                  productName: row.productNames[i] ?? "",
+                  quantity: row.buyQty ?? 1,
+                }))
+              : [{ productId: "", productName: "", quantity: row.buyQty ?? 1 }],
         getItems: [{ productId: row.getProductId?.toString() ?? "", productName: row.getProductName ?? "", quantity: row.getQty ?? 1 }],
         mode: "different",
-        repeatable: true,
+        repeatable: row.repeatable,
       };
     case "gift":
       const triggerType: "min-order" | "buy-product" | "buy-quantity" = row.minOrderValue > 0
@@ -173,7 +212,7 @@ export function adminPromotionRowToUi(row: AdminPromotionRow): Promotion {
         triggerProductId: row.productIds[0]?.toString(),
         triggerProductName: row.productNames[0],
         giftItems: [{ productId: row.getProductId?.toString() ?? "", productName: row.getProductName ?? "", quantity: row.getQty ?? 1 }],
-        giftStockLimit: row.maxBuyQty ?? undefined,
+        giftStockLimit: row.maxGiftApplications ?? row.maxBuyQty ?? undefined,
       };
     case "free-shipping":
       return { ...base, type: "free-shipping", minOrder: row.minOrderValue || undefined, maxShippingDiscount: row.maxDiscount || undefined };
@@ -195,11 +234,15 @@ export function buildPromotionUpsertBody(promo: Promotion): Record<string, unkno
     startDate: startDateTime(promo.startDate),
     endDate: endDateTime(promo.endDate),
     active: promo.active,
+    minOrderScope: promo.minOrderBasis === "whole-order" ? "WHOLE_ORDER" : "ELIGIBLE_ITEMS",
     buyQty: null,
     getProductId: null,
     getQty: null,
     minBuyQty: null,
     maxBuyQty: null,
+    buyItems: null,
+    repeatable: true,
+    maxGiftApplications: null,
     ...scope,
   };
   switch (promo.type) {
@@ -210,13 +253,21 @@ export function buildPromotionUpsertBody(promo: Promotion): Record<string, unkno
     case "free-shipping":
       return { ...common, minOrderValue: promo.minOrder ?? 0, maxDiscount: promo.maxShippingDiscount ?? 0 };
     case "buy-x-get-y": {
-      const buy = promo.buyItems[0];
       const gift = promo.getItems[0];
+      const buyItemsPayload = promo.buyItems
+        .filter((item) => item.productId)
+        .map((item, i) => ({
+          productId: Number(item.productId),
+          buyQty: item.quantity ?? 1,
+          sortOrder: i,
+        }));
       return {
         ...common,
         appliesTo: "PRODUCT",
-        productIds: promo.buyItems.map((item) => Number(item.productId)).filter((id) => Number.isFinite(id)),
-        buyQty: buy?.quantity ?? 1,
+        productIds: buyItemsPayload.map((b) => b.productId),
+        buyQty: buyItemsPayload.length === 1 ? buyItemsPayload[0].buyQty : promo.buyItems[0]?.quantity ?? 1,
+        buyItems: buyItemsPayload,
+        repeatable: promo.repeatable ?? true,
         getProductId: gift?.productId ? Number(gift.productId) : null,
         getQty: gift?.quantity ?? 1,
       };
@@ -231,7 +282,8 @@ export function buildPromotionUpsertBody(promo: Promotion): Record<string, unkno
         productIds: promo.triggerType === "min-order" ? [] : triggerProductIds.length > 0 ? triggerProductIds : scope.productIds,
         minOrderValue: promo.triggerType === "min-order" ? promo.triggerValue : 0,
         minBuyQty: promo.triggerType === "buy-quantity" ? promo.triggerValue : promo.triggerType === "buy-product" ? 1 : null,
-        maxBuyQty: promo.giftStockLimit ?? null,
+        maxGiftApplications: promo.giftStockLimit ?? null,
+        maxBuyQty: null,
         getProductId: gift?.productId ? Number(gift.productId) : null,
         getQty: gift?.quantity ?? 1,
       };

@@ -37,13 +37,6 @@ public final class DtoMapper {
      * Build product response using an explicit variant list (e.g. after create, when the entity's lazy
      * {@code variants} bag may not reflect rows created in the same transaction).
      */
-    public static ProductResponse toResponse(Product p, List<ProductVariant> variantEntities) {
-        List<ProductVariantResponse> variants = variantEntities == null || variantEntities.isEmpty()
-                ? Collections.emptyList()
-                : variantEntities.stream().map(DtoMapper::toResponse).collect(Collectors.toList());
-        return productResponse(p, variants);
-    }
-
     private static ProductResponse productResponse(Product p, List<ProductVariantResponse> variants) {
         return new ProductResponse(
                 p.getId(), p.getCode(), p.getName(), p.getActive(),
@@ -55,8 +48,28 @@ public final class DtoMapper {
         );
     }
 
+    /**
+     * Build product response using an explicit variant entity list (e.g. after create, when the entity's lazy
+     * {@code variants} bag may not reflect rows created in the same transaction).
+     */
+    public static ProductResponse toResponse(Product p, List<ProductVariant> variantEntities) {
+        List<ProductVariantResponse> variants = variantEntities == null || variantEntities.isEmpty()
+                ? Collections.emptyList()
+                : variantEntities.stream().map(DtoMapper::toResponse).collect(Collectors.toList());
+        return productResponse(p, variants);
+    }
+
+    /** Same as {@link #toResponse(Product, List)} but variant rows are pre-built (e.g. sellable stock injected). */
+    public static ProductResponse toResponseWithVariants(Product p, List<ProductVariantResponse> variantResponses) {
+        return productResponse(p, variantResponses == null ? Collections.emptyList() : variantResponses);
+    }
+
     // ── ProductVariant ────────────────────────────────────────────────────────
     public static ProductVariantResponse toResponse(ProductVariant v) {
+        return toResponse(v, null);
+    }
+
+    public static ProductVariantResponse toResponse(ProductVariant v, Integer sellableStockQty) {
         return new ProductVariantResponse(
                 v.getId(),
                 v.getProduct().getId(),
@@ -70,6 +83,7 @@ public final class DtoMapper {
                 v.getSellPrice(),
                 v.getCostPrice(),
                 v.getStockQty(),
+                sellableStockQty,
                 v.getMinStockQty(),
                 v.isLowStock(),
                 v.getExpiryDays(),

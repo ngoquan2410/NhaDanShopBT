@@ -69,6 +69,23 @@ export type SalesQuoteApiResult = {
   shippingQuoteSnapshot: ShippingQuoteSnapshot | null;
   voucherSnapshot: VoucherSnapshotFromQuote | null;
   loyaltySnapshot: LoyaltySnapshotFromQuote | null;
+  promotionSnapshot?: {
+    promotionId?: string | number | null;
+    name?: string | null;
+    type?: string | null;
+    giftLines?: Array<{
+      productId?: string | number | null;
+      variantId?: string | number | null;
+      productName?: string | null;
+      variantName?: string | null;
+      qty?: number | null;
+    }>;
+  } | null;
+  effectivePromotionId?: number | null;
+  effectivePromotionName?: string | null;
+  effectivePromotionType?: string | null;
+  selectedPromotionInvalidReason?: string | null;
+  fallbackPromotionId?: number | null;
 };
 
 function normalizePricing(v: Record<string, unknown>): PricingBreakdownSnapshot {
@@ -139,6 +156,7 @@ export function pricingFromQuoteApi(raw: SalesQuoteApiResult): PricingBreakdownS
 }
 
 function mapQuoteResponse(j: Record<string, unknown>): SalesQuoteApiResult {
+  const promotionSnapshotRaw = j.promotionSnapshot as Record<string, unknown> | null | undefined;
   return {
     quoteId: String(j.quoteId ?? ""),
     expiresAt: String(j.expiresAt ?? ""),
@@ -150,7 +168,64 @@ function mapQuoteResponse(j: Record<string, unknown>): SalesQuoteApiResult {
     shippingQuoteSnapshot: (j.shippingQuoteSnapshot as ShippingQuoteSnapshot) ?? null,
     voucherSnapshot: mapVoucherSnapshot(j.voucherSnapshot),
     loyaltySnapshot: mapLoyaltySnapshot(j.loyaltySnapshot),
+    promotionSnapshot:
+      promotionSnapshotRaw && typeof promotionSnapshotRaw === "object"
+        ? {
+          promotionId:
+              promotionSnapshotRaw.promotionId == null
+                ? null
+                : String(promotionSnapshotRaw.promotionId),
+          name:
+              promotionSnapshotRaw.name != null ? String(promotionSnapshotRaw.name) : null,
+          type:
+              promotionSnapshotRaw.type != null ? String(promotionSnapshotRaw.type) : null,
+          giftLines: Array.isArray(promotionSnapshotRaw.giftLines)
+            ? promotionSnapshotRaw.giftLines.map((g) => {
+              const row = g as Record<string, unknown>;
+              return {
+                productId: row.productId == null ? null : String(row.productId),
+                variantId: row.variantId == null ? null : String(row.variantId),
+                productName: row.productName != null ? String(row.productName) : null,
+                variantName: row.variantName != null ? String(row.variantName) : null,
+                qty: row.qty == null ? null : Number(row.qty),
+              };
+            })
+            : [],
+        }
+        : null,
+    effectivePromotionId:
+      j.effectivePromotionId == null || j.effectivePromotionId === ""
+        ? null
+        : Number(j.effectivePromotionId),
+    effectivePromotionName:
+      j.effectivePromotionName != null ? String(j.effectivePromotionName) : null,
+    effectivePromotionType:
+      j.effectivePromotionType != null ? String(j.effectivePromotionType) : null,
+    selectedPromotionInvalidReason:
+      j.selectedPromotionInvalidReason != null ? String(j.selectedPromotionInvalidReason) : null,
+    fallbackPromotionId:
+      j.fallbackPromotionId == null || j.fallbackPromotionId === ""
+        ? null
+        : Number(j.fallbackPromotionId),
   };
+}
+
+function formatQuoteHttpDetail(j: Record<string, unknown>, fallback: string): string {
+  const d = j.detail ?? j.message ?? j.error ?? j.title;
+  if (Array.isArray(d)) {
+    return d
+      .map((x) => (typeof x === "object" && x != null && "defaultMessage" in x ? String((x as { defaultMessage?: string }).defaultMessage) : String(x)))
+      .filter(Boolean)
+      .join("; ");
+  }
+  if (d != null && typeof d === "object") {
+    try {
+      return JSON.stringify(d);
+    } catch {
+      return fallback;
+    }
+  }
+  return d != null && String(d).trim() !== "" ? String(d) : fallback;
 }
 
 export async function postSalesQuote(req: SalesQuoteRequestPayload): Promise<SalesQuoteApiResult> {
@@ -162,8 +237,8 @@ export async function postSalesQuote(req: SalesQuoteRequestPayload): Promise<Sal
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try {
-      const j = await res.json();
-      detail = (j.detail || j.message || j.error || detail) as string;
+      const j = (await res.json()) as Record<string, unknown>;
+      detail = formatQuoteHttpDetail(j, detail);
     } catch {
       /* ignore */
     }

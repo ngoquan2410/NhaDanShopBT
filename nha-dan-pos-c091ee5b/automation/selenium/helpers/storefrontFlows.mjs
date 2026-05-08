@@ -69,7 +69,7 @@ export async function fillCheckoutContactAndStreet(driver, customer) {
 
   const streetPh = customer.street ?? "1 Đường kiểm thử E2E";
   const streetIn = await driver.wait(
-    until.elementLocated(By.xpath("//input[@placeholder='VD: 12 Lê Lợi']")),
+    until.elementLocated(By.xpath("//input[contains(@placeholder,'VD:')]")),
     15000,
   );
   await streetIn.clear();

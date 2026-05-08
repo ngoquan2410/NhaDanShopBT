@@ -395,4 +395,30 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             ORDER BY b.expiryDate ASC, b.id ASC
             """)
     List<ProductBatch> findProductionInputBatchesForPreview(@Param("variantId") Long variantId, @Param("asOf") LocalDate asOf);
+
+    @Query("""
+            SELECT b.variant.id, MIN(b.expiryDate)
+            FROM ProductBatch b
+            WHERE b.variant.id IN :variantIds
+              AND b.remainingQty > 0
+              AND b.status = 'active'
+              AND b.expiryDate >= :asOf
+              AND b.variant.active = true
+              AND b.variant.product.active = true
+            GROUP BY b.variant.id
+            """)
+    List<Object[]> minProductionInputExpiryGrouped(@Param("variantIds") Collection<Long> variantIds, @Param("asOf") LocalDate asOf);
+
+    @Query("""
+            SELECT b.variant.id, COALESCE(SUM(b.remainingQty), 0)
+            FROM ProductBatch b
+            WHERE b.variant.id IN :variantIds
+              AND b.remainingQty > 0
+              AND b.status = 'active'
+              AND b.expiryDate >= :asOf
+              AND b.variant.active = true
+              AND b.variant.product.active = true
+            GROUP BY b.variant.id
+            """)
+    List<Object[]> sumProductionInputRemainingGrouped(@Param("variantIds") Collection<Long> variantIds, @Param("asOf") LocalDate asOf);
 }

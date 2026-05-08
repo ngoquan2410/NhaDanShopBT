@@ -33,6 +33,15 @@ public class ProductionOrderAllocation {
     @Column(name = "unit_cost", nullable = false, precision = 18, scale = 2)
     private BigDecimal unitCost;
 
+    @Column(name = "total_cost_snapshot", precision = 18, scale = 2)
+    private BigDecimal totalCostSnapshot;
+
+    @Column(name = "batch_code_snapshot", length = 80)
+    private String batchCodeSnapshot;
+
+    @Column(name = "allocation_index")
+    private Integer allocationIndex;
+
     @Column(name = "expiry_date")
     private LocalDate expiryDate;
 }

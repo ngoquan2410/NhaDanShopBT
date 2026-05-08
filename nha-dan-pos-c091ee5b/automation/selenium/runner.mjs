@@ -156,9 +156,10 @@ export async function runAutomationSuite(config) {
       /** @type {'pass'|'fail'|'skipped'} */
       let outcome = "pass";
       let skipReason;
+      let ret = null;
 
       try {
-        const ret = await spec.run(driver, ctx);
+        ret = await spec.run(driver, ctx);
         await api.runCleanups();
 
         if (ret && typeof ret === "object" && ret.skipped) {
@@ -208,6 +209,9 @@ export async function runAutomationSuite(config) {
         name: spec.name,
         tags: spec.tags,
         outcome,
+        ...(ret && typeof ret === "object" && Array.isArray(ret.caseResults)
+          ? { caseResults: ret.caseResults }
+          : {}),
         ...(skipReason ? { reason: skipReason } : {}),
       });
 

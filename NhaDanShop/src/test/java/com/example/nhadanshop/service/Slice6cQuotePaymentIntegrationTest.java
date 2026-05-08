@@ -69,9 +69,11 @@ import static org.mockito.Mockito.when;
         SalesQuoteService.class,
         ShippingSettingsService.class,
         ShippingQuoteService.class,
+        PromotionEvaluationService.class,
         GhnShippingService.class,
         ProductBatchService.class,
         StockMutationService.class,
+        StockedCatalogGuardService.class,
         ProductVariantService.class,
         ProductComboService.class,
         CustomerService.class,
@@ -412,7 +414,7 @@ class Slice6cQuotePaymentIntegrationTest {
         promo.setEndDate(LocalDateTime.now(clock).plusDays(30));
         promo.setActive(true);
         promo.setAppliesTo("ALL");
-        promo = promotionRepository.save(promo);
+        Long promoId = promotionRepository.save(promo).getId();
 
         Voucher vo = new Voucher();
         vo.setCode("BIGPCT");
@@ -504,7 +506,7 @@ class Slice6cQuotePaymentIntegrationTest {
         promo.setBuyQty(2);
         promo.setGetProductId(giftP.getId());
         promo.setGetQty(1);
-        promo = promotionRepository.save(promo);
+        Long promoId = promotionRepository.save(promo).getId();
 
         var q = salesQuoteService.quote(new SalesQuoteRequest(
                 "storefront",
@@ -592,7 +594,7 @@ class Slice6cQuotePaymentIntegrationTest {
         promo.setBuyQty(2);
         promo.setGetProductId(giftP.getId());
         promo.setGetQty(1);
-        promo = promotionRepository.save(promo);
+        Long promoId = promotionRepository.save(promo).getId();
 
         var quote = salesQuoteService.quote(new SalesQuoteRequest(
                 "storefront",
@@ -624,6 +626,249 @@ class Slice6cQuotePaymentIntegrationTest {
                 && i.getUnitPrice().compareTo(BigDecimal.ZERO) == 0));
         giftV = variantRepository.findById(giftV.getId()).orElseThrow();
         assertEquals(4, giftV.getStockQty());
+    }
+
+    @Test
+    void quote_fails_when_sellable_less_than_paid_plus_gift_demand() {
+        ProductVariant v = mkVariant("S6C-SLG-FAIL");
+        mkBatch(v, LocalDate.now(clock).minusDays(1), 5);
+        mkBatch(v, LocalDate.now(clock).plusDays(30), 5);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+
+        Promotion promo = new Promotion();
+        promo.setName("QG-SAME-FAIL");
+        promo.setType("QUANTITY_GIFT");
+        promo.setDiscountValue(BigDecimal.ZERO);
+        promo.setMinOrderValue(BigDecimal.ZERO);
+        promo.setStartDate(LocalDateTime.now(clock).minusDays(1));
+        promo.setEndDate(LocalDateTime.now(clock).plusDays(30));
+        promo.setActive(true);
+        promo.setAppliesTo("ALL");
+        promo.setBuyQty(1);
+        promo.setGetProductId(v.getProduct().getId());
+        promo.setGetQty(3);
+        Long promoId = promotionRepository.save(promo).getId();
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> salesQuoteService.quote(
+                new SalesQuoteRequest(
+                        "storefront",
+                        null,
+                        List.of(new SalesQuoteLineRequest(
+                                v.getProduct().getId(), v.getId(), 3, BigDecimal.ZERO, null, false)),
+                        promoId,
+                        null,
+                        null,
+                        storefrontShipAddr(),
+                        null,
+                        BigDecimal.ZERO
+                )));
+        assertTrue(ex.getMessage().contains("Không đủ tồn bán được cho đơn hàng và quà tặng"));
+        assertTrue(ex.getMessage().contains("[" + v.getVariantCode() + "]"));
+        assertTrue(ex.getMessage().contains("Cần 6, còn 5."));
+    }
+
+    @Test
+    void quote_passes_when_sellable_equals_paid_plus_gift_demand() {
+        ProductVariant v = mkVariant("S6C-SLG-PASS");
+        mkBatch(v, LocalDate.now(clock).minusDays(1), 4);
+        mkBatch(v, LocalDate.now(clock).plusDays(30), 6);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+
+        Promotion promo = new Promotion();
+        promo.setName("QG-SAME-PASS");
+        promo.setType("QUANTITY_GIFT");
+        promo.setDiscountValue(BigDecimal.ZERO);
+        promo.setMinOrderValue(BigDecimal.ZERO);
+        promo.setStartDate(LocalDateTime.now(clock).minusDays(1));
+        promo.setEndDate(LocalDateTime.now(clock).plusDays(30));
+        promo.setActive(true);
+        promo.setAppliesTo("ALL");
+        promo.setBuyQty(1);
+        promo.setGetProductId(v.getProduct().getId());
+        promo.setGetQty(3);
+        promo = promotionRepository.save(promo);
+
+        var quote = salesQuoteService.quote(new SalesQuoteRequest(
+                "storefront",
+                null,
+                List.of(new SalesQuoteLineRequest(v.getProduct().getId(), v.getId(), 3, BigDecimal.ZERO, null, false)),
+                promo.getId(),
+                null,
+                null,
+                storefrontShipAddr(),
+                null,
+                BigDecimal.ZERO
+        ));
+        assertEquals(1, quote.rewardLines().size());
+        assertEquals(3, quote.rewardLines().getFirst().quantity());
+    }
+
+    @Test
+    void pending_order_creation_fails_when_sellable_less_than_paid_plus_reward_demand() {
+        ProductVariant v = mkVariant("S6C-PEND-SLG");
+        mkBatch(v, LocalDate.now(clock).minusDays(1), 5);
+        mkBatch(v, LocalDate.now(clock).plusDays(30), 5);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+
+        SecurityContextHolder.getContext().setAuthentication(adminAuth());
+        var billable = new PendingOrderLineRequest(
+                "l1",
+                String.valueOf(v.getProduct().getId()),
+                String.valueOf(v.getId()),
+                v.getProduct().getName(),
+                v.getVariantName(),
+                3,
+                v.getSellPrice(),
+                v.getSellPrice().multiply(BigDecimal.valueOf(3)),
+                null,
+                false,
+                null);
+        var reward = new PendingOrderLineRequest(
+                "l2",
+                String.valueOf(v.getProduct().getId()),
+                String.valueOf(v.getId()),
+                v.getProduct().getName(),
+                v.getVariantName(),
+                3,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                null,
+                true,
+                v.getSellPrice());
+        var pricing = new PricingBreakdownSnapshotDto(
+                v.getSellPrice().multiply(BigDecimal.valueOf(3)),
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                v.getSellPrice().multiply(BigDecimal.valueOf(3)),
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                v.getSellPrice().multiply(BigDecimal.valueOf(3)),
+                null,
+                null,
+                null);
+        var req = new PendingOrderRequest(
+                null, "Sellable Guard", "0900000000", null, null, "cod",
+                List.of(billable, reward), null, null, null, pricing, null, null);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> pendingOrderService.createOrder(req));
+        assertTrue(ex.getMessage().contains("Không đủ tồn bán được cho đơn hàng và quà tặng"));
+        assertTrue(ex.getMessage().contains("[" + v.getVariantCode() + "]"));
+        assertTrue(ex.getMessage().contains("Cần 6, còn 5."));
+    }
+
+    @Test
+    void quote_with_different_variant_gift_passes_when_each_variant_has_enough_sellable() {
+        Category cat = new Category();
+        cat.setName("CAT-S6C-SPLIT");
+        cat.setActive(true);
+        cat = categoryRepository.save(cat);
+
+        Product buyP = new Product();
+        buyP.setCode("P-S6C-BUY");
+        buyP.setName("Buy S6C");
+        buyP.setCategory(cat);
+        buyP.setActive(true);
+        buyP.setProductType(Product.ProductType.SINGLE);
+        buyP = productRepository.save(buyP);
+
+        Product giftP = new Product();
+        giftP.setCode("P-S6C-GIFT");
+        giftP.setName("Gift S6C");
+        giftP.setCategory(cat);
+        giftP.setActive(true);
+        giftP.setProductType(Product.ProductType.SINGLE);
+        giftP = productRepository.save(giftP);
+
+        ProductVariant buyV = new ProductVariant();
+        buyV.setProduct(buyP);
+        buyV.setVariantCode("S6C-BUYV");
+        buyV.setVariantName("V");
+        buyV.setSellUnit("cai");
+        buyV.setPiecesPerUnit(1);
+        buyV.setSellPrice(new BigDecimal("70000"));
+        buyV.setCostPrice(new BigDecimal("25000"));
+        buyV.setStockQty(0);
+        buyV.setMinStockQty(0);
+        buyV.setActive(true);
+        buyV.setIsDefault(true);
+        buyV.setIsSellable(true);
+        buyV = variantRepository.save(buyV);
+
+        ProductVariant giftV = new ProductVariant();
+        giftV.setProduct(giftP);
+        giftV.setVariantCode("S6C-GIFTV");
+        giftV.setVariantName("V");
+        giftV.setSellUnit("cai");
+        giftV.setPiecesPerUnit(1);
+        giftV.setSellPrice(new BigDecimal("20000"));
+        giftV.setCostPrice(new BigDecimal("7000"));
+        giftV.setStockQty(0);
+        giftV.setMinStockQty(0);
+        giftV.setActive(true);
+        giftV.setIsDefault(true);
+        giftV.setIsSellable(true);
+        giftV = variantRepository.save(giftV);
+
+        mkBatch(buyV, LocalDate.now(clock).plusDays(30), 3);
+        mkBatch(giftV, LocalDate.now(clock).plusDays(30), 3);
+        stockMutationService.syncVariantStockWithBatches(buyV.getId());
+        stockMutationService.syncVariantStockWithBatches(giftV.getId());
+
+        Promotion promo = new Promotion();
+        promo.setName("QG-SPLIT");
+        promo.setType("QUANTITY_GIFT");
+        promo.setDiscountValue(BigDecimal.ZERO);
+        promo.setMinOrderValue(BigDecimal.ZERO);
+        promo.setStartDate(LocalDateTime.now(clock).minusDays(1));
+        promo.setEndDate(LocalDateTime.now(clock).plusDays(30));
+        promo.setActive(true);
+        promo.setAppliesTo("ALL");
+        promo.setBuyQty(1);
+        promo.setGetProductId(giftP.getId());
+        promo.setGetQty(3);
+        promo = promotionRepository.save(promo);
+
+        var quote = salesQuoteService.quote(new SalesQuoteRequest(
+                "storefront",
+                null,
+                List.of(new SalesQuoteLineRequest(buyP.getId(), buyV.getId(), 3, BigDecimal.ZERO, null, false)),
+                promo.getId(),
+                null,
+                null,
+                storefrontShipAddr(),
+                null,
+                BigDecimal.ZERO
+        ));
+        assertEquals(1, quote.rewardLines().size());
+        assertEquals(giftV.getId(), quote.rewardLines().getFirst().variantId());
+        assertEquals(3, quote.rewardLines().getFirst().quantity());
+    }
+
+    @Test
+    void expired_only_stock_is_treated_as_zero_for_quote_guard() {
+        ProductVariant v = mkVariant("S6C-EXP-0");
+        mkBatch(v, LocalDate.now(clock).minusDays(1), 5);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> salesQuoteService.quote(
+                new SalesQuoteRequest(
+                        "storefront",
+                        null,
+                        List.of(new SalesQuoteLineRequest(
+                                v.getProduct().getId(), v.getId(), 1, BigDecimal.ZERO, null, false)),
+                        null,
+                        null,
+                        null,
+                        storefrontShipAddr(),
+                        null,
+                        BigDecimal.ZERO
+                )));
+        assertTrue(ex.getMessage().contains("Không đủ tồn bán được cho đơn hàng và quà tặng"));
+        assertTrue(ex.getMessage().contains("[" + v.getVariantCode() + "]"));
+        assertTrue(ex.getMessage().contains("Cần 1, còn 0."));
     }
 
     @Test
@@ -827,7 +1072,7 @@ class Slice6cQuotePaymentIntegrationTest {
     private static ShippingAddressDto storefrontShipAddr() {
         return new ShippingAddressDto(
                 "Nguyen Van A", "0909123456",
-                "79", "Ho Chi Minh", "1442", "Quan 1", "21211", "Ben Nghe", "12 Le Loi", null);
+                "79", "Ho Chi Minh", "1442", "Quan 1", "21211", "Ben Nghe", "12 Le Loi", null, null);
     }
 
     private UsernamePasswordAuthenticationToken adminAuth() {

@@ -135,8 +135,15 @@ public class ReportController {
     @GetMapping("/inventory")
     public InventoryStockReport inventoryReport(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        return stockService.getStockReport(from, to);
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) String categoryName,
+            @RequestParam(required = false) String sort) {
+        if (keyword == null && categoryId == null && categoryName == null && sort == null) {
+            return stockService.getStockReport(from, to);
+        }
+        return stockService.getStockReport(from, to, keyword, categoryId, categoryName, sort);
     }
 
     /**
@@ -158,12 +165,20 @@ public class ReportController {
     @GetMapping("/inventory/export")
     public ResponseEntity<byte[]> exportInventoryExcel(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) throws IOException {
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) String categoryName,
+            @RequestParam(required = false) String sort) throws IOException {
 
-        byte[] excelBytes = stockService.exportStockReportToExcel(from, to);
+        byte[] excelBytes = stockService.exportStockReportToExcel(from, to, keyword, categoryId, categoryName, sort);
 
-        String filename = "TonKho_" + from.format(DateTimeFormatter.ofPattern("yyyyMMdd"))
-                + "_" + to.format(DateTimeFormatter.ofPattern("yyyyMMdd")) + ".xlsx";
+        String base = "bao-cao-ton-kho_" + from + "_" + to;
+        if (categoryName != null && !categoryName.isBlank()) {
+            String slug = categoryName.trim().replaceAll("\\s+", "-");
+            base += "_" + slug;
+        }
+        String filename = base + ".xlsx";
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType(

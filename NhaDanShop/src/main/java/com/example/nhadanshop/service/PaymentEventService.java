@@ -103,12 +103,16 @@ public class PaymentEventService {
         PendingOrder order = pendingOrderRepository.findByOrderCodeOrPaymentReference(orderCode)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy đơn hàng mã: " + orderCode));
 
-        attachEventToOrder(event, order, linkedBy);
-        boolean autoConfirmed = maybeMarkOrderPaidAuto(order, event.getAmount());
+        if (isAlreadyLinkedTo(order, event)) {
+            PendingOrderResponse pendingOrder = pendingOrderService.getById(order.getId());
+            return new PaymentEventLinkResponse(toResponse(event), pendingOrder, false);
+        }
+        ensureManualLinkAllowed(order, event);
+        attachEventToOrder(event, order, normalizeManualLinkedBy(linkedBy));
 
         paymentEventRepository.save(event);
         PendingOrderResponse pendingOrder = pendingOrderService.getById(order.getId());
-        return new PaymentEventLinkResponse(toResponse(event), pendingOrder, autoConfirmed);
+        return new PaymentEventLinkResponse(toResponse(event), pendingOrder, false);
     }
 
     @Transactional
@@ -191,7 +195,7 @@ public class PaymentEventService {
                 autoLinked = true;
                 markedPaidAuto = maybeMarkOrderPaidAuto(matchedOrder.get(), event.getAmount());
             }
-        } else if (event.getLinkedPendingOrder() != null) {
+        } else if (event.getLinkedPendingOrder() != null && isAutoLinkedEvent(event)) {
             markedPaidAuto = maybeMarkOrderPaidAuto(event.getLinkedPendingOrder(), event.getAmount());
         }
 
@@ -205,6 +209,45 @@ public class PaymentEventService {
         event.setLinkedAt(LocalDateTime.now());
         event.setLinkedBy(linkedBy);
         event.setStatus(PaymentEvent.Status.LINKED);
+    }
+
+    private boolean isAlreadyLinkedTo(PendingOrder order, PaymentEvent event) {
+        return event.getLinkedPendingOrder() != null
+                && event.getLinkedPendingOrder().getId().equals(order.getId());
+    }
+
+    private boolean isAutoLinkedEvent(PaymentEvent event) {
+        if (event == null || !StringUtils.hasText(event.getLinkedBy())) {
+            return false;
+        }
+        String linkedBy = event.getLinkedBy().trim().toLowerCase(Locale.ROOT);
+        return "auto".equals(linkedBy) || "webhook".equals(linkedBy) || linkedBy.startsWith("casso:webhook");
+    }
+
+    private String normalizeManualLinkedBy(String linkedBy) {
+        if (!StringUtils.hasText(linkedBy)) {
+            return "admin";
+        }
+        String normalized = linkedBy.trim().toLowerCase(Locale.ROOT);
+        if ("manual".equals(normalized) || "admin".equals(normalized)) {
+            return normalized;
+        }
+        return "admin";
+    }
+
+    private void ensureManualLinkAllowed(PendingOrder order, PaymentEvent event) {
+        PendingOrder linkedOrder = event.getLinkedPendingOrder();
+        if (linkedOrder != null) {
+            throw new IllegalStateException("Giao dịch đã được liên kết với đơn hàng khác");
+        }
+        if (!isManualLinkableStatus(order.getStatus())) {
+            throw new IllegalStateException("Đơn hàng không ở trạng thái có thể liên kết giao dịch");
+        }
+    }
+
+    private boolean isManualLinkableStatus(PendingOrder.Status status) {
+        return status == PendingOrder.Status.PENDING_PAYMENT
+                || status == PendingOrder.Status.WAITING_CONFIRM;
     }
 
     private boolean maybeMarkOrderPaidAuto(PendingOrder order, BigDecimal amount) {

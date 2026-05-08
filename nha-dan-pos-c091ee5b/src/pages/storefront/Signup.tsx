@@ -36,7 +36,15 @@ export default function SignupPage() {
     setLoading(true);
     try {
       const res = await auth.signUp(username.trim(), password, fullName.trim() || undefined, phone.trim() || undefined);
-      if (res.error) return toast.error(res.error);
+      if (res.error) {
+        if (res.code === "PHONE_ALREADY_REGISTERED") {
+          return toast.error("Số điện thoại này đã được đăng ký tài khoản. Vui lòng đăng nhập hoặc dùng số khác.");
+        }
+        if (res.code === "USERNAME_ALREADY_EXISTS") {
+          return toast.error("Tên đăng nhập đã tồn tại. Vui lòng chọn tên khác.");
+        }
+        return toast.error(res.error);
+      }
       toast.success("Đăng ký thành công");
       navigate("/account", { replace: true });
     } finally {

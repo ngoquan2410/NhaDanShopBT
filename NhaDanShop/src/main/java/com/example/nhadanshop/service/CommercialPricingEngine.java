@@ -308,7 +308,8 @@ public final class CommercialPricingEngine {
     ) {
         validatePromotionEligibilityFromLines(promo, lines);
         BigDecimal eligibleAmount = computeEligibleAmount(promo, lines, merchandiseTotal);
-        if (merchandiseTotal.compareTo(promo.getMinOrderValue()) < 0) return BigDecimal.ZERO;
+        BigDecimal minOrderBasis = minOrderBasisFromLines(promo, lines, merchandiseTotal);
+        if (minOrderBasis.compareTo(nz(promo.getMinOrderValue())) < 0) return BigDecimal.ZERO;
         return switch (promo.getType()) {
             case "PERCENT_DISCOUNT" -> {
                 BigDecimal pct = promo.getDiscountValue().divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP);
@@ -332,7 +333,8 @@ public final class CommercialPricingEngine {
             BigDecimal merchandiseTotal
     ) {
         BigDecimal eligibleAmount = computeEligibleAmountFromItems(promo, items, merchandiseTotal);
-        if (merchandiseTotal.compareTo(promo.getMinOrderValue()) < 0) return BigDecimal.ZERO;
+        BigDecimal minOrderBasis = minOrderBasisFromItems(promo, items, merchandiseTotal);
+        if (minOrderBasis.compareTo(nz(promo.getMinOrderValue())) < 0) return BigDecimal.ZERO;
         return switch (promo.getType()) {
             case "PERCENT_DISCOUNT" -> {
                 BigDecimal pct = promo.getDiscountValue().divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP);
@@ -363,7 +365,9 @@ public final class CommercialPricingEngine {
         } else if ("CATEGORY".equals(appliesTo)) {
             Set<Long> eligibleCatIds = promo.getCategories().stream().map(Category::getId).collect(Collectors.toSet());
             boolean hasEligible = lines.stream().anyMatch(l ->
-                    eligibleCatIds.contains(l.product().getCategory().getId()));
+                    l.product() != null
+                            && l.product().getCategory() != null
+                            && eligibleCatIds.contains(l.product().getCategory().getId()));
             if (!hasEligible) {
                 String names = promo.getCategories().stream().map(Category::getName).collect(Collectors.joining(", "));
                 throw new IllegalArgumentException("Chuong trinh KM '" + promo.getName()
@@ -405,7 +409,8 @@ public final class CommercialPricingEngine {
         }
         if ("CATEGORY".equals(appliesTo)) {
             Set<Long> ids = promo.getCategories().stream().map(Category::getId).collect(Collectors.toSet());
-            return lines.stream().filter(l -> ids.contains(l.product().getCategory().getId()))
+            return lines.stream()
+                    .filter(l -> l.product().getCategory() != null && ids.contains(l.product().getCategory().getId()))
                     .map(PromoPricingLine::lineAmount)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
         }
@@ -423,7 +428,8 @@ public final class CommercialPricingEngine {
         }
         if ("CATEGORY".equals(appliesTo)) {
             Set<Long> ids = promo.getCategories().stream().map(Category::getId).collect(Collectors.toSet());
-            return items.stream().filter(i -> ids.contains(i.getProduct().getCategory().getId()))
+            return items.stream()
+                    .filter(i -> i.getProduct().getCategory() != null && ids.contains(i.getProduct().getCategory().getId()))
                     .map(i -> i.getUnitPrice().multiply(BigDecimal.valueOf(i.getQuantity())))
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
         }
@@ -432,5 +438,26 @@ public final class CommercialPricingEngine {
 
     private static BigDecimal nz(BigDecimal v) {
         return v != null ? v : BigDecimal.ZERO;
+    }
+
+    private static boolean minOrderWholeOrder(Promotion promo) {
+        if (promo.getAppliesTo() == null || "ALL".equals(promo.getAppliesTo())) {
+            return true;
+        }
+        return "WHOLE_ORDER".equalsIgnoreCase(promo.getMinOrderScope());
+    }
+
+    private static BigDecimal minOrderBasisFromLines(Promotion promo, List<PromoPricingLine> lines, BigDecimal merchandiseTotal) {
+        if (minOrderWholeOrder(promo)) {
+            return nz(merchandiseTotal);
+        }
+        return computeEligibleAmount(promo, lines, merchandiseTotal);
+    }
+
+    private static BigDecimal minOrderBasisFromItems(Promotion promo, List<SalesInvoiceItem> items, BigDecimal merchandiseTotal) {
+        if (minOrderWholeOrder(promo)) {
+            return nz(merchandiseTotal);
+        }
+        return computeEligibleAmountFromItems(promo, items, merchandiseTotal);
     }
 }

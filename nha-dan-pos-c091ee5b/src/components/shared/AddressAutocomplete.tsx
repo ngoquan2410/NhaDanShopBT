@@ -50,6 +50,9 @@ interface Props {
   onFallback?: (reason: FallbackReason) => void;
   /** Notified whenever the internal state changes. Useful for parent banners. */
   onStateChange?: (state: AutocompleteState) => void;
+  /** Notified whenever raw input text changes (so caller can keep the original
+   *  user-entered string for display/audit). */
+  onInputChange?: (raw: string) => void;
   defaultValue?: string;
   className?: string;
   /** When true, the proxy will NOT call Goong upstream (uses cache only). */
@@ -173,6 +176,7 @@ export function AddressAutocomplete({
   onResolved,
   onFallback,
   onStateChange,
+  onInputChange,
   defaultValue = "",
   className,
   dryRun = false,
@@ -274,6 +278,7 @@ export function AddressAutocomplete({
 
   const onChange = (val: string) => {
     setInput(val);
+    onInputChange?.(val);
     if (!ignoreSessionFallback && readSessionFallback()) return;
     setState("typing");
     setOpen(val.length >= MIN_CHARS);
@@ -284,6 +289,7 @@ export function AddressAutocomplete({
   const pickPrediction = async (p: Prediction) => {
     setOpen(false);
     setInput(p.description);
+    onInputChange?.(p.description);
     const cachedDetail = localDetailCache.get(p.place_id);
     if (cachedDetail) {
       onResolved({ ...cachedDetail, street: cachedDetail.street || p.structured_formatting?.main_text || p.description });
@@ -364,14 +370,14 @@ export function AddressAutocomplete({
 
   return (
     <div ref={containerRef} className={cn("relative", className)}>
-      <label className="text-xs font-semibold text-muted-foreground">Tìm địa chỉ giao hàng</label>
+      <label className="text-xs font-semibold text-muted-foreground">Tìm địa chỉ / dán địa chỉ đầy đủ</label>
       <div className="relative mt-1.5">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <input
           value={input}
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => predictions.length > 0 && setOpen(true)}
-          placeholder="Nhập số nhà, tên đường, phường…"
+          placeholder="VD: Tên tiệm, số nhà, đường, phường/xã, quận/huyện, tỉnh"
           className="w-full h-11 pl-10 pr-10 text-sm border rounded-xl bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
           autoComplete="off"
         />
@@ -379,9 +385,6 @@ export function AddressAutocomplete({
           <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />
         )}
       </div>
-      <p className="mt-1 text-[11px] text-muted-foreground">
-        Gợi ý sẽ hiện sau khi bạn nhập ít nhất {MIN_CHARS} ký tự. Chọn 1 gợi ý để tự điền tỉnh/quận/phường.
-      </p>
 
       {open && (
         <div className="absolute z-30 left-0 right-0 mt-1.5 bg-popover border rounded-xl shadow-lg overflow-hidden">

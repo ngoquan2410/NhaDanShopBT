@@ -13,6 +13,18 @@ type AuthSession = {
 
 const STORAGE_KEY = "nhadan.auth.session.v1";
 
+export class AdminApiError extends Error {
+  readonly status: number;
+  readonly data: unknown;
+
+  constructor(message: string, status: number, data: unknown) {
+    super(message);
+    this.name = "AdminApiError";
+    this.status = status;
+    this.data = data;
+  }
+}
+
 function readSession(): AuthSession | null {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -98,7 +110,7 @@ export async function adminFetchJson<T>(path: string, init?: RequestInit): Promi
     });
     if (res.status !== 401 && res.status !== 403) {
       const data = await parseJsonSafe(res);
-      if (!res.ok) throw new Error(errorMessage(data, res.status));
+      if (!res.ok) throw new AdminApiError(errorMessage(data, res.status), res.status, data);
       return data as T;
     }
 

@@ -13,7 +13,7 @@ class Slice8AuthContractTest {
         LoginResponse response = new LoginResponse(
                 "access", "refresh", "Bearer", 900,
                 "user1", "User One", Set.of("ROLE_USER"), 42L,
-                false, false);
+                false, false, false);
 
         assertThat(response.customerId()).isEqualTo(42L);
         assertThat(response.roles()).containsExactly("ROLE_USER");

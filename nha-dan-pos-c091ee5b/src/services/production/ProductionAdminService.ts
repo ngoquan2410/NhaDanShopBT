@@ -9,6 +9,11 @@ export interface ProductionRecipeComponentDto {
   qtyPerOutput: number;
   unit: string;
   sortOrder?: number | null;
+  sellUnit?: string | null;
+  importUnit?: string | null;
+  piecesPerImportUnit?: number | null;
+  availableQty?: number | null;
+  nearestExpiryDateIso?: string | null;
 }
 
 export interface ProductionRecipeDto {
@@ -62,10 +67,26 @@ export interface ProductionPreviewAllocationDto {
 export interface ProductionPreviewComponentDto {
   productId: number;
   variantId: number;
+  productName?: string;
+  variantName?: string;
+  variantCode?: string;
   requiredQty: number;
   availableQty: number;
+  missingQty?: number;
   unit: string;
   allocations: ProductionPreviewAllocationDto[];
+}
+
+export interface ProductionShortageDetailDto {
+  productId: number;
+  variantId: number;
+  productName?: string;
+  variantName?: string;
+  variantCode?: string;
+  requiredQty: number;
+  availableQty: number;
+  missingQty: number;
+  unit: string;
 }
 
 export interface ProductionPreviewDto {
@@ -95,9 +116,11 @@ export interface ProductionOrderVoidInput {
 export interface ProductionAllocationResponse {
   id: number;
   batchId: number;
-  lotCode: string;
+  lotCode?: string | null;
   qty: number;
   unitCost: string | number;
+  totalCost?: string | number | null;
+  allocationIndex?: number | null;
   expiryDateIso?: string | null;
 }
 
@@ -105,6 +128,9 @@ export interface ProductionOrderComponentResponse {
   id: number;
   productId: number;
   variantId: number;
+  productName?: string | null;
+  variantName?: string | null;
+  variantCode?: string | null;
   requiredQty: number;
   consumedQty: number;
   unit: string;

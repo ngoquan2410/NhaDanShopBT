@@ -55,7 +55,7 @@ public class PaymentEventController {
                 IdempotencyScopes.paymentEventLink(eventId),
                 idempotencyKey,
                 PaymentEventLinkResponse.class,
-                () -> paymentEventService.linkToOrder(eventId, request.orderCode(), request.linkedBy()));
+                () -> paymentEventService.linkToOrder(eventId, request.orderCode(), "admin"));
     }
 
     @PostMapping("/{eventId}/ignore")

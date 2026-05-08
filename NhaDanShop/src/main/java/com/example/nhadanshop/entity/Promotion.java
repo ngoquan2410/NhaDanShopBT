@@ -6,7 +6,9 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 @Entity
@@ -49,6 +51,9 @@ public class Promotion {
     @Column(name = "applies_to", nullable = false, length = 20)
     private String appliesTo = "ALL";
 
+    @Column(name = "min_order_scope", nullable = false, length = 32)
+    private String minOrderScope = "ELIGIBLE_ITEMS";
+
     // ── BUY_X_GET_Y fields ─────────────────────────────────────────────────
     /** Số lượng cần mua (X) */
     @Column(name = "buy_qty")
@@ -83,6 +88,15 @@ public class Promotion {
             inverseJoinColumns = @JoinColumn(name = "product_id"))
     private Set<Product> products = new HashSet<>();
 
+    /** BUY_X_GET_Y: per-product required buy quantities (replaces single pooled X when non-empty). */
+    @OneToMany(mappedBy = "promotion", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sortOrder ASC, id ASC")
+    private List<PromotionBuyItem> buyItems = new ArrayList<>();
+
+    /** QUANTITY_GIFT / BUY_X_GET_Y: stack rule — when true, reward repeats per completed threshold set. */
+    @Column(name = "repeatable", nullable = false)
+    private Boolean repeatable = true;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -96,6 +110,8 @@ public class Promotion {
         if (updatedAt == null) updatedAt = now;
         if (discountValue == null) discountValue = BigDecimal.ZERO;
         if (minOrderValue == null) minOrderValue = BigDecimal.ZERO;
+        if (repeatable == null) repeatable = true;
+        if (minOrderScope == null || minOrderScope.isBlank()) minOrderScope = "ELIGIBLE_ITEMS";
     }
 
     @PreUpdate

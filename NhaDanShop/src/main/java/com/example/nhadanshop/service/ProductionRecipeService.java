@@ -13,8 +13,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.time.LocalDateTime;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -24,6 +27,8 @@ public class ProductionRecipeService {
     private final ProductionRecipeComponentRepository componentRepo;
     private final ProductVariantRepository variantRepo;
     private final ProductRepository productRepo;
+    private final ProductBatchRepository batchRepository;
+    private final Clock businessClock;
 
     @Transactional(readOnly = true)
     public Page<ProductionRecipeResponse> list(
@@ -177,15 +182,44 @@ public class ProductionRecipeService {
     }
 
     private ProductionRecipeResponse map(ProductionRecipe r) {
-        var comps = componentRepo.findByRecipeIdOrderBySortOrderAscIdAsc(r.getId()).stream()
-                .map(c -> new ProductionRecipeComponentResponse(
-                        c.getId(),
-                        c.getProduct().getId(),
-                        c.getVariant().getId(),
-                        c.getQtyPerOutput(),
-                        c.getUnit(),
-                        c.getSortOrder()
-                ))
+        List<ProductionRecipeComponent> compRows = componentRepo.findByRecipeIdOrderBySortOrderAscIdAsc(r.getId());
+        List<Long> vids = compRows.stream().map(c -> c.getVariant().getId()).distinct().toList();
+        LocalDate today = LocalDate.now(businessClock);
+        Map<Long, Integer> avail = new HashMap<>();
+        Map<Long, LocalDate> nearestExp = new HashMap<>();
+        if (!vids.isEmpty()) {
+            for (Object[] row : batchRepository.sumProductionInputRemainingGrouped(vids, today)) {
+                if (row[0] != null) {
+                    avail.put(((Number) row[0]).longValue(), row[1] == null ? 0 : ((Number) row[1]).intValue());
+                }
+            }
+            for (Object[] row : batchRepository.minProductionInputExpiryGrouped(vids, today)) {
+                if (row[0] != null && row[1] != null) {
+                    Object exp = row[1];
+                    LocalDate ld = exp instanceof LocalDate loc ? loc : LocalDate.parse(exp.toString());
+                    nearestExp.put(((Number) row[0]).longValue(), ld);
+                }
+            }
+        }
+        var comps = compRows.stream()
+                .map(c -> {
+                    ProductVariant vv = c.getVariant();
+                    long vid = vv.getId();
+                    LocalDate nx = nearestExp.get(vid);
+                    return new ProductionRecipeComponentResponse(
+                            c.getId(),
+                            c.getProduct().getId(),
+                            vid,
+                            c.getQtyPerOutput(),
+                            c.getUnit(),
+                            c.getSortOrder(),
+                            vv.getSellUnit(),
+                            vv.getImportUnit(),
+                            vv.getPiecesPerUnit(),
+                            avail.getOrDefault(vid, 0),
+                            nx != null ? nx + "T00:00:00" : null
+                    );
+                })
                 .toList();
         return new ProductionRecipeResponse(
                 r.getId(),

@@ -16,7 +16,9 @@ public record LoginResponse(
         Set<String> roles,
         Long customerId,
         boolean totpEnabled,    // user đã bật TOTP chưa
-        boolean totpRequired    // login này có yêu cầu nhập TOTP không (true = cần bước 2)
+        boolean totpRequired,   // login này có yêu cầu nhập TOTP không (true = cần bước 2)
+        /** Đăng ký: trùng SĐT với nhiều KH POS — đã ghép theo HĐ gần nhất, cần admin xử lý trùng lặp. */
+        boolean duplicateCustomerPhoneMatch
 ) {
     public LoginResponse(
             String accessToken,
@@ -29,6 +31,7 @@ public record LoginResponse(
             boolean totpEnabled,
             boolean totpRequired
     ) {
-        this(accessToken, refreshToken, tokenType, expiresIn, username, fullName, roles, null, totpEnabled, totpRequired);
+        this(accessToken, refreshToken, tokenType, expiresIn, username, fullName, roles, null,
+                totpEnabled, totpRequired, false);
     }
 }

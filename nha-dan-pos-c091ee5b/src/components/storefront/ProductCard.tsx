@@ -105,9 +105,16 @@ export function ProductCard({ product, compact = false }: { product: Product; co
           data-testid="storefront-add-cart"
           onClick={handleAdd}
           disabled={dv.stock === 0}
-          className="absolute bottom-0 inset-x-0 h-9 bg-foreground text-background text-xs font-semibold flex items-center justify-center gap-1.5 translate-y-0 transition-transform duration-300 disabled:opacity-50"
+          aria-disabled={dv.stock === 0}
+          className={
+            "absolute bottom-0 inset-x-0 h-9 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all duration-200 " +
+            (dv.stock === 0
+              ? "bg-muted text-muted-foreground cursor-not-allowed"
+              : "bg-foreground text-background cursor-pointer hover:bg-storefront-accent hover:brightness-110 active:scale-[0.98] active:brightness-95")
+          }
         >
-          <ShoppingCart className="h-3.5 w-3.5" /> Thêm vào giỏ
+          <ShoppingCart className="h-3.5 w-3.5" />
+          {dv.stock === 0 ? "Hết hàng" : "Thêm vào giỏ"}
         </button>
       </div>
 
@@ -130,6 +137,23 @@ export function ProductCard({ product, compact = false }: { product: Product; co
             </span>
           )}
         </div>
+        {/* Stock line */}
+        <p
+          className={
+            "mt-2 text-[11px] font-medium " +
+            (stockStatus === "out-of-stock"
+              ? "text-destructive"
+              : stockStatus === "low-stock"
+              ? "text-warning"
+              : "text-muted-foreground")
+          }
+        >
+          {stockStatus === "out-of-stock"
+            ? "Hết hàng"
+            : stockStatus === "low-stock"
+            ? `Sắp hết · còn ${dv.stock} ${dv.sellUnit}`
+            : `Còn ${dv.stock} ${dv.sellUnit}`}
+        </p>
       </div>
     </Link>
   );

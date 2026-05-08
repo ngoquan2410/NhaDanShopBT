@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { formatVND } from "@/lib/format";
 import {
@@ -25,12 +25,13 @@ import type { SalesQuoteApiResult } from "@/services";
 import type {
   CartContext,
   EvaluatedPromotion,
+  GiftLine,
   PaymentMethod,
   ShippingAddress,
   ShippingQuote,
   PendingOrder,
 } from "@/services/types";
-import { useCart, useSelectedPromotionId, cartActions } from "@/lib/cart";
+import { useCart, useSelectedPromotionId, useSelectedPromotionMode, cartActions } from "@/lib/cart";
 import { AddressSelect, type AddressSelectValue } from "@/components/shared/AddressSelect";
 import { AddressAutocomplete, type GoongResolvedAddress, type FallbackReason, clearSessionFallback } from "@/components/shared/AddressAutocomplete";
 import { useAuth } from "@/lib/admin-auth";
@@ -54,10 +55,54 @@ const EMPTY_ADDR: AddressSelectValue = {
   wardName: "",
 };
 
+type GiftSummaryLine = { key: string; label: string; qty: number };
+
+export function isGiftPromotionType(type: string | null | undefined): boolean {
+  const normalized = String(type ?? "").trim().toLowerCase();
+  return normalized === "buy_x_get_y" || normalized === "quantity_gift" || normalized === "gift";
+}
+
+export function buildCheckoutGiftSummaryLines(
+  serverOk: boolean,
+  rewardLines: SalesQuoteApiResult["rewardLines"] | null | undefined,
+  promotionSnapshotGiftLines:
+    | Array<{
+      productId?: string | number | null;
+      variantId?: string | number | null;
+      productName?: string | null;
+      variantName?: string | null;
+      qty?: number | null;
+    }>
+    | null
+    | undefined,
+  previewGiftLines: GiftLine[],
+): GiftSummaryLine[] {
+  if (serverOk && Array.isArray(rewardLines) && rewardLines.length > 0) {
+    return rewardLines.map((r) => ({
+      key: `${r.variantId ?? r.productId}`,
+      label: `${r.productName}${r.variantName ? ` ${r.variantName}` : ""}`,
+      qty: r.quantity,
+    }));
+  }
+  if (serverOk && Array.isArray(promotionSnapshotGiftLines) && promotionSnapshotGiftLines.length > 0) {
+    return promotionSnapshotGiftLines.map((g) => ({
+      key: `${g.variantId ?? g.productId}`,
+      label: `${g.productName ?? ""}${g.variantName ? ` ${g.variantName}` : ""}`.trim(),
+      qty: Number(g.qty ?? 0),
+    }));
+  }
+  return previewGiftLines.map((g) => ({
+    key: `${g.variantId ?? g.productId}`,
+    label: `${g.productName}${g.variantName ? ` ${g.variantName}` : ""}`,
+    qty: g.qty,
+  }));
+}
+
 export default function CheckoutPage() {
   const navigate = useNavigate();
   const cartItems = useCart();
   const selectedPromotionId = useSelectedPromotionId();
+  const selectedPromotionMode = useSelectedPromotionMode();
   const auth = useAuth();
   const [accountPoints, setAccountPoints] = useState<CustomerPointsSummary | null>(null);
   const [recoverableOrders, setRecoverableOrders] = useState<PendingOrder[]>([]);
@@ -75,6 +120,7 @@ export default function CheckoutPage() {
   const [mappingWarning, setMappingWarning] = useState<string | null>(null);
   const [unmatchedLevels, setUnmatchedLevels] = useState<Array<"province" | "district" | "ward">>([]);
   const [acRetryNonce, setAcRetryNonce] = useState(0);
+  const [originalAddressInput, setOriginalAddressInput] = useState("");
   const [requestedRedeemPoints, setRequestedRedeemPoints] = useState(0);
 
   useEffect(() => {
@@ -132,9 +178,10 @@ export default function CheckoutPage() {
       wardCode: addr.wardCode,
       wardName: addr.wardName,
       street: street.trim(),
+      rawAddress: originalAddressInput.trim() || undefined,
       note: note.trim() || undefined,
     };
-  }, [addr, name, phone, street, note]);
+  }, [addr, name, phone, street, note, originalAddressInput]);
 
   // 500ms debounce: rapid address changes (e.g. ward dropdown spam) collapse
   // into a single quote() call.
@@ -183,14 +230,18 @@ export default function CheckoutPage() {
   // Promotion engine reads cart lines directly — they already carry the real
   // productId / variantId / categoryId from the shared cart store.
   const [bestPromo, setBestPromo] = useState<EvaluatedPromotion | null>(null);
+  const [manualSelectedPromo, setManualSelectedPromo] = useState<EvaluatedPromotion | null>(null);
   const [promoFallbackNotice, setPromoFallbackNotice] = useState<string | null>(null);
+  const [effectivePromotionIdForQuote, setEffectivePromotionIdForQuote] = useState<string | null>(null);
+  const [effectivePromotionMode, setEffectivePromotionMode] = useState<"auto" | "manual">("auto");
+  const [effectivePromotionResolving, setEffectivePromotionResolving] = useState(false);
+  const [manualPromotionInvalidReason, setManualPromotionInvalidReason] = useState<string | null>(null);
+  const promoResolveSeq = useRef(0);
+  const quoteReqSeq = useRef(0);
 
   useEffect(() => {
     let cancel = false;
-    if (!cartItems.length) {
-      setBestPromo(null);
-      return;
-    }
+    const seq = ++promoResolveSeq.current;
     const ctx: CartContext = {
       lines: cartItems,
       subtotal,
@@ -198,33 +249,63 @@ export default function CheckoutPage() {
       shippingQuote: quote,
       voucherCode: appliedVoucherCode ?? undefined,
     };
-    void promotions.evaluateAll(ctx)
-      .then((list) => {
-        if (cancel) return;
-        const eligible = list.filter((p) => p.eligible);
-        const sorted = [...eligible].sort(
-          (a, b) => b.discountAmount + b.shippingDiscountAmount - (a.discountAmount + a.shippingDiscountAmount),
-        );
-        const selected = selectedPromotionId
-          ? sorted.find((p) => p.promotionId === selectedPromotionId) ?? null
-          : null;
-        setBestPromo(selected ?? sorted[0] ?? null);
-        setPromoFallbackNotice(
-          selectedPromotionId && !selected && sorted.length > 0
-            ? "Khuyến mãi đã chọn không còn hợp lệ sau khi tính phí ship, hệ thống đang dùng ưu đãi phù hợp nhất."
-            : null,
-        );
+    if (!cartItems.length) {
+      setBestPromo(null);
+      setManualSelectedPromo(null);
+      setEffectivePromotionIdForQuote(null);
+      setEffectivePromotionMode("auto");
+      setEffectivePromotionResolving(false);
+      return;
+    }
+    if (selectedPromotionMode === "manual") {
+      const manualId = selectedPromotionId ?? null;
+      setEffectivePromotionIdForQuote(manualId);
+      setEffectivePromotionMode("manual");
+      if (!manualId) {
+        setManualSelectedPromo(null);
+        setEffectivePromotionResolving(false);
+        return;
+      }
+      setEffectivePromotionResolving(true);
+      void promotions.evaluateAll(ctx)
+        .then((list) => {
+          if (cancel || seq !== promoResolveSeq.current) return;
+          const selected = list.find((p) => p.promotionId === manualId) ?? null;
+          setManualSelectedPromo(selected);
+          setEffectivePromotionResolving(false);
+        })
+        .catch(() => {
+          if (cancel || seq !== promoResolveSeq.current) return;
+          setManualSelectedPromo(null);
+          setEffectivePromotionResolving(false);
+        });
+      return;
+    }
+    setManualSelectedPromo(null);
+    setEffectivePromotionResolving(true);
+    void promotions.pickBest(ctx)
+      .then((picked) => {
+        if (cancel || seq !== promoResolveSeq.current) return;
+        setBestPromo(picked ?? null);
+        setEffectivePromotionIdForQuote(picked?.promotionId ?? null);
+        setEffectivePromotionMode("auto");
+        setEffectivePromotionResolving(false);
+        setPromoFallbackNotice(null);
       })
       .catch(() => {
-        if (!cancel) {
+        if (!cancel && seq === promoResolveSeq.current) {
           setBestPromo(null);
+          setEffectivePromotionIdForQuote(null);
+          setEffectivePromotionMode("auto");
+          setEffectivePromotionResolving(false);
           setPromoFallbackNotice(null);
+          toast.error("Không đánh giá được khuyến mãi");
         }
       });
     return () => {
       cancel = true;
     };
-  }, [cartItems, subtotal, shippingAddress, quote, appliedVoucherCode, selectedPromotionId]);
+  }, [cartItems, subtotal, shippingAddress, quote, appliedVoucherCode, selectedPromotionId, selectedPromotionMode]);
 
   useEffect(() => {
     if (import.meta.env.MODE === "test") {
@@ -233,10 +314,11 @@ export default function CheckoutPage() {
       return;
     }
     let cancel = false;
-    if (!cartItems.length || quote.status !== "quoted" || !shippingAddress) {
+    if (!cartItems.length || quote.status !== "quoted" || !shippingAddress || effectivePromotionResolving) {
       setBeQuote(null);
       setBeQuoteErr(null);
       setBeQuoteLoading(false);
+      setManualPromotionInvalidReason(null);
       return;
     }
     setBeQuoteLoading(true);
@@ -259,9 +341,12 @@ export default function CheckoutPage() {
             }
             return;
           }
+          const currentReqSeq = ++quoteReqSeq.current;
           const promotionId =
-            bestPromo?.promotionId != null && !Number.isNaN(Number(bestPromo.promotionId))
-              ? Number(bestPromo.promotionId)
+            effectivePromotionIdForQuote != null &&
+            String(effectivePromotionIdForQuote).trim() !== "" &&
+            !Number.isNaN(Number(effectivePromotionIdForQuote))
+              ? Number(effectivePromotionIdForQuote)
               : undefined;
           const res = await postSalesQuote({
             source: "storefront",
@@ -274,10 +359,23 @@ export default function CheckoutPage() {
             vatPercent: 0,
             requestedRedeemPoints: auth.session ? requestedRedeemPoints : 0,
           });
-          if (!cancel) {
+          if (!cancel && currentReqSeq === quoteReqSeq.current) {
             setBeQuote(res);
             setBeQuoteErr(null);
             setBeQuoteLoading(false);
+            setManualPromotionInvalidReason(selectedPromotionMode === "manual" ? (res.selectedPromotionInvalidReason ?? null) : null);
+            if (res.selectedPromotionInvalidReason) {
+              toast.warning(res.selectedPromotionInvalidReason);
+              if (selectedPromotionMode === "auto") {
+                if (res.fallbackPromotionId != null && Number.isFinite(Number(res.fallbackPromotionId))) {
+                  cartActions.setSelectedPromotion(String(res.fallbackPromotionId), "auto");
+                } else {
+                  cartActions.setSelectedPromotion(null, "auto");
+                }
+              } else {
+                setPromoFallbackNotice("Khuyến mãi bạn chọn không còn hợp lệ. Vui lòng đổi khuyến mãi khác.");
+              }
+            }
           }
         } catch (e) {
           if (!cancel) {
@@ -297,13 +395,27 @@ export default function CheckoutPage() {
     cartItems,
     quote.status,
     shippingAddress,
-    bestPromo,
+    selectedPromotionId,
+    selectedPromotionMode,
+    effectivePromotionIdForQuote,
+    effectivePromotionResolving,
     requestedRedeemPoints,
     auth.session,
   ]);
 
-  const promoDiscountPreview = bestPromo?.discountAmount ?? 0;
-  const promoShippingDiscountPreview = Math.min(bestPromo?.shippingDiscountAmount ?? 0, baseShippingFee);
+  const effectivePreviewPromo =
+    selectedPromotionMode === "manual"
+      ? manualSelectedPromo
+      : bestPromo;
+  const previewPromoIsFreeShipping = effectivePreviewPromo?.type === "free_shipping";
+  const promoDiscountPreview =
+    previewPromoIsFreeShipping
+      ? 0
+      : (effectivePreviewPromo?.discountAmount ?? 0);
+  const promoShippingDiscountPreview =
+    previewPromoIsFreeShipping && quote.status === "quoted"
+      ? Math.min(effectivePreviewPromo?.shippingDiscountAmount ?? 0, baseShippingFee)
+      : 0;
   const shippingFeePreview = Math.max(0, baseShippingFee - promoShippingDiscountPreview);
   const totalPreview = Math.max(0, subtotal - promoDiscountPreview + shippingFeePreview);
 
@@ -319,6 +431,24 @@ export default function CheckoutPage() {
   const rowShipDisc = pb ? pb.shippingDiscount : promoShippingDiscountPreview;
   const rowShipPayable = Math.max(0, rowShipFee - rowShipDisc);
   const displayTotal = pb ? pb.total : totalPreview;
+  const previewPromotionLabel =
+    selectedPromotionMode === "manual"
+      ? (manualSelectedPromo?.name ?? null)
+      : (bestPromo?.name ?? null);
+  const quotedPromotionLabel =
+    beQuote?.effectivePromotionName
+    ?? null;
+  const previewGiftLines = effectivePreviewPromo?.giftLines ?? [];
+  const giftSummaryLines = buildCheckoutGiftSummaryLines(
+    serverOk,
+    beQuote?.rewardLines,
+    beQuote?.promotionSnapshot?.giftLines,
+    previewGiftLines,
+  );
+  const effectiveGiftType = serverOk
+    ? (beQuote?.effectivePromotionType ?? beQuote?.promotionSnapshot?.type ?? null)
+    : (effectivePreviewPromo?.type ?? null);
+  const shouldShowGiftSummary = isGiftPromotionType(effectiveGiftType);
 
   const phoneOk = /^[\d+]{9,12}$/.test(phone.replace(/\s/g, ""));
   // Block submit if GHN couldn't map the ward — the address is ambiguous and
@@ -335,6 +465,7 @@ export default function CheckoutPage() {
     !!beQuote &&
     !beQuoteLoading &&
     !beQuoteErr &&
+    !manualPromotionInvalidReason &&
     (!appliedVoucherCode || (vs != null && vs.code.toLowerCase() === appliedVoucherCode.toLowerCase()));
 
   const applyVoucher = () => {
@@ -498,6 +629,7 @@ export default function CheckoutPage() {
                 <AddressAutocomplete
                   key={acRetryNonce}
                   onFallback={(reason) => setAcFallback(reason)}
+                  onInputChange={(raw) => setOriginalAddressInput(raw)}
                   onResolved={(r: GoongResolvedAddress) => {
                     const levels = r.unmatched ?? [];
                     setUnmatchedLevels(levels);
@@ -528,12 +660,22 @@ export default function CheckoutPage() {
                       });
                     }
                     if (r.street) setStreet(r.street);
+                    if (r.formattedAddress) setOriginalAddressInput(r.formattedAddress);
                   }}
                 />
                 {mappingWarning && (
                   <div className="mt-2 rounded-xl border border-warning/40 bg-warning-soft/40 p-2.5 flex items-start gap-2">
                     <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0 mt-0.5" />
                     <p className="text-[11px] text-warning-foreground">{mappingWarning}</p>
+                  </div>
+                )}
+                {originalAddressInput.trim().length > 0 && (
+                  <div className="mt-2 rounded-xl border bg-muted/40 p-2.5">
+                    <p className="text-[11px] font-semibold text-muted-foreground">Địa chỉ gốc khách nhập</p>
+                    <p className="mt-0.5 text-xs text-foreground break-words">{originalAddressInput}</p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Thông tin này giúp admin/shipper đối chiếu khi giao hàng.
+                    </p>
                   </div>
                 )}
               </div>
@@ -556,8 +698,21 @@ export default function CheckoutPage() {
                 }}
                 className="mt-3.5"
               />
+              {(!addr.provinceCode || !addr.districtCode || !addr.wardCode) && (
+                <div className="mt-2 rounded-xl border border-warning/40 bg-warning-soft/40 p-2.5 flex items-start gap-2">
+                  <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-warning-foreground">
+                    Vui lòng chọn đủ Tỉnh / Huyện / Xã để tính phí giao hàng.
+                  </p>
+                </div>
+              )}
               <div className="mt-3.5">
-                <Field label="Số nhà, đường" value={street} onChange={setStreet} placeholder="VD: 12 Lê Lợi" />
+                <Field label="Số nhà, đường" value={street} onChange={setStreet} placeholder="VD: Tên tiệm, số nhà, tên đường" />
+                {originalAddressInput.trim().length > 0 && street.trim().length > 0 && street.trim().length < 6 && (
+                  <p className="mt-1 text-[11px] text-warning-foreground">
+                    Kiểm tra lại Số nhà, đường để shipper tìm đúng địa chỉ.
+                  </p>
+                )}
               </div>
               <div className="mt-3.5">
                 <label className="text-xs font-semibold text-muted-foreground">Ghi chú đơn hàng</label>
@@ -712,28 +867,48 @@ export default function CheckoutPage() {
               )}
 
               <div className="border-t mt-4 pt-4 space-y-2 text-sm">
-                <Row label="Tạm tính" value={formatVND(rowSubtotal)} />
-                {bestPromo && rowPromoDisc > 0 && (
+                <div data-testid="checkout-effective-promotion-id" className="hidden">{beQuote?.effectivePromotionId ?? effectivePromotionIdForQuote ?? ""}</div>
+                <div data-testid="checkout-effective-promotion-name" className="hidden">{quotedPromotionLabel ?? previewPromotionLabel ?? ""}</div>
+                <Row label="Tạm tính" value={formatVND(rowSubtotal)} dataTestId="checkout-subtotal" />
+                {(previewPromotionLabel || quotedPromotionLabel) && rowPromoDisc > 0 && (
                   <Row
-                    label={`Khuyến mãi: ${bestPromo.name}`}
+                    label={`Khuyến mãi sản phẩm: ${quotedPromotionLabel ?? previewPromotionLabel}`}
                     value={<span className="text-success">−{formatVND(rowPromoDisc)}</span>}
+                    dataTestId="checkout-promotion-discount"
                   />
+                )}
+                {!serverOk && effectivePreviewPromo?.type === "free_shipping" && (
+                  <p className="rounded-lg bg-info-soft px-3 py-2 text-[11px] text-info">
+                    Miễn phí ship sẽ áp dụng sau khi nhập địa chỉ.
+                  </p>
                 )}
                 {promoFallbackNotice && (
                   <p className="rounded-lg bg-warning-soft px-3 py-2 text-[11px] text-warning">
                     {promoFallbackNotice}
                   </p>
                 )}
+                {selectedPromotionMode === "manual" && selectedPromotionId && !previewPromotionLabel && (
+                  <p className="rounded-lg bg-info-soft px-3 py-2 text-[11px] text-info">
+                    Đang xác nhận khuyến mãi đã chọn...
+                  </p>
+                )}
+                {manualPromotionInvalidReason && (
+                  <p className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-[11px] text-danger">
+                    Khuyến mãi đã chọn không hợp lệ: {manualPromotionInvalidReason}
+                  </p>
+                )}
                 {vs && rowVoucherDisc > 0 && (
                   <Row
-                    label={`Voucher: ${vs.code}`}
+                    label={`Mã giảm giá: ${vs.code}`}
                     value={<span className="text-success">−{formatVND(rowVoucherDisc)}</span>}
+                    dataTestId="checkout-voucher-discount"
                   />
                 )}
                 {rowLoyaltyDisc > 0 && (
                   <Row
                     label={`Đổi điểm (${beQuote?.loyaltySnapshot?.redeemedPoints ?? pb?.loyaltyRedeemedPoints ?? 0} điểm)`}
                     value={<span className="text-success">−{formatVND(rowLoyaltyDisc)}</span>}
+                    dataTestId="checkout-loyalty-discount"
                   />
                 )}
                 <Row
@@ -742,53 +917,59 @@ export default function CheckoutPage() {
                     quoting ? <span className="text-muted-foreground inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />Đang tính…</span> :
                     quote.status === "incomplete" ? <span className="text-muted-foreground">—</span> :
                     quote.status === "unavailable" ? <span className="text-danger">Không khả dụng</span> :
-                    quote.status === "quoted" && rowShipPayable === 0 ? <span className="text-success">Miễn phí</span> :
-                    quote.status === "quoted" ? formatVND(rowShipPayable) : "—"
+                    quote.status === "quoted" ? formatVND(rowShipFee) : "—"
                   }
+                  dataTestId="checkout-shipping-fee"
                 />
                 {rowShipDisc > 0 && (
                   <Row
                     label="Giảm phí giao hàng"
                     value={<span className="text-success">−{formatVND(rowShipDisc)}</span>}
+                    dataTestId="checkout-shipping-discount"
                   />
                 )}
                 {serverOk && pb && pb.vatAmount > 0 && (
                   <Row label="VAT (máy chủ)" value={formatVND(pb.vatAmount)} />
                 )}
-                {(beQuoteLoading || beQuoteErr) && (
-                  <p className="text-[11px] text-muted-foreground">
-                    {beQuoteLoading ? "Đang lấy báo giá máy chủ…" : null}
-                    {beQuoteErr ? (
-                      <span className="text-amber-700">
-                        Báo giá máy chủ thất bại: {beQuoteErr}. Vui lòng sửa địa chỉ / thử lại — không thể tạo đơn khi thiếu báo giá backend.
-                      </span>
-                    ) : null}
-                  </p>
+                {beQuoteLoading && (
+                  <div className="rounded-lg bg-info-soft px-3 py-2 text-[11px] text-info flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                    <span>Đang xác nhận giá cuối cùng với máy chủ...</span>
+                  </div>
+                )}
+                {beQuoteErr && !beQuoteLoading && (
+                  <div className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-[11px] text-danger flex items-start gap-2">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      <b>Báo giá máy chủ thất bại:</b> {beQuoteErr}. Vui lòng sửa địa chỉ / thử lại — không thể tạo đơn khi thiếu báo giá backend.
+                    </span>
+                  </div>
                 )}
                 {serverOk && (
                   <p className="text-[11px] text-muted-foreground">
                     Giá theo báo giá máy chủ (gồm voucher / KM / phí ship backend).
                   </p>
                 )}
-                {beQuote?.rewardLines && beQuote.rewardLines.length > 0 && (
-                  <div className="rounded-lg bg-success-soft/40 px-3 py-2 text-xs text-success space-y-0.5">
-                    <p className="font-semibold">Quà tặng kèm (máy chủ)</p>
-                    {beQuote.rewardLines.map((r, i) => (
-                      <p key={i}>• {r.productName} ×{r.quantity}</p>
-                    ))}
-                  </div>
-                )}
-                {!serverOk && bestPromo && bestPromo.giftLines.length > 0 && (
-                  <div className="rounded-lg bg-success-soft/40 px-3 py-2 text-xs text-success space-y-0.5">
-                    <p className="font-semibold">🎁 Quà tặng kèm (xem trước)</p>
-                    {bestPromo.giftLines.map((g, i) => (
-                      <p key={i}>• {g.productName} ×{g.qty}</p>
-                    ))}
+                {!previewPromoIsFreeShipping && shouldShowGiftSummary && (
+                  <div data-testid="checkout-promotion-gifts" className="rounded-lg bg-success-soft/40 px-3 py-2 text-xs text-success space-y-0.5">
+                    <p className="font-semibold">Quà tặng: {quotedPromotionLabel ?? previewPromotionLabel ?? "Khuyến mãi đã chọn"}</p>
+                    {giftSummaryLines.length > 0 ? (
+                      giftSummaryLines.map((g) => (
+                        <p key={g.key} data-testid={`checkout-promotion-gift-line-${g.key}`}>🎁 {g.label} ×{g.qty}</p>
+                      ))
+                    ) : (
+                      <p data-testid="checkout-promotion-gifts-pending">Đang xác nhận quà tặng cho khuyến mãi này...</p>
+                    )}
+                    {serverOk && (
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        Quà tặng sẽ được xác nhận theo tồn kho tại thời điểm tạo đơn.
+                      </p>
+                    )}
                   </div>
                 )}
                 <div className="border-t pt-3 flex justify-between items-baseline">
                   <span className="font-bold">Tổng cộng</span>
-                  <span className="font-bold text-foreground text-xl">{formatVND(displayTotal)}</span>
+                  <span className="font-bold text-foreground text-xl" data-testid="checkout-total">{formatVND(displayTotal)}</span>
                 </div>
               </div>
               <button
@@ -830,9 +1011,9 @@ function Field({ label, value, onChange, placeholder }: { label: string; value: 
   );
 }
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function Row({ label, value, dataTestId }: { label: string; value: React.ReactNode; dataTestId?: string }) {
   return (
-    <div className="flex justify-between">
+    <div className="flex justify-between" data-testid={dataTestId}>
       <span className="text-muted-foreground">{label}</span>
       <span className="font-semibold">{value}</span>
     </div>

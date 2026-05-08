@@ -45,7 +45,7 @@ public class PendingOrderService {
     private final VoucherRepository voucherRepository;
     private final SalesQuoteRepository salesQuoteRepository;
     private final ProductBatchRepository productBatchRepository;
-    private final Clock clock;
+    private final Clock businessClock;
     private final CustomerLoyaltyService loyaltyService;
     private final AccountService accountService;
     private final ProductComboRepository comboItemRepo;
@@ -124,7 +124,7 @@ public class PendingOrderService {
         order.setPaymentMethod(req.paymentMethod());
         order.setPaymentReference(order.getOrderNo());
         order.setStatus(PendingOrder.Status.PENDING_PAYMENT);
-        order.setExpiresAt(req.expiresAt() != null ? req.expiresAt() : LocalDateTime.now(clock).plusHours(12));
+        order.setExpiresAt(req.expiresAt() != null ? req.expiresAt() : LocalDateTime.now(businessClock).plusHours(12));
         order.setShippingAddressJson(writeJson(req.shippingAddress()));
         order.setGiftLinesSnapshotJson(writeJson(req.promotionSnapshot() != null ? safeList(req.promotionSnapshot().giftLines()) : List.of()));
         order.setPromotionSnapshotJson(writeJson(req.promotionSnapshot()));
@@ -203,7 +203,7 @@ public class PendingOrderService {
         if (quote.getConsumedInvoice() != null || quote.getConsumedPendingOrder() != null) {
             throw new IllegalStateException("Quote đã được dùng");
         }
-        if (quote.isExpired(clock)) {
+        if (quote.isExpired(businessClock)) {
             throw new IllegalStateException("Quote đã hết hạn");
         }
         SalesQuotePayloadDto payload;
@@ -233,7 +233,7 @@ public class PendingOrderService {
         order.setPaymentMethod(req.paymentMethod());
         order.setPaymentReference(order.getOrderNo());
         order.setStatus(PendingOrder.Status.PENDING_PAYMENT);
-        order.setExpiresAt(req.expiresAt() != null ? req.expiresAt() : LocalDateTime.now(clock).plusHours(12));
+        order.setExpiresAt(req.expiresAt() != null ? req.expiresAt() : LocalDateTime.now(businessClock).plusHours(12));
         order.setShippingAddressJson(writeJson(req.shippingAddress()));
         order.setGiftLinesSnapshotJson(writeJson(
                 payload.promotionSnapshot() != null ? safeList(payload.promotionSnapshot().giftLines()) : List.of()));
@@ -334,7 +334,7 @@ public class PendingOrderService {
             throw new IllegalStateException("Quote đã được dùng");
         }
         locked.setConsumedPendingOrder(savedOrder);
-        locked.setConsumedAt(LocalDateTime.now(clock));
+        locked.setConsumedAt(LocalDateTime.now(businessClock));
         salesQuoteRepository.save(locked);
 
         loyaltyService.reserveForPendingOrder(savedOrder, loyaltySnapshot);
@@ -352,11 +352,13 @@ public class PendingOrderService {
         }
         for (Map.Entry<Long, Integer> entry : demandByVariant.entrySet()) {
             ProductVariant variant = variantRepository.findById(entry.getKey()).orElseThrow();
-            int stockQty = variant.getStockQty() != null ? variant.getStockQty() : 0;
-            if (stockQty < entry.getValue()) {
+            int sellableQty = productBatchRepository.sumSellableRemainingQtyByVariantId(
+                    entry.getKey(),
+                    LocalDate.now(businessClock));
+            if (sellableQty < entry.getValue()) {
                 throw new IllegalArgumentException(
-                        "Khong du ton cho don hang va qua tang [" + variant.getVariantCode()
-                                + "]. Can " + entry.getValue() + ", con " + stockQty);
+                        "Không đủ tồn bán được cho đơn hàng và quà tặng [" + variant.getVariantCode()
+                                + "]. Cần " + entry.getValue() + ", còn " + sellableQty + ".");
             }
         }
     }
@@ -381,7 +383,7 @@ public class PendingOrderService {
                                 PendingOrder.Status.PENDING_PAYMENT,
                                 PendingOrder.Status.WAITING_CONFIRM,
                                 PendingOrder.Status.PAID_AUTO),
-                        LocalDateTime.now(clock))
+                        LocalDateTime.now(businessClock))
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -491,12 +493,12 @@ public class PendingOrderService {
     @Transactional
     public PendingOrderResponse cancelRecoverableForCustomer(Long id, Long customerId, String reason) {
         PendingOrder order = pendingOrderRepo.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("KhÃ´ng tÃ¬m tháº¥y Ä‘Æ¡n hÃ ng ID: " + id));
+                .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy đơn hàng ID: " + id));
         if (customerId == null || order.getCustomerId() == null || !order.getCustomerId().equals(String.valueOf(customerId))) {
-            throw new IllegalArgumentException("KhÃ´ng thá»ƒ há»§y Ä‘Æ¡n khÃ´ng thuá»™c tÃ i khoáº£n hiá»‡n táº¡i");
+            throw new IllegalArgumentException("Không thể hủy đơn không thuộc tài khoản hiện tại");
         }
         if (order.getStatus() != PendingOrder.Status.PENDING_PAYMENT) {
-            throw new IllegalStateException("Chá»‰ cÃ³ thá»ƒ sá»­a Ä‘Æ¡n Ä‘ang chá» thanh toÃ¡n");
+            throw new IllegalStateException("Chỉ có thể sửa đơn đang chờ thanh toán");
         }
         return cancelOrder(id, reason);
     }

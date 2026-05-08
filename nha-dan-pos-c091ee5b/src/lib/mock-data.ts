@@ -142,8 +142,12 @@ export interface InvoiceBreakdown {
   vatPercent: number;
   vatBase: number;
   vatAmount: number;
+  loyaltyDiscount?: number;
+  loyaltyRedeemedPoints?: number;
   total: number;
   freeItems?: { productName: string; quantity: number }[];
+  discountedLines?: { productName: string; variantName?: string; discountedAmount: number }[];
+  giftLines?: { productName: string; variantName?: string; quantity: number }[];
 }
 
 export interface Invoice {

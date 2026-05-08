@@ -179,7 +179,7 @@ class Phase6BeDomainRegressionIntegrationTest {
 
         ShippingAddressDto addr = new ShippingAddressDto(
                 "A", "0909123456", "79", "HCM", "760", "Q1",
-                "26734", "Xa", "1", null);
+                "26734", "Xa", "1", null, null);
 
         var quote = salesQuoteService.quote(new SalesQuoteRequest(
                 "storefront",

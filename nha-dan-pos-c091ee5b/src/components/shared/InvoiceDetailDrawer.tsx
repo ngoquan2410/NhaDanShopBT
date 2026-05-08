@@ -51,6 +51,8 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
 
   // Resolve full promotion record by name (best-effort) for richer detail panel.
   const voucherDiscount = b.voucherDiscount ?? 0;
+  const loyaltyDiscount = Number((b as { loyaltyDiscount?: number }).loyaltyDiscount ?? 0);
+  const loyaltyRedeemedPoints = Number((b as { loyaltyRedeemedPoints?: number }).loyaltyRedeemedPoints ?? 0);
   const hasManual = b.manualDiscount > 0;
   const hasPromoDiscount = b.promoDiscount > 0;
   const hasVoucherDiscount = voucherDiscount > 0;
@@ -58,21 +60,11 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
   const hasFreeItems = (b.freeItems?.length ?? 0) > 0 || rewards.length > 0;
   const hasAnyPromotion = !!b.promoName || !!b.voucherName || hasManual || hasPromoDiscount || hasVoucherDiscount || hasShipDiscount || hasFreeItems;
 
-  const totalPromoImpact = b.manualDiscount + b.promoDiscount + voucherDiscount + b.shippingDiscount;
+  const totalPromoImpact = b.manualDiscount + b.promoDiscount + voucherDiscount + loyaltyDiscount + b.shippingDiscount;
 
 
-  // Build per-item impact rows (eligible qty + gift qty), keyed by display name.
-  const eligibleByName = new Map<string, { qty: number; price: number }>();
-  for (const l of billable) {
-    const cur = eligibleByName.get(l.name);
-    if (cur) { cur.qty += l.qty; } else { eligibleByName.set(l.name, { qty: l.qty, price: l.price }); }
-  }
-  const giftByName = new Map<string, number>();
-  for (const r of rewards) giftByName.set(r.name, (giftByName.get(r.name) ?? 0) + r.qty);
-  for (const fi of b.freeItems ?? []) {
-    const key = fi.productName;
-    if (!giftByName.has(key)) giftByName.set(key, fi.quantity);
-  }
+  const discountedLines = b.discountedLines ?? [];
+  const giftLines = b.giftLines ?? [];
 
   // Promotion rule text + scope text
   const ruleText = b.promoName ? "Khuyến mãi áp dụng từ snapshot hóa đơn backend" : "";
@@ -195,6 +187,16 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
                     <span className="flex items-center gap-1 text-muted-foreground"><Tag className="h-3 w-3" /> Giảm từ voucher{b.voucherName ? ` (${b.voucherName})` : ""}</span>
                     <span className={hasVoucherDiscount ? "text-danger" : "text-muted-foreground"}>{hasVoucherDiscount ? `-${formatVND(voucherDiscount)}` : "—"}</span>
                   </div>
+                  {loyaltyDiscount > 0 && (
+                    <div className="flex justify-between" data-testid="invoice-loyalty-discount">
+                      <span className="flex items-center gap-1 text-muted-foreground">
+                        Đổi điểm ({loyaltyRedeemedPoints} điểm)
+                      </span>
+                      <span className="text-danger" data-testid="loyalty-redeemed-points">
+                        -{formatVND(loyaltyDiscount)}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="flex items-center gap-1 text-muted-foreground"><Truck className="h-3 w-3" /> Ưu đãi ship</span>
                     <span className={hasShipDiscount ? "text-success" : "text-muted-foreground"}>{hasShipDiscount ? `-${formatVND(b.shippingDiscount)}` : "—"}</span>
@@ -204,50 +206,53 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
                     <span className={b.vatAmount > 0 ? "" : "text-muted-foreground"}>{b.vatAmount > 0 ? `+${formatVND(b.vatAmount)}` : "—"}</span>
                   </div>
                   <div className="border-t pt-1.5 mt-1 flex justify-between font-semibold">
-                    <span>Tổng tác động khuyến mãi</span>
+                    <span>Tổng ưu đãi / giảm trừ</span>
                     <span className="text-primary">-{formatVND(totalPromoImpact)}</span>
                   </div>
                 </div>
 
-                {(eligibleByName.size > 0 || giftByName.size > 0) && (
+                {(discountedLines.length > 0 || giftLines.length > 0) && (
                   <div className="px-3 py-2.5 border-b">
-                    <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                      Tác động lên sản phẩm
-                    </div>
-                    <div className="rounded-md border divide-y">
-                      {Array.from(new Set([...eligibleByName.keys(), ...giftByName.keys()])).map((name) => {
-                        const elig = eligibleByName.get(name);
-                        const giftQty = giftByName.get(name) ?? 0;
-                        const isGift = !elig && giftQty > 0;
-                        return (
-                          <div key={name} className={`p-2 grid grid-cols-12 gap-2 text-xs items-center ${isGift ? "bg-warning-soft/30" : ""}`}>
-                            <div className="col-span-6 min-w-0">
-                              <p className="font-medium truncate">{name}</p>
-                              {isGift && (
-                                <p className="text-[10px] text-warning truncate">
-                                  Tặng từ khuyến mãi {b.promoName ? `"${b.promoName}"` : ""}
+                    {discountedLines.length > 0 && (
+                      <>
+                        <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                          Sản phẩm được giảm
+                        </div>
+                        <div className="rounded-md border divide-y mb-2">
+                          {discountedLines.map((line, idx) => (
+                            <div key={`${line.productName}-${idx}`} className="p-2 flex items-center justify-between text-xs">
+                              <div className="min-w-0">
+                                <p className="font-medium truncate">
+                                  {line.productName}
+                                  {line.variantName ? ` · ${line.variantName}` : ""}
                                 </p>
-                              )}
+                              </div>
+                              <span className="text-danger font-medium">-{formatVND(line.discountedAmount)}</span>
                             </div>
-                            <div className="col-span-3 text-muted-foreground">
-                              {isGift ? (
-                                <Badge variant="outline" className="text-[10px] h-4 px-1 border-warning/50 text-warning">
-                                  <Gift className="h-2.5 w-2.5 mr-0.5" /> Quà tặng
-                                </Badge>
-                              ) : giftQty > 0 ? "Đủ điều kiện + tặng" : "Đủ điều kiện"}
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {giftLines.length > 0 && (
+                      <>
+                        <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                          Quà tặng
+                        </div>
+                        <div className="rounded-md border divide-y">
+                          {giftLines.map((line, idx) => (
+                            <div key={`${line.productName}-${idx}`} className="p-2 flex items-center justify-between text-xs bg-warning-soft/20">
+                              <div className="min-w-0">
+                                <p className="font-medium truncate">
+                                  {line.productName}
+                                  {line.variantName ? ` · ${line.variantName}` : ""}
+                                </p>
+                              </div>
+                              <span className="text-warning font-medium">x{line.quantity}</span>
                             </div>
-                            <div className="col-span-3 text-right">
-                              {elig && <span className="text-muted-foreground">SL {elig.qty}</span>}
-                              {giftQty > 0 && (
-                                <span className={`ml-1 font-medium ${isGift ? "text-warning" : "text-success"}`}>
-                                  {elig ? `+${giftQty} tặng` : `×${giftQty}`}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -285,6 +290,12 @@ export function InvoiceDetailDrawer({ invoice, onClose }: Props) {
                 <div className="flex justify-between text-danger">
                   <span className="flex items-center gap-1"><Tag className="h-3 w-3" /> Voucher{b.voucherName ? ` (${b.voucherName})` : ""}</span>
                   <span>-{formatVND(voucherDiscount)}</span>
+                </div>
+              )}
+              {loyaltyDiscount > 0 && (
+                <div className="flex justify-between text-danger" data-testid="invoice-loyalty-discount">
+                  <span className="flex items-center gap-1">Đổi điểm ({loyaltyRedeemedPoints} điểm)</span>
+                  <span>-{formatVND(loyaltyDiscount)}</span>
                 </div>
               )}
               {(b.shippingFee > 0 || b.shippingDiscount > 0) && (

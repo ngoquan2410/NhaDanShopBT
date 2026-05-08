@@ -34,4 +34,13 @@ public class ProductionOrderComponent {
 
     @Column(name = "unit", nullable = false, length = 32)
     private String unit = "unit";
+
+    @Column(name = "product_name_snapshot", length = 255)
+    private String productNameSnapshot;
+
+    @Column(name = "variant_name_snapshot", length = 255)
+    private String variantNameSnapshot;
+
+    @Column(name = "variant_code_snapshot", length = 100)
+    private String variantCodeSnapshot;
 }

@@ -532,6 +532,8 @@ function PendingOrderDetail({ order, onClose, onConfirm, onCancel }: {
               {pb.manualDiscount > 0 && <Row label="Giảm thủ công" value={`−${formatVND(pb.manualDiscount)}`} muted />}
               {pb.promotionDiscount > 0 && <Row label="Giảm khuyến mãi" value={`−${formatVND(pb.promotionDiscount)}`} muted />}
               {pb.voucherDiscount > 0 && <Row label="Giảm voucher" value={`−${formatVND(pb.voucherDiscount)}`} muted />}
+              {(pb.loyaltyDiscount ?? 0) > 0 && <Row label={`Đổi điểm (${pb.loyaltyRedeemedPoints ?? 0} điểm)`} value={`−${formatVND(pb.loyaltyDiscount ?? 0)}`} muted dataTestId="pending-loyalty-discount" />}
+              {(pb.loyaltyDiscount ?? 0) > 0 && <Row label="Điểm đã dùng" value={`${pb.loyaltyRedeemedPoints ?? 0}`} muted dataTestId="loyalty-redeemed-points" />}
               <Row label="Phí vận chuyển" value={formatVND(pb.shippingFee)} />
               {pb.shippingDiscount > 0 && <Row label="Giảm phí ship" value={`−${formatVND(pb.shippingDiscount)}`} muted />}
               {pb.vatPercent > 0 && (
@@ -573,9 +575,9 @@ function PendingOrderDetail({ order, onClose, onConfirm, onCancel }: {
   );
 }
 
-function Row({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
+function Row({ label, value, muted, dataTestId }: { label: string; value: string; muted?: boolean; dataTestId?: string }) {
   return (
-    <div className="flex justify-between">
+    <div className="flex justify-between" data-testid={dataTestId}>
       <span className={muted ? "text-muted-foreground" : ""}>{label}</span>
       <span className={muted ? "text-muted-foreground" : "font-medium"}>{value}</span>
     </div>

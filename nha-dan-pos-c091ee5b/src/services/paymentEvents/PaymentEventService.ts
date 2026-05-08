@@ -31,7 +31,6 @@ export interface PaymentEventService {
   linkPaymentEvent(
     eventId: string,
     orderCode: string,
-    linkedBy: "auto" | "admin",
   ): Promise<PaymentEvent>;
   /** Mark an event as ignored (e.g. wrong-recipient transfer). */
   ignorePaymentEvent(eventId: string): Promise<PaymentEvent>;
@@ -52,7 +51,6 @@ export interface PaymentEventService {
   linkToOrder(
     eventId: string,
     orderCode: string,
-    by: "auto" | "admin",
   ): Promise<PaymentEvent>;
   /** Compatibility alias for `ignorePaymentEvent`. */
   markIgnored(eventId: string): Promise<PaymentEvent>;

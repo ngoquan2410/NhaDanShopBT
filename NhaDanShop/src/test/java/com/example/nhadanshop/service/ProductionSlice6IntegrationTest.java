@@ -8,6 +8,7 @@ import com.example.nhadanshop.dto.InvoiceItemRequest;
 import com.example.nhadanshop.dto.SalesInvoiceRequest;
 import com.example.nhadanshop.dto.SalesInvoiceResponse;
 import com.example.nhadanshop.entity.*;
+import com.example.nhadanshop.exception.ProductionShortageException;
 import com.example.nhadanshop.repository.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -91,6 +92,9 @@ class ProductionSlice6IntegrationTest {
 
     @MockBean
     CustomerLoyaltyService customerLoyaltyService;
+
+    @MockBean
+    StockedCatalogGuardService stockedCatalogGuardService;
 
     @BeforeEach
     void auth() {
@@ -182,7 +186,7 @@ class ProductionSlice6IntegrationTest {
         assertEquals(5, prev.maxProducibleQty());
         assertTrue(prev.components().getFirst().allocations().size() >= 1);
 
-        assertThrows(IllegalStateException.class, () ->
+        assertThrows(ProductionShortageException.class, () ->
                 productionOrderService.create(new CreateProductionOrderRequest(recipe.id(), 10, null, null)));
     }
 
@@ -277,6 +281,48 @@ class ProductionSlice6IntegrationTest {
         assertEquals(1, outputMoves);
 
         assertTrue(orderAllocationRepository.count() > 0);
+        assertFalse(ord.components().isEmpty());
+        var firstComponent = ord.components().getFirst();
+        assertEquals(raw.getProduct().getName(), firstComponent.productName());
+        assertEquals(raw.getVariantName(), firstComponent.variantName());
+        assertEquals(raw.getVariantCode(), firstComponent.variantCode());
+        assertFalse(firstComponent.allocations().isEmpty());
+        var firstAllocation = firstComponent.allocations().getFirst();
+        assertNotNull(firstAllocation.totalCost());
+        assertNotNull(firstAllocation.allocationIndex());
+    }
+
+    @Test
+    void production_detail_uses_snapshot_identity_after_master_data_mutation() {
+        ProductVariant raw = createVariant(false, true, true, "RAW-SNAP-" + nano());
+        ProductVariant out = createVariant(false, true, true, "OUT-SNAP-" + nano());
+        ProductionRecipeResponse recipe = productionRecipeService.create(new CreateProductionRecipeRequest(
+                "RCP-SNAP-" + nano(), "Snap", out.getProduct().getId(), out.getId(), 10, true, BigDecimal.ZERO,
+                List.of(new ComponentLine(raw.getProduct().getId(), raw.getId(), 2, "u", 0))));
+        ProductBatch inputBatch = createBatch(raw, remaining(10), new BigDecimal("50000"), expFuture(), ProductBatch.STATUS_ACTIVE);
+        sync(raw.getId());
+
+        ProductionOrderResponse created = productionOrderService.create(
+                new CreateProductionOrderRequest(recipe.id(), 2, BigDecimal.ZERO, null));
+        var createdComp = created.components().getFirst();
+        var createdAlloc = createdComp.allocations().getFirst();
+
+        Product rawProduct = raw.getProduct();
+        rawProduct.setName("Product CHANGED");
+        productRepository.save(rawProduct);
+        raw.setVariantName("Variant CHANGED");
+        raw.setVariantCode("RAW-CHANGED-CODE");
+        variantRepository.save(raw);
+        inputBatch.setBatchCode("BATCH-CHANGED-CODE");
+        batchRepository.save(inputBatch);
+
+        ProductionOrderResponse reloaded = productionOrderService.get(created.id());
+        var reloadedComp = reloaded.components().getFirst();
+        var reloadedAlloc = reloadedComp.allocations().getFirst();
+        assertEquals(createdComp.productName(), reloadedComp.productName());
+        assertEquals(createdComp.variantName(), reloadedComp.variantName());
+        assertEquals(createdComp.variantCode(), reloadedComp.variantCode());
+        assertEquals(createdAlloc.lotCode(), reloadedAlloc.lotCode());
     }
 
     /** Insufficient stock: no order row, no movements. */
@@ -294,7 +340,7 @@ class ProductionSlice6IntegrationTest {
         long movesBefore = movementRepository.count();
         long ordersBefore = productionOrderRepository.count();
 
-        assertThrows(IllegalStateException.class, () ->
+        assertThrows(ProductionShortageException.class, () ->
                 productionOrderService.create(new CreateProductionOrderRequest(recipe.id(), 1, null, null)));
 
         assertEquals(movesBefore, movementRepository.count());
@@ -383,6 +429,44 @@ class ProductionSlice6IntegrationTest {
         InventoryStockReportRow ordRaw = report.rows().stream()
                 .filter(r -> raw.getId().equals(r.variantId())).findFirst().orElseThrow();
         assertEquals(rawV.getStockQty(), ordRaw.closingStock());
+    }
+
+    @Test
+    void inventory_report_keeps_active_variant_without_category() {
+        Category cat = new Category();
+        cat.setName(" ");
+        cat.setDescription("blank-cat");
+        cat.setActive(true);
+        cat = categoryRepository.save(cat);
+
+        Product p = new Product();
+        p.setCode("PNOCAT-" + nano());
+        p.setName("No category");
+        p.setCategory(cat);
+        p.setActive(true);
+        p.setProductType(Product.ProductType.SINGLE);
+        p = productRepository.save(p);
+
+        ProductVariant v = new ProductVariant();
+        v.setProduct(p);
+        v.setVariantCode("VNOCAT-" + nano());
+        v.setVariantName("No cat var");
+        v.setSellUnit("unit");
+        v.setPiecesPerUnit(1);
+        v.setSellPrice(new BigDecimal("100000"));
+        v.setCostPrice(new BigDecimal("50000"));
+        v.setStockQty(0);
+        v.setMinStockQty(0);
+        v.setActive(true);
+        v.setIsDefault(true);
+        v.setIsSellable(true);
+        v = variantRepository.save(v);
+
+        InventoryStockReport report = inventoryStockService.getStockReport(LocalDate.now(businessClock), LocalDate.now(businessClock));
+        Long variantId = v.getId();
+        InventoryStockReportRow row = report.rows().stream().filter(r -> variantId.equals(r.variantId())).findFirst().orElse(null);
+        assertNotNull(row);
+        assertTrue(row.categoryName() == null || row.categoryName().isBlank());
     }
 
     /** Combined list filters: recipe by name/code fragment; order by order number and recipe id. */
@@ -478,6 +562,42 @@ class ProductionSlice6IntegrationTest {
 
         assertEquals(remainingBefore, batchRepository.findById(b.getId()).orElseThrow().getRemainingQty());
         assertEquals(mvBefore, movementRepository.count());
+    }
+
+    @Test
+    void preview_includes_component_identity_and_missing_qty() {
+        ProductVariant raw = createVariant(false, true, true, "RAW-PREV-ID-" + nano());
+        ProductVariant out = createVariant(false, true, true, "OUT-PREV-ID-" + nano());
+        ProductionRecipeResponse recipe = mkSimpleRecipeWithOutput(out, raw);
+        createBatch(raw, remaining(2), cost(1000), expFuture(), ProductBatch.STATUS_ACTIVE);
+        sync(raw.getId());
+
+        ProductionPreviewResponse prev = productionOrderService.preview(new ProductionPreviewRequest(recipe.id(), 1, null));
+        assertFalse(prev.components().isEmpty());
+        PreviewComponentDto c = prev.components().getFirst();
+        assertEquals(raw.getProduct().getName(), c.productName());
+        assertEquals(raw.getVariantName(), c.variantName());
+        assertEquals(raw.getVariantCode(), c.variantCode());
+        assertEquals(5, c.requiredQty());
+        assertEquals(2, c.availableQty());
+        assertEquals(3, c.missingQty());
+    }
+
+    @Test
+    void create_shortage_throws_structured_exception() {
+        ProductVariant raw = createVariant(false, true, true, "RAW-SHORT-" + nano());
+        ProductVariant out = createVariant(false, true, true, "OUT-SHORT-" + nano());
+        ProductionRecipeResponse recipe = mkSimpleRecipeWithOutput(out, raw);
+        createBatch(raw, remaining(1), cost(1000), expFuture(), ProductBatch.STATUS_ACTIVE);
+        sync(raw.getId());
+
+        ProductionShortageException ex = assertThrows(ProductionShortageException.class, () ->
+                productionOrderService.create(new CreateProductionOrderRequest(recipe.id(), 1, null, null)));
+        assertFalse(ex.getShortages().isEmpty());
+        var row = ex.getShortages().getFirst();
+        assertEquals(raw.getProduct().getId(), row.productId());
+        assertEquals(raw.getId(), row.variantId());
+        assertTrue(row.missingQty() > 0);
     }
 
     /** Slice 6B: selling the production output batch by exact batchId uses weighted output unit cost. */

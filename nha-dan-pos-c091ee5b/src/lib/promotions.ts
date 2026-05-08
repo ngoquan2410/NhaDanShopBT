@@ -18,6 +18,8 @@ export interface PromotionBase {
   startDate: string; // YYYY-MM-DD
   endDate: string;   // YYYY-MM-DD
   scope: PromotionScope;
+  /** "scoped" => ELIGIBLE_ITEMS, "whole-order" => WHOLE_ORDER */
+  minOrderBasis?: "scoped" | "whole-order";
 }
 
 // ===== Type-specific configs =====

@@ -58,7 +58,11 @@ function mapVariant(v: Record<string, unknown>): StorefrontVariant {
     piecesPerImportUnit: Number(v.piecesPerUnit ?? v.piecesPerImportUnit ?? 1),
     sellPrice: Number(v.sellPrice ?? 0),
     costPrice: Number(v.costPrice ?? 0),
-    stock: Number(v.stockQty ?? v.stock ?? 0),
+    stock: Number(
+      v.sellableStockQty != null && Number.isFinite(Number(v.sellableStockQty))
+        ? Number(v.sellableStockQty)
+        : Number(v.stockQty ?? v.stock ?? 0),
+    ),
     minStock: Number(v.minStockQty ?? v.minStock ?? 0),
     expiryDays: Number(v.expiryDays ?? 0),
     isDefault: Boolean(v.isDefault),

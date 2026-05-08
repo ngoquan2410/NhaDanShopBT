@@ -359,9 +359,31 @@ export const adminReports = {
     }
     return this.profit(from, to, productIds);
   },
-  async downloadInventoryExcel(from: string, to: string): Promise<void> {
+  async downloadInventoryExcel(
+    from: string,
+    to: string,
+    filters?: {
+      keyword?: string;
+      categoryId?: number;
+      categoryName?: string;
+      sort?: string;
+    },
+  ): Promise<void> {
+    const params = new URLSearchParams({ from, to });
+    if (filters?.keyword != null && filters.keyword.trim() !== "") {
+      params.set("keyword", filters.keyword.trim());
+    }
+    if (filters?.categoryId != null && Number.isFinite(filters.categoryId)) {
+      params.set("categoryId", String(filters.categoryId));
+    }
+    if (filters?.categoryName != null && filters.categoryName.trim() !== "") {
+      params.set("categoryName", filters.categoryName.trim());
+    }
+    if (filters?.sort != null && filters.sort.trim() !== "") {
+      params.set("sort", filters.sort.trim());
+    }
     await downloadAdminBlob(
-      `/api/reports/inventory/export?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      `/api/reports/inventory/export?${params.toString()}`,
       `TonKho_${from}_${to}.xlsx`,
     );
   },

@@ -1,5 +1,6 @@
 package com.example.nhadanshop.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 
 import java.math.BigDecimal;
@@ -22,6 +23,8 @@ public record PromotionRequest(
 
         /** ALL | CATEGORY | PRODUCT */
         String appliesTo,
+        /** ELIGIBLE_ITEMS | WHOLE_ORDER */
+        String minOrderScope,
 
         /** IDs của danh mục áp dụng (khi appliesTo=CATEGORY) */
         List<Long> categoryIds,
@@ -32,7 +35,7 @@ public record PromotionRequest(
         Boolean active,
 
         // ── BUY_X_GET_Y ────────────────────────────────────────────────────
-        /** Số lượng cần mua (X) — dùng khi type=BUY_X_GET_Y */
+        /** Số lượng cần mua (X) — dùng khi type=BUY_X_GET_Y và không có buyItems */
         Integer buyQty,
         /** ID sản phẩm được tặng */
         Long getProductId,
@@ -40,8 +43,17 @@ public record PromotionRequest(
         Integer getQty,
 
         // ── QUANTITY_GIFT ──────────────────────────────────────────────────
-        /** Mua tối thiểu N SP → tặng (dùng khi type=QUANTITY_GIFT) */
+        /** Mua tối thiểu N SP → tặng (dùng khi type=QUANTITY_GIFT); null = chỉ kích hoạt theo đơn tối thiểu / mặc định 1 */
         Integer minBuyQty,
-        /** Giới hạn tặng tối đa M lần, null = không giới hạn */
-        Integer maxBuyQty
+        /** Legacy: giới hạn số lần tặng — map DB column max_buy_qty */
+        Integer maxBuyQty,
+
+        /** BUY_X_GET_Y: mỗi dòng là một sản phẩm và số lượng cần mua; khi rỗng dùng productIds + buyQty */
+        @Valid List<PromotionBuyItemRequest> buyItems,
+
+        /** Lặp lại theo bộ ngưỡng; mặc định true khi null */
+        Boolean repeatable,
+
+        /** QUANTITY_GIFT: giới hạn số lần áp dụng quà (map DB max_buy_qty); ưu tiên hơn maxBuyQty khi cả hai gửi */
+        Integer maxGiftApplications
 ) {}

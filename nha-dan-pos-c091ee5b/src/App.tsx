@@ -1,7 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
-import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { StorefrontLayout } from "@/components/layout/StorefrontLayout";
@@ -62,7 +61,6 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <Toaster />
       <Sonner />
       <BrowserRouter>
         <AdminAuthProvider>
@@ -114,6 +112,7 @@ const App = () => (
               <Route path="stock-adjustments" element={<AdminStockAdjustments />} />
               <Route path="stock-adjustments/create" element={<AdminStockAdjustmentCreate />} />
               <Route path="production/recipes/:id" element={<AdminProductionRecipeDetail />} />
+              <Route path="production/recipes/:id/edit" element={<AdminProductionRecipeForm />} />
               <Route path="inventory-report" element={<AdminInventoryReport />} />
               <Route path="production/recipes/new" element={<AdminProductionRecipeForm />} />
               <Route path="production" element={<AdminProduction />} />

@@ -3,12 +3,14 @@ package com.example.nhadanshop.service;
 import com.example.nhadanshop.dto.ProductPatchRequest;
 import com.example.nhadanshop.dto.ProductRequest;
 import com.example.nhadanshop.dto.ProductResponse;
+import com.example.nhadanshop.dto.ProductVariantResponse;
 import com.example.nhadanshop.entity.Category;
 import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.entity.ProductImportUnit;
 import com.example.nhadanshop.entity.ProductVariant;
 import com.example.nhadanshop.repository.CategoryRepository;
 import com.example.nhadanshop.repository.ProductImportUnitRepository;
+import com.example.nhadanshop.repository.ProductBatchRepository;
 import com.example.nhadanshop.repository.ProductRepository;
 import com.example.nhadanshop.repository.ProductVariantRepository;
 import com.example.nhadanshop.repository.PromotionRepository;
@@ -20,6 +22,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -39,6 +43,8 @@ public class ProductService {
     private final PromotionRepository promotionRepository;
     private final ProductImportUnitRepository importUnitRepository;
     private final ProductVariantRepository variantRepository;
+    private final ProductBatchRepository productBatchRepository;
+    private final Clock businessClock;
     @org.springframework.context.annotation.Lazy
     private final ProductVariantService variantService;
 
@@ -395,13 +401,40 @@ public class ProductService {
         for (List<ProductVariant> list : byProductId.values()) {
             list.sort(variantOrder);
         }
+        LocalDate today = LocalDate.now(businessClock);
+        List<Long> allVids = byProductId.values().stream()
+                .flatMap(List::stream)
+                .map(ProductVariant::getId)
+                .distinct()
+                .toList();
+        java.util.Map<Long, Integer> sellableByVid = buildSellableStockMap(allVids, today);
         return products.stream().map(p -> {
             if (p.getProductType() == Product.ProductType.COMBO) {
                 return DtoMapper.toResponse(p);
             }
             List<ProductVariant> vv = byProductId.getOrDefault(p.getId(), List.of());
-            return DtoMapper.toResponse(p, vv);
+            List<ProductVariantResponse> variantRows = vv.stream()
+                    .map(v -> DtoMapper.toResponse(v, sellableByVid.getOrDefault(v.getId(), 0)))
+                    .toList();
+            return DtoMapper.toResponseWithVariants(p, variantRows);
         }).toList();
+    }
+
+    private java.util.Map<Long, Integer> buildSellableStockMap(List<Long> variantIds, LocalDate asOf) {
+        if (variantIds == null || variantIds.isEmpty()) {
+            return java.util.Map.of();
+        }
+        java.util.Map<Long, Integer> out = new HashMap<>();
+        for (Long vid : variantIds) {
+            out.put(vid, 0);
+        }
+        for (Object[] row : productBatchRepository.sumSellableRemainingQtyByVariantIds(variantIds, asOf)) {
+            if (row[0] == null) continue;
+            long vid = ((Number) row[0]).longValue();
+            int qty = row[1] == null ? 0 : ((Number) row[1]).intValue();
+            out.put(vid, qty);
+        }
+        return out;
     }
 }
 

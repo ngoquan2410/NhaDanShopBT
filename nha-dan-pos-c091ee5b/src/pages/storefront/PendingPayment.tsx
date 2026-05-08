@@ -612,6 +612,18 @@ export default function PendingPaymentPage() {
               value={`-${formatVND(breakdown.voucherDiscount)}`}
             />
           )}
+          {(breakdown.loyaltyDiscount ?? 0) > 0 && (
+            <>
+              <SummaryRow
+                label={`Đổi điểm (${breakdown.loyaltyRedeemedPoints ?? 0} điểm)`}
+                value={`-${formatVND(breakdown.loyaltyDiscount ?? 0)}`}
+                dataTestId="pending-loyalty-discount"
+              />
+              <div className="text-right text-[11px] text-muted-foreground" data-testid="loyalty-redeemed-points">
+                Đã dùng {breakdown.loyaltyRedeemedPoints ?? 0} điểm
+              </div>
+            </>
+          )}
           <SummaryRow
             label="Phí giao hàng"
             value={breakdown.shippingFee === 0 ? <span className="text-success">Miễn phí</span> : formatVND(breakdown.shippingFee)}
@@ -706,9 +718,9 @@ export default function PendingPaymentPage() {
   );
 }
 
-function SummaryRow({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
+function SummaryRow({ label, value, dataTestId }: { label: React.ReactNode; value: React.ReactNode; dataTestId?: string }) {
   return (
-    <div className="flex justify-between">
+    <div className="flex justify-between" data-testid={dataTestId}>
       <span className="text-muted-foreground">{label}</span>
       <span>{value}</span>
     </div>

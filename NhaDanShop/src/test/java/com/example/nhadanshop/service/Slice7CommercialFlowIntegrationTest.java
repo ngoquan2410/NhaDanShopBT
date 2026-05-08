@@ -57,6 +57,7 @@ import java.time.ZoneId;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
@@ -95,6 +96,9 @@ class Slice7CommercialFlowIntegrationTest {
 
     @MockBean
     private AccountService accountService;
+
+    @MockBean
+    private StockedCatalogGuardService stockedCatalogGuardService;
 
     @Autowired
     private PendingOrderService pendingOrderService;
@@ -136,6 +140,29 @@ class Slice7CommercialFlowIntegrationTest {
     }
 
     @Test
+    void quote_when_selected_promotion_missing_suggests_best_eligible_fallback() {
+        Category cat = mkCategory("CAT-S7-FALLBACK");
+        ProductVariant v = mkVariant(cat, "S7-FALLBACK-P", new BigDecimal("100000"), new BigDecimal("30000"));
+        mkBatch(v, 10, new BigDecimal("30000"));
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+        Promotion pct = mkPercent("FB-PCT-10", new BigDecimal("10"), BigDecimal.ZERO, null);
+
+        SalesQuoteResponse quote = salesQuoteService.quote(new SalesQuoteRequest(
+                "pos",
+                null,
+                List.of(new SalesQuoteLineRequest(v.getProduct().getId(), v.getId(), 1, BigDecimal.ZERO, null, false)),
+                9_999_999L,
+                null,
+                null,
+                null,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO
+        ));
+        assertNotNull(quote.selectedPromotionInvalidReason());
+        assertEquals(pct.getId(), quote.fallbackPromotionId());
+    }
+
+    @Test
     void acceptance_85f_reward_free_item_persists_zero_revenue_commercial_invariants_and_cogs_stock() {
         when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-S7-85F-001");
         Category cat = mkCategory("CAT-S7-85F");
@@ -159,6 +186,10 @@ class Slice7CommercialFlowIntegrationTest {
                 BigDecimal.ZERO
         ));
         assertEquals(1, quote.rewardLines().size());
+        assertNotNull(quote.promotionSnapshot());
+        assertTrue(quote.promotionSnapshot().affectedLines() == null || quote.promotionSnapshot().affectedLines().isEmpty());
+        assertNotNull(quote.promotionSnapshot().giftLines());
+        assertEquals(1, quote.promotionSnapshot().giftLines().size());
 
         SalesInvoiceResponse invoice = invoiceService.createInvoiceFromQuoteRequest(
                 new SalesInvoiceRequest(null, null, null, null, null, quote.quoteId(), "cash"));
@@ -344,9 +375,64 @@ class Slice7CommercialFlowIntegrationTest {
         assertMoney(new BigDecimal("100000"), pricing.itemNetRevenue());
         assertMoney(new BigDecimal("100000"), quote.lines().getFirst().commercialSnapshot().lineNetRevenue());
         assertMoney(new BigDecimal("30000"), quote.promotionSnapshot().shippingDiscountAmount());
+        assertTrue(quote.promotionSnapshot().affectedLines() == null || quote.promotionSnapshot().affectedLines().isEmpty());
         assertMoney(BigDecimal.ZERO, quote.voucherSnapshot().shippingDiscountAmount());
         assertMoney(BigDecimal.ZERO, pricing.shippingNetRevenue());
         assertMoney(pricing.itemNetRevenue().add(pricing.shippingNetRevenue()).add(pricing.vatAmount()), pricing.total());
+    }
+
+    @Test
+    void promotion_snapshot_affected_lines_for_fixed_discount_persist_to_invoice_and_ignore_master_mutation() {
+        when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-S7-AFFECT-001");
+        Category cat = mkCategory("CAT-S7-AFFECT");
+        ProductVariant first = mkVariant(cat, "S7-AFFECT-A", new BigDecimal("100000"), new BigDecimal("40000"));
+        ProductVariant second = mkVariant(cat, "S7-AFFECT-B", new BigDecimal("50000"), new BigDecimal("20000"));
+        mkBatch(first, 10, new BigDecimal("40000"));
+        mkBatch(second, 10, new BigDecimal("20000"));
+        stockMutationService.syncVariantStockWithBatches(first.getId());
+        stockMutationService.syncVariantStockWithBatches(second.getId());
+        Promotion promo = mkFixed("AFFECT-FIXED-15K", new BigDecimal("15000"), BigDecimal.ZERO, null);
+
+        SalesQuoteResponse quote = salesQuoteService.quote(new SalesQuoteRequest(
+                "pos",
+                null,
+                List.of(
+                        new SalesQuoteLineRequest(first.getProduct().getId(), first.getId(), 1, BigDecimal.ZERO, null, false),
+                        new SalesQuoteLineRequest(second.getProduct().getId(), second.getId(), 1, BigDecimal.ZERO, null, false)
+                ),
+                promo.getId(),
+                null,
+                null,
+                null,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO
+        ));
+        assertNotNull(quote.promotionSnapshot());
+        assertNotNull(quote.promotionSnapshot().affectedLines());
+        assertEquals(2, quote.promotionSnapshot().affectedLines().size());
+        assertTrue(quote.promotionSnapshot().affectedLines().stream()
+                .allMatch(l -> l.discountedAmount() != null && l.discountedAmount().compareTo(BigDecimal.ZERO) > 0));
+
+        var pending = pendingOrderService.createOrder(new PendingOrderRequest(
+                null, "S7", "091", null, null, "bank_transfer",
+                null, null, null, null, null, null, quote.quoteId()));
+        var confirmed = pendingOrderService.confirmOrder(Long.parseLong(pending.id()), "confirm", "admin:s7");
+        SalesInvoiceResponse invoice = confirmed.invoice();
+        assertNotNull(invoice);
+        assertNotNull(invoice.promotionSnapshot());
+        assertEquals(2, invoice.promotionSnapshot().affectedLines().size());
+        assertTrue(invoice.promotionSnapshot().affectedLines().stream()
+                .allMatch(l -> l.discountedAmount() != null && l.discountedAmount().compareTo(BigDecimal.ZERO) > 0));
+
+        promo.setName("AFFECT-FIXED-MUTATED");
+        promo.setDiscountValue(new BigDecimal("999999"));
+        promo.setActive(false);
+        promotionRepository.save(promo);
+
+        SalesInvoiceResponse reloaded = invoiceService.getInvoice(invoice.id());
+        assertNotNull(reloaded.promotionSnapshot());
+        assertEquals(invoice.promotionSnapshot().affectedLines(), reloaded.promotionSnapshot().affectedLines());
+        assertFalse(reloaded.promotionSnapshot().giftLines() != null && !reloaded.promotionSnapshot().giftLines().isEmpty());
     }
 
     @Test

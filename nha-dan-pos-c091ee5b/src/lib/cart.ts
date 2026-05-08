@@ -19,22 +19,27 @@ export interface CartItem extends CartLine {
 interface CartState {
   items: CartItem[];
   selectedPromotionId?: string | null;
+  selectedPromotionMode?: "auto" | "manual";
 }
 
 function loadInitial(): CartState {
   if (typeof window === "undefined") return { items: [] };
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { items: [], selectedPromotionId: null };
+    if (!raw) return { items: [], selectedPromotionId: null, selectedPromotionMode: "auto" };
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.items)) return { items: [] };
     const valid = parsed.items.filter(isBackendCartLine);
     if (valid.length !== parsed.items.length) {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ items: valid, selectedPromotionId: parsed.selectedPromotionId ?? null }));
     }
-    return { items: valid, selectedPromotionId: typeof parsed.selectedPromotionId === "string" ? parsed.selectedPromotionId : null };
+    return {
+      items: valid,
+      selectedPromotionId: typeof parsed.selectedPromotionId === "string" ? parsed.selectedPromotionId : null,
+      selectedPromotionMode: parsed.selectedPromotionMode === "manual" ? "manual" : "auto",
+    };
   } catch {
-    return { items: [], selectedPromotionId: null };
+    return { items: [], selectedPromotionId: null, selectedPromotionMode: "auto" };
   }
 }
 
@@ -87,6 +92,10 @@ export function getSelectedPromotionId(): string | null {
   return state.selectedPromotionId ?? null;
 }
 
+export function getSelectedPromotionMode(): "auto" | "manual" {
+  return state.selectedPromotionMode === "manual" ? "manual" : "auto";
+}
+
 export const cartActions = {
   add(input: Omit<CartItem, "id" | "lineSubtotal">) {
     if (!isBackendCartLine({ ...input, id: "check", lineSubtotal: 0 })) {
@@ -114,7 +123,7 @@ export const cartActions = {
     setState((s) => ({
       ...s,
       items: s.items.map((i) =>
-        i.id === id ? recompute({ ...i, qty: Math.max(1, qty) }) : i,
+        i.id === id ? recompute({ ...i, qty: Math.max(1, Math.min(i.stock ?? Number.MAX_SAFE_INTEGER, qty)) }) : i,
       ),
     }));
   },
@@ -122,14 +131,20 @@ export const cartActions = {
     setState((s) => ({ ...s, items: s.items.filter((i) => i.id !== id) }));
   },
   clear() {
-    setState(() => ({ items: [], selectedPromotionId: null }));
+    setState(() => ({ items: [], selectedPromotionId: null, selectedPromotionMode: "auto" }));
   },
   replace(items: CartItem[]) {
     const valid = items.filter(isBackendCartLine);
     setState((s) => ({ ...s, items: valid.map(recompute) }));
   },
-  setSelectedPromotionId(promotionId: string | null) {
-    setState((s) => ({ ...s, selectedPromotionId: promotionId }));
+  setSelectedPromotionId(promotionId: string) {
+    setState((s) => ({ ...s, selectedPromotionId: promotionId, selectedPromotionMode: "manual" }));
+  },
+  setSelectedPromotion(promotionId: string | null, mode: "auto" | "manual") {
+    setState((s) => ({ ...s, selectedPromotionId: promotionId, selectedPromotionMode: mode }));
+  },
+  clearSelectedPromotion(mode: "auto" | "manual" = "auto") {
+    setState((s) => ({ ...s, selectedPromotionId: null, selectedPromotionMode: mode }));
   },
 };
 
@@ -139,4 +154,12 @@ export function useCart(): CartItem[] {
 
 export function useSelectedPromotionId(): string | null {
   return useSyncExternalStore(subscribe, () => state.selectedPromotionId ?? null, () => state.selectedPromotionId ?? null);
+}
+
+export function useSelectedPromotionMode(): "auto" | "manual" {
+  return useSyncExternalStore(
+    subscribe,
+    () => (state.selectedPromotionMode === "manual" ? "manual" : "auto"),
+    () => (state.selectedPromotionMode === "manual" ? "manual" : "auto"),
+  );
 }

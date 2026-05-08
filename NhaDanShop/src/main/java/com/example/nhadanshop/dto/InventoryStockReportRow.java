@@ -24,6 +24,8 @@ public record InventoryStockReportRow(
         String productCode,
         String productName,
         String categoryName,
+        /** Nullable — lọc server-side theo categoryId */
+        Long categoryId,
         String sellUnit,
         /** [Sprint 0] Variant ID — null nếu SP chưa có variant */
         Long variantId,

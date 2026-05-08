@@ -100,6 +100,10 @@ export function BuyXGetYForm({ value, onChange, validation }: { value: BuyXGetYP
         error={e.buyItems}
       />
 
+      <p className="text-[11px] text-muted-foreground -mt-1 leading-relaxed">
+        Mỗi sản phẩm điều kiện phải đạt đủ số lượng riêng. Không tính gộp tổng số lượng giữa các sản phẩm.
+      </p>
+
       <ProductQuantityList
         label="Sản phẩm tặng *"
         items={value.getItems}
@@ -182,7 +186,11 @@ export function GiftForm({ value, onChange, validation }: { value: GiftPromotion
         error={e.giftItems}
       />
 
-      <Field label="Giới hạn số lần tặng" error={e.giftStockLimit} hint="Tùy chọn — để trống nếu không giới hạn">
+      <Field
+        label="Giới hạn số lần tặng (maxGiftApplications)"
+        error={e.giftStockLimit}
+        hint="Giới hạn số lần áp dụng quà — không phải giới hạn số lượng khách được mua. Để trống = không giới hạn lần tặng."
+      >
         {numberInput(value.giftStockLimit, (n) => onChange({ ...value, giftStockLimit: n }), { placeholder: "Không giới hạn" })}
       </Field>
     </div>
@@ -192,14 +200,25 @@ export function GiftForm({ value, onChange, validation }: { value: GiftPromotion
 // ===== Free Shipping =====
 export function FreeShippingForm({ value, onChange, validation }: { value: FreeShippingPromotion; onChange: (v: FreeShippingPromotion) => void; validation: ValidationResult }) {
   const e = validation.errors;
+  const maxSummary = value.maxShippingDiscount && value.maxShippingDiscount > 0
+    ? `Miễn phí ship tối đa ${value.maxShippingDiscount.toLocaleString("vi-VN")}đ`
+    : "Miễn phí toàn bộ phí ship";
   return (
     <div className="space-y-3">
       <Field label="Đơn tối thiểu (₫)" error={e.minOrder} hint="Tùy chọn">
         {numberInput(value.minOrder, (n) => onChange({ ...value, minOrder: n }), { placeholder: "0" })}
       </Field>
-      <Field label="Mức ship được giảm tối đa (₫)" error={e.maxShippingDiscount} hint="Tùy chọn — để trống nếu giảm toàn bộ ship">
-        {numberInput(value.maxShippingDiscount, (n) => onChange({ ...value, maxShippingDiscount: n }), { placeholder: "Toàn bộ phí ship" })}
+      <Field
+        label="Mức ship được giảm tối đa (₫)"
+        error={e.maxShippingDiscount}
+        hint="Để trống = giảm toàn bộ phí ship"
+      >
+        {numberInput(value.maxShippingDiscount, (n) => onChange({ ...value, maxShippingDiscount: n }), { placeholder: "Để trống = giảm toàn bộ phí ship" })}
       </Field>
+      <p className="text-[11px] font-semibold text-success">{maxSummary}</p>
+      <p className="text-[11px] text-muted-foreground leading-relaxed">
+        Miễn phí ship là giảm phí vận chuyển cho khách. Phí carrier gốc vẫn được backend giữ để đối soát.
+      </p>
     </div>
   );
 }

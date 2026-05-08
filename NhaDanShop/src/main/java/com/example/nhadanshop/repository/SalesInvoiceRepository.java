@@ -474,8 +474,11 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
                     (i.promotion_snapshot_json IS NOT NULL
                     AND (i.promotion_snapshot_json::jsonb->>'promotionId') = CAST(:id AS text))
                  OR (i.gift_lines_snapshot_json IS NOT NULL
-                    AND EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(i.gift_lines_snapshot_json::jsonb, '[]'::jsonb)) g
-                    WHERE (g->>'promotionId') = CAST(:id AS text))
+                    AND EXISTS (
+                        SELECT 1
+                        FROM jsonb_array_elements(COALESCE(i.gift_lines_snapshot_json::jsonb, '[]'::jsonb)) g
+                        WHERE (g->>'promotionId') = CAST(:id AS text)
+                    ))
             )
             """, nativeQuery = true)
     boolean existsReferenceToPromotionInInvoiceJsonSnapshots(@Param("id") long id);

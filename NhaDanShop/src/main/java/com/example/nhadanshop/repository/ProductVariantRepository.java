@@ -63,8 +63,9 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
     @Query("""
             SELECT v FROM ProductVariant v
             JOIN FETCH v.product p
-            JOIN FETCH p.category
+            LEFT JOIN FETCH p.category
             WHERE v.active = TRUE
+              AND p.active = TRUE
             ORDER BY p.id ASC, v.isDefault DESC, v.variantCode ASC
             """)
     List<ProductVariant> findAllActiveWithProductAndCategory();

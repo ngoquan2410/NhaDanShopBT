@@ -3,10 +3,12 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { toast } from "sonner";
 import { production } from "@/services";
 import { products as productService } from "@/services";
+import { AdminApiError } from "@/services/auth/adminApi";
 import type {
   ProductionOrderDto,
   ProductionRecipeDto,
   ProductionPreviewDto,
+  ProductionShortageDetailDto,
 } from "@/services/production/ProductionAdminService";
 import type { Product } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
@@ -229,7 +231,14 @@ export default function AdminProduction() {
               <tbody>
                 {recipes.map((r) => (
                   <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="px-3 py-2.5 font-mono text-xs">{r.recipeCode}</td>
+                    <td className="px-3 py-2.5 font-mono text-xs">
+                      <Link
+                        to={`/admin/production/recipes/${r.id}`}
+                        className="text-primary hover:underline underline-offset-2 inline-flex items-center gap-1"
+                      >
+                        {r.recipeCode}
+                      </Link>
+                    </td>
                     <td className="px-3 py-2.5 font-medium">{r.name}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums">{r.outputQty}</td>
                     <td className="px-3 py-2.5 text-center">
@@ -286,6 +295,7 @@ export default function AdminProduction() {
             preview={preview}
             loadRecipes={loadRecipes}
             loadOrders={loadOrders}
+            productOptions={productOptions}
           />
         </TabsContent>
 
@@ -414,7 +424,16 @@ export default function AdminProduction() {
                   <div className="rounded-md border bg-muted/30 px-3 py-2">
                     <p className="text-[11px] text-muted-foreground">Thành phẩm</p>
                     <p className="font-medium font-mono text-xs mt-0.5">
-                      variant #{orderDetail.outputVariantId}
+                      {(() => {
+                        const outputProduct = productOptions.find((p) => Number(p.id) === orderDetail.outputProductId);
+                        const outputVariant = outputProduct?.variants?.find(
+                          (v) => Number(v.id) === orderDetail.outputVariantId,
+                        );
+                        if (outputProduct?.name || outputVariant?.name || outputVariant?.code) {
+                          return `${outputProduct?.name ?? "Sản phẩm"} - ${outputVariant?.name ?? outputVariant?.code ?? `variant #${orderDetail.outputVariantId}`}`;
+                        }
+                        return `variant #${orderDetail.outputVariantId}`;
+                      })()}
                     </p>
                   </div>
                   <div className="rounded-md border bg-muted/30 px-3 py-2">
@@ -481,7 +500,14 @@ export default function AdminProduction() {
                       <tbody>
                       {orderDetail.components.map((c) => (
                           <tr key={c.id} className="border-b last:border-0 align-top">
-                            <td className="px-3 py-2 font-mono">#{c.variantId}</td>
+                            <td className="px-3 py-2">
+                              <div className="font-medium">
+                                {c.productName || "Sản phẩm"}
+                              </div>
+                              <div className="font-mono text-[11px] text-muted-foreground">
+                                {c.variantName || c.variantCode || `variant #${c.variantId}`}
+                              </div>
+                            </td>
                             <td className="px-3 py-2 text-right tabular-nums">{c.requiredQty}</td>
                             <td className="px-3 py-2 text-right tabular-nums">{c.consumedQty}</td>
                             <td className="px-3 py-2 text-center font-mono">{c.unit}</td>
@@ -490,13 +516,28 @@ export default function AdminProduction() {
                                   <span className="text-muted-foreground">—</span>
                               ) : (
                                   <ul className="space-y-0.5">
-                                    {c.allocations.map((a) => (
+                                    {[...c.allocations]
+                                      .sort((a, b) => {
+                                        const ai = a.allocationIndex ?? Number.MAX_SAFE_INTEGER;
+                                        const bi = b.allocationIndex ?? Number.MAX_SAFE_INTEGER;
+                                        if (ai !== bi) return ai - bi;
+                                        return a.id - b.id;
+                                      })
+                                      .map((a) => (
                                         <li key={a.id} className="flex flex-wrap items-center gap-x-2">
-                                          <span className="font-mono text-[11px]">{a.lotCode}</span>
+                                          <span className="font-mono text-[11px]">
+                                            {a.lotCode || `#${a.batchId}`}
+                                          </span>
                                           <span className="text-muted-foreground">×</span>
                                           <span className="tabular-nums">{a.qty}</span>
                                           <span className="text-muted-foreground">@</span>
                                           <span className="tabular-nums">{String(a.unitCost)}</span>
+                                          {a.totalCost != null && (
+                                            <>
+                                              <span className="text-muted-foreground">=</span>
+                                              <span className="tabular-nums">{String(a.totalCost)}</span>
+                                            </>
+                                          )}
                                           {a.expiryDateIso && (
                                               <span className="text-muted-foreground text-[10px]">
                                   HSD {a.expiryDateIso.slice(0, 10)}
@@ -607,12 +648,24 @@ function RunProductionPanel(props: {
   onPreview: (p: ProductionPreviewDto) => void;
   loadRecipes: () => void;
   loadOrders: () => void;
+  productOptions: Product[];
 }) {
-  const { recipes, preview, onPreview, loadRecipes, loadOrders } = props;
+  const { recipes, preview, onPreview, loadRecipes, loadOrders, productOptions } = props;
+
+  /** Tìm nhãn hiển thị tốt nhất cho variantId từ danh sách product đã load. */
+  const variantLabel = (variantId: number | string) => {
+    for (const p of productOptions) {
+      const v = p.variants?.find((x) => String(x.id) === String(variantId));
+      if (v) return `${p.name} · ${v.name || v.code}`;
+    }
+    return `Variant ${variantId}`;
+  };
   const [recipeId, setRecipeId] = useState<number | "">("");
   const [outputQty, setOutputQty] = useState(1);
   const [overhead, setOverhead] = useState("");
   const [busy, setBusy] = useState(false);
+  const [shortages, setShortages] = useState<ProductionShortageDetailDto[]>([]);
+  const hasMissingFromPreview = (preview?.components ?? []).some((c) => Number(c.missingQty ?? 0) > 0);
 
   const runPreview = async () => {
     if (recipeId === "") return;
@@ -624,6 +677,7 @@ function RunProductionPanel(props: {
         overheadCost: overhead ? Number(overhead) : undefined,
       });
       onPreview(p);
+      setShortages([]);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Preview lỗi");
     } finally {
@@ -635,6 +689,7 @@ function RunProductionPanel(props: {
     if (recipeId === "") return;
     setBusy(true);
     try {
+      setShortages([]);
       await production.createOrder({
         recipeId: Number(recipeId),
         outputQty,
@@ -644,6 +699,17 @@ function RunProductionPanel(props: {
       toast.success("Đã tạo lệnh SX");
       void loadOrders();
     } catch (e) {
+      if (e instanceof AdminApiError && e.status === 409) {
+        const data = (e.data ?? {}) as Record<string, unknown>;
+        const details = Array.isArray(data.shortages)
+          ? (data.shortages as ProductionShortageDetailDto[])
+          : [];
+        if (details.length > 0) {
+          setShortages(details);
+          toast.error("Không đủ tồn nguyên liệu để tạo lệnh");
+          return;
+        }
+      }
       toast.error(e instanceof Error ? e.message : "Tạo lệnh lỗi");
     } finally {
       setBusy(false);
@@ -687,19 +753,22 @@ function RunProductionPanel(props: {
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground">Chi phí chung (₫)</Label>
+            <Label className="text-xs font-medium text-muted-foreground">Chi phí sản xuất bổ sung (₫)</Label>
             <Input
               value={overhead}
               onChange={(e) => setOverhead(e.target.value)}
               placeholder="0"
             />
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Chi phí này được cộng vào giá vốn lô thành phẩm. Không tự cập nhật giá bán.
+            </p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" disabled={busy} onClick={() => void runPreview()}>
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null} Preview
           </Button>
-          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void runCreate()}>
+          <Button size="sm" variant="secondary" disabled={busy || hasMissingFromPreview} onClick={() => void runCreate()}>
             Tạo lệnh hoàn tất
           </Button>
         </div>
@@ -722,20 +791,80 @@ function RunProductionPanel(props: {
               </div>
             </div>
             <Separator />
-            {preview.components.map((c, i) => (
-              <div key={i} className="border-b pb-2 mb-2 last:border-0 last:mb-0 last:pb-0">
-                <p className="font-medium text-xs">
-                  Variant {c.variantId} — cần {c.requiredQty}, còn {c.availableQty} {c.unit}
-                </p>
-                <ul className="text-[11px] text-muted-foreground ml-3 mt-1 list-disc">
-                  {c.allocations.map((a, j) => (
-                    <li key={j}>
-                      lô <span className="font-mono">{a.lotCode}</span> ×{a.qty} @ {String(a.unitCost)}
+            {(() => {
+              const missingItems = preview.components.filter(
+                (c) => Number(c.missingQty ?? Math.max(0, Number(c.requiredQty) - Number(c.availableQty))) > 0
+              );
+              if (missingItems.length === 0) return null;
+              return (
+                <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs">
+                  <p className="font-semibold text-destructive">
+                    Thiếu nguyên liệu — không đủ tồn để chạy lệnh này
+                  </p>
+                  <ul className="mt-1 list-disc ml-4 text-destructive/90">
+                    {missingItems.map((c, i) => (
+                      <li key={i}>
+                        {c.productName ?? variantLabel(c.variantId)}{c.variantName ? ` · ${c.variantName}` : ""}: thiếu{" "}
+                        <b>
+                          {Number(c.missingQty ?? Math.max(0, Number(c.requiredQty) - Number(c.availableQty)))} {c.unit}
+                        </b>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })()}
+            {preview.components.map((c, i) => {
+              const need = Number(c.requiredQty);
+              const have = Number(c.availableQty);
+              const missing = Number(c.missingQty ?? Math.max(0, need - have));
+              const isMissing = missing > 0;
+              return (
+                <div
+                  key={i}
+                  className={cn(
+                    "border-b pb-2 mb-2 last:border-0 last:mb-0 last:pb-0 px-2 py-1.5 rounded",
+                    isMissing && "bg-destructive/5 border-l-2 border-l-destructive"
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <p className="font-medium text-xs">
+                      {c.productName ?? variantLabel(c.variantId)}
+                      {c.variantName ? ` · ${c.variantName}` : ""}
+                      {c.variantCode ? ` (${c.variantCode})` : ""}
+                      {" — "}cần {need}, còn {have} {c.unit}
+                    </p>
+                    {isMissing && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-destructive text-destructive-foreground">
+                        Thiếu {missing} {c.unit}
+                      </span>
+                    )}
+                  </div>
+                  <ul className="text-[11px] text-muted-foreground ml-3 mt-1 list-disc">
+                    {c.allocations.map((a, j) => (
+                      <li key={j}>
+                        lô <span className="font-mono">{a.lotCode}</span> ×{a.qty} @ {String(a.unitCost)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+            {shortages.length > 0 && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs">
+                <p className="font-semibold text-destructive">Tạo lệnh thất bại do thiếu nguyên liệu:</p>
+                <ul className="mt-1 list-disc ml-4 text-destructive/90">
+                  {shortages.map((s, i) => (
+                    <li key={`${s.variantId}-${i}`}>
+                      {s.productName ?? `SP ${s.productId}`}
+                      {s.variantName ? ` · ${s.variantName}` : ""}
+                      {s.variantCode ? ` (${s.variantCode})` : ""}: cần {s.requiredQty}, còn {s.availableQty},
+                      thiếu <b>{s.missingQty} {s.unit}</b>
                     </li>
                   ))}
                 </ul>
               </div>
-            ))}
+            )}
           </>
         ) : (
           <div className="flex items-center justify-center h-full min-h-[10rem]">

@@ -33,6 +33,8 @@ describe("mapSalesInvoiceApiJsonToInvoice", () => {
         manualDiscount: 0,
         promotionDiscount: 0,
         voucherDiscount: 0,
+        loyaltyDiscount: 5000,
+        loyaltyRedeemedPoints: 50,
         shippingFee: 15000,
         shippingDiscount: 0,
         vatBase: 100000,
@@ -67,6 +69,8 @@ describe("mapSalesInvoiceApiJsonToInvoice", () => {
     expect(inv.lines?.length).toBe(1);
     expect(inv.lines?.[0].name).toContain("Smoke PG");
     expect(inv.breakdown?.total).toBe(115000);
+    expect(inv.breakdown?.loyaltyDiscount).toBe(5000);
+    expect(inv.breakdown?.loyaltyRedeemedPoints).toBe(50);
   });
 });
 

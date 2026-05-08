@@ -329,7 +329,7 @@ function LinkDialog({
     if (!event) return;
     setBusyId(order.id);
     try {
-      await paymentEvents.linkToOrder(event.id, order.code, "admin");
+      await paymentEvents.linkToOrder(event.id, order.code);
       if (event.amount >= order.pricingBreakdownSnapshot.total) {
         toast.success(
           `Đã gắn giao dịch vào ${order.code}. Thanh toán đã được ghi nhận, nhưng vẫn cần xác nhận đơn riêng.`,

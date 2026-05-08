@@ -86,6 +86,8 @@ export function loadAutomationConfig(argv = process.argv.slice(2)) {
                     "watchlist-combo-production",
                     "watchlist-revenue-profit",
                   ]
+              : scope === "promotion-checkout"
+                ? ["promotion-checkout"]
               : scope === "smoke"
                 ? ["smoke"]
                 : [scope];

@@ -56,6 +56,8 @@ function breakdownFromSnapshots(raw: BackendSalesInvoiceJson): InvoiceBreakdown 
   const vatPercent = num(p?.vatPercent);
   const vatBase = num(p?.vatBase);
   const vatAmount = num(p?.vatAmount);
+  const loyaltyDiscount = num(p?.loyaltyDiscount, NaN);
+  const loyaltyRedeemedPoints = num(p?.loyaltyRedeemedPoints, NaN);
   const total = num(p?.total, num(raw.finalAmount));
 
   const promoName =
@@ -70,6 +72,26 @@ function breakdownFromSnapshots(raw: BackendSalesInvoiceJson): InvoiceBreakdown 
   const voucherCode = typeof vSnap?.code === "string" ? vSnap.code : undefined;
 
   const giftLinesRaw = raw.giftLinesSnapshot;
+  const promoAffectedRaw = Array.isArray(promoSnap?.affectedLines) ? promoSnap.affectedLines : [];
+  const promoGiftRaw = Array.isArray(promoSnap?.giftLines) ? promoSnap.giftLines : [];
+  const discountedLines = promoAffectedRaw
+    .map((line) => asRecord(line))
+    .filter((line): line is Record<string, unknown> => line !== null)
+    .map((line) => ({
+      productName: typeof line.productName === "string" ? line.productName : "",
+      variantName: typeof line.variantName === "string" ? line.variantName : undefined,
+      discountedAmount: num(line.discountedAmount),
+    }))
+    .filter((line) => line.discountedAmount > 0);
+  const promoGiftLines = promoGiftRaw
+    .map((line) => asRecord(line))
+    .filter((line): line is Record<string, unknown> => line !== null)
+    .map((line) => ({
+      productName: typeof line.productName === "string" ? line.productName : "Quà tặng",
+      variantName: typeof line.variantName === "string" ? line.variantName : undefined,
+      quantity: num(line.qty ?? line.quantity, 0),
+    }))
+    .filter((line) => line.quantity > 0);
   const freeItems =
     Array.isArray(giftLinesRaw) && giftLinesRaw.length > 0
       ? giftLinesRaw.map((g: unknown) => {
@@ -95,8 +117,12 @@ function breakdownFromSnapshots(raw: BackendSalesInvoiceJson): InvoiceBreakdown 
     vatPercent,
     vatBase,
     vatAmount,
+    loyaltyDiscount: Number.isFinite(loyaltyDiscount) ? loyaltyDiscount : undefined,
+    loyaltyRedeemedPoints: Number.isFinite(loyaltyRedeemedPoints) ? loyaltyRedeemedPoints : undefined,
     total,
     freeItems,
+    discountedLines,
+    giftLines: promoGiftLines,
   };
 }
 

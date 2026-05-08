@@ -3,6 +3,8 @@ import type {
   EvaluatedPromotion,
   GiftLine,
   PromotionAffectedLine,
+  PromotionProgress,
+  PromotionProgressItem,
   PromotionType,
 } from "@/services/types";
 
@@ -35,6 +37,7 @@ export type PromotionEvaluationPayload = {
   lines: PromotionEvaluationLinePayload[];
   subtotal?: number;
   shippingFee?: number;
+  pendingShippingAddress?: boolean | null;
 };
 
 type RawEvaluation = Record<string, unknown>;
@@ -48,11 +51,38 @@ function toId(v: unknown): string {
   return String(v ?? "");
 }
 
+function parseProgress(raw: unknown): PromotionProgress | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const row = raw as Record<string, unknown>;
+  const itemsRaw = Array.isArray(row.items) ? row.items : [];
+  const items = itemsRaw.map((x) => {
+    const item = x as Record<string, unknown>;
+    return {
+      productId: item.productId == null ? undefined : toId(item.productId),
+      variantId: item.variantId == null ? undefined : toId(item.variantId),
+      requiredQty: item.requiredQty == null ? undefined : toNumber(item.requiredQty),
+      currentQty: item.currentQty == null ? undefined : toNumber(item.currentQty),
+      remainingQty: item.remainingQty == null ? undefined : toNumber(item.remainingQty),
+    } satisfies PromotionProgressItem;
+  });
+  return {
+    type: row.type == null ? undefined : String(row.type),
+    basis: row.basis == null ? undefined : String(row.basis),
+    currentAmount: row.currentAmount == null ? undefined : toNumber(row.currentAmount),
+    remainingAmount: row.remainingAmount == null ? undefined : toNumber(row.remainingAmount),
+    requiredAmount: row.requiredAmount == null ? undefined : toNumber(row.requiredAmount),
+    items,
+  };
+}
+
 export function cartContextToPromotionEvaluationPayload(
   ctx: CartContext,
   promotionId?: string | number | null,
 ): PromotionEvaluationPayload {
   const numericPromotionId = promotionId == null || promotionId === "" ? null : Number(promotionId);
+  const ship = ctx.shippingQuote;
+  const pendingShippingAddress =
+    ship == null || ship.status !== "quoted" || ship.fee == null || ship.fee <= 0;
   return {
     promotionId: Number.isFinite(numericPromotionId as number) ? (numericPromotionId as number) : null,
     lines: ctx.lines.map((line) => ({
@@ -64,7 +94,8 @@ export function cartContextToPromotionEvaluationPayload(
       lineSubtotal: line.lineSubtotal,
     })),
     subtotal: ctx.subtotal,
-    shippingFee: ctx.shippingQuote?.fee ?? 0,
+    shippingFee: ship?.status === "quoted" ? ship.fee ?? 0 : 0,
+    pendingShippingAddress,
   };
 }
 
@@ -110,6 +141,7 @@ export function parsePromotionEvaluationResponse(raw: RawEvaluation): EvaluatedP
         promotionName: String(row.promotionName ?? ""),
       } satisfies GiftLine;
     }),
+    progress: parseProgress(raw.progress),
   };
 }
 

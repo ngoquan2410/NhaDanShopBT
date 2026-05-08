@@ -2,6 +2,7 @@ package com.example.nhadanshop.exception;
 
 import com.example.nhadanshop.service.ExcelReceiptImportService;
 import jakarta.persistence.EntityNotFoundException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.security.access.AccessDeniedException;
@@ -54,6 +55,40 @@ public class GlobalExceptionHandler {
     public ProblemDetail handleConflict(IllegalStateException ex) {
         ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.CONFLICT);
         pd.setDetail(ex.getMessage());
+        return pd;
+    }
+
+    @ExceptionHandler(BusinessConflictException.class)
+    public ProblemDetail handleBusinessConflict(BusinessConflictException ex) {
+        ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        pd.setDetail(ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        return pd;
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ProblemDetail handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        String root = ex.getMostSpecificCause() != null
+                ? ex.getMostSpecificCause().getMessage()
+                : ex.getMessage();
+        String lower = root != null ? root.toLowerCase() : "";
+        if (lower.contains("uk_users_customer_id")) {
+            ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+            pd.setDetail("Số điện thoại này đã được đăng ký tài khoản. Vui lòng đăng nhập hoặc dùng số khác.");
+            pd.setProperty("code", "PHONE_ALREADY_REGISTERED");
+            return pd;
+        }
+        ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        pd.setDetail("Dữ liệu bị trùng hoặc vi phạm ràng buộc nghiệp vụ.");
+        return pd;
+    }
+
+    @ExceptionHandler(ProductionShortageException.class)
+    public ProblemDetail handleProductionShortage(ProductionShortageException ex) {
+        ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        pd.setTitle("Thiếu nguyên liệu sản xuất");
+        pd.setDetail(ex.getMessage());
+        pd.setProperty("shortages", ex.getShortages());
         return pd;
     }
 

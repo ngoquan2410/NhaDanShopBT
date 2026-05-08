@@ -43,7 +43,15 @@ public class ProductionRecipeDtos {
             Long variantId,
             Integer qtyPerOutput,
             String unit,
-            Integer sortOrder
+            Integer sortOrder,
+            /** Đơn vị tồn/bán lẻ trên variant — BOM auto-fill */
+            String sellUnit,
+            String importUnit,
+            Integer piecesPerImportUnit,
+            /** Tổng tồn lô input cho SX (active, chưa hết hạn). */
+            Integer availableQty,
+            /** HSD gần nhất của lô input (ISO date+time). */
+            String nearestExpiryDateIso
     ) {}
 
     public record ProductionRecipeResponse(
@@ -79,10 +87,26 @@ public class ProductionRecipeDtos {
     public record PreviewComponentDto(
             Long productId,
             Long variantId,
+            String productName,
+            String variantName,
+            String variantCode,
             int requiredQty,
             int availableQty,
+            int missingQty,
             String unit,
             List<PreviewAllocationDto> allocations
+    ) {}
+
+    public record ProductionShortageDetailDto(
+            Long productId,
+            Long variantId,
+            String productName,
+            String variantName,
+            String variantCode,
+            int requiredQty,
+            int availableQty,
+            int missingQty,
+            String unit
     ) {}
 
     public record ProductionPreviewResponse(
@@ -119,6 +143,9 @@ public class ProductionRecipeDtos {
             Long id,
             Long productId,
             Long variantId,
+            String productName,
+            String variantName,
+            String variantCode,
             int requiredQty,
             int consumedQty,
             String unit,
@@ -131,6 +158,8 @@ public class ProductionRecipeDtos {
             String lotCode,
             int qty,
             BigDecimal unitCost,
+            BigDecimal totalCost,
+            Integer allocationIndex,
             String expiryDateIso
     ) {}
 

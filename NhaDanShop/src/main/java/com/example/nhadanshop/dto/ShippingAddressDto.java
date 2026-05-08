@@ -12,5 +12,6 @@ public record ShippingAddressDto(
         @Size(max = 50) String wardCode,
         @Size(max = 150) String wardName,
         @Size(max = 255) String street,
+        @Size(max = 500) String rawAddress,
         @Size(max = 255) String note
 ) {}

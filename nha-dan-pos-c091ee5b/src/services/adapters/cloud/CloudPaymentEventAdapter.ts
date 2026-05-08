@@ -42,6 +42,38 @@ function toEvent(r: Row): PaymentEvent {
 }
 
 export class CloudPaymentEventAdapter implements PaymentEventService {
+  async listRecentPaymentEvents(limit = 50): Promise<PaymentEvent[]> {
+    return this.listRecent(limit);
+  }
+
+  async listUnmatchedPaymentEvents(limit = 100): Promise<PaymentEvent[]> {
+    return this.listUnmatched(limit);
+  }
+
+  async getPaymentEventsByOrderCode(code: string): Promise<PaymentEvent[]> {
+    return this.findByOrderCode(code);
+  }
+
+  async linkPaymentEvent(eventId: string, orderCode: string): Promise<PaymentEvent> {
+    return this.linkToOrder(eventId, orderCode);
+  }
+
+  async ignorePaymentEvent(eventId: string): Promise<PaymentEvent> {
+    return this.markIgnored(eventId);
+  }
+
+  async unignorePaymentEvent(eventId: string): Promise<PaymentEvent> {
+    return this.unmarkIgnored(eventId);
+  }
+
+  async listIgnoredPaymentEvents(limit = 100): Promise<PaymentEvent[]> {
+    return this.listIgnored(limit);
+  }
+
+  async getUnmatchedPaymentEventCount(): Promise<number> {
+    return this.countUnmatched();
+  }
+
   async listRecent(limit = 50): Promise<PaymentEvent[]> {
     const { data, error } = await supabase
       .from("payment_events")
@@ -79,14 +111,13 @@ export class CloudPaymentEventAdapter implements PaymentEventService {
   async linkToOrder(
     eventId: string,
     orderCode: string,
-    by: "auto" | "admin",
   ): Promise<PaymentEvent> {
     const { data, error } = await supabase
       .from("payment_events")
       .update({
         linked_order_code: orderCode.toUpperCase(),
         linked_at: new Date().toISOString(),
-        linked_by: by,
+        linked_by: "admin",
         status: "linked",
       })
       .eq("id", eventId)

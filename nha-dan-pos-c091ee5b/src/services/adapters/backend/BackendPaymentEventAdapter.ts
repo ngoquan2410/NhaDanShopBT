@@ -69,13 +69,11 @@ export class BackendPaymentEventAdapter implements PaymentEventService {
   async linkPaymentEvent(
     eventId: string,
     orderCode: string,
-    linkedBy: "auto" | "admin",
   ): Promise<PaymentEvent> {
     const data = await adminFetchJson<LinkResponse>(`/api/payment-events/${encodeURIComponent(eventId)}/link`, {
       method: "POST",
       body: JSON.stringify({
         orderCode,
-        linkedBy,
       }),
     });
     return toEvent(data.paymentEvent);
@@ -122,9 +120,8 @@ export class BackendPaymentEventAdapter implements PaymentEventService {
   async linkToOrder(
     eventId: string,
     orderCode: string,
-    by: "auto" | "admin",
   ): Promise<PaymentEvent> {
-    return this.linkPaymentEvent(eventId, orderCode, by);
+    return this.linkPaymentEvent(eventId, orderCode);
   }
 
   async markIgnored(eventId: string): Promise<PaymentEvent> {

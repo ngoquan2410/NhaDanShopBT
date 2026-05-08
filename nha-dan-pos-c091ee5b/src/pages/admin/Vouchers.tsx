@@ -316,7 +316,11 @@ export default function VouchersPage() {
             <tbody>
               {rows.map((v) => (
                 <tr key={v.id} className="border-t">
-                  <td className="px-3 py-2 font-mono font-semibold">{v.code}</td>
+                  <td className="px-3 py-2 font-mono font-semibold">
+                    <span className="text-primary hover:underline underline-offset-2">
+                      {v.code}
+                    </span>
+                  </td>
                   <td className="px-3 py-2 text-muted-foreground">{v.ruleSummary || "—"}</td>
                   <td className="px-3 py-2 text-right">{v.minSubtotal > 0 ? formatVND(v.minSubtotal) : "—"}</td>
                   <td className="px-3 py-2 text-right">

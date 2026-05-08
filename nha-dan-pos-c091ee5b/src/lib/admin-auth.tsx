@@ -33,7 +33,7 @@ interface AdminAuthState {
   loading: boolean;
   signIn: (username: string, password: string) => Promise<{ error?: string; totpRequired?: boolean; preAuthToken?: string }>;
   verifyTotp: (preAuthToken: string, otp: string) => Promise<{ error?: string }>;
-  signUp: (username: string, password: string, fullName?: string, phone?: string) => Promise<{ error?: string }>;
+  signUp: (username: string, password: string, fullName?: string, phone?: string) => Promise<{ error?: string; code?: string }>;
   signOut: () => Promise<void>;
   refreshRole: () => Promise<void>;
   refreshSession: () => Promise<AuthSession | null>;
@@ -100,7 +100,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const signUp = useCallback(async (username: string, password: string, fullName?: string, phone?: string) => {
     const res = await fetch("/api/auth/signup", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ username, password, fullName, phone }) });
     const data = await parse(res);
-    if (!res.ok) return { error: data?.detail ?? data?.message ?? `HTTP ${res.status}` };
+    if (!res.ok) return { error: data?.detail ?? data?.message ?? `HTTP ${res.status}`, code: data?.code };
     persist(normalize(data));
     return {};
   }, [normalize, persist]);

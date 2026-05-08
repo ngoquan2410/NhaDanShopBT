@@ -116,9 +116,8 @@ export default function ProductionRecipeDetailPage() {
                 </button>
                 <button
                   type="button"
-                  disabled
-                  title="Sửa quy trình (chưa hỗ trợ trong slice hiện tại)"
-                  className="inline-flex items-center gap-1.5 px-3 h-9 text-sm font-medium border rounded-md opacity-60 cursor-not-allowed"
+                  onClick={() => navigate(`/admin/production/recipes/${recipe.id}/edit`)}
+                  className="inline-flex items-center gap-1.5 px-3 h-9 text-sm font-medium border rounded-md hover:bg-muted transition-colors"
                 >
                   <Pencil className="h-3.5 w-3.5" /> Sửa
                 </button>
@@ -163,7 +162,7 @@ export default function ProductionRecipeDetailPage() {
                   <dd className="mt-0.5 font-medium tabular-nums">{recipe.outputQty}</dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted-foreground">Chi phí chung</dt>
+                  <dt className="text-xs text-muted-foreground">Chi phí sản xuất bổ sung</dt>
                   <dd className="mt-0.5 font-medium tabular-nums">{String(recipe.overheadCost)}</dd>
                 </div>
               </dl>
@@ -204,6 +203,8 @@ export default function ProductionRecipeDetailPage() {
                     <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">Phân loại</th>
                     <th className="text-right px-3 py-2.5 font-medium text-muted-foreground w-[120px]">SL / output</th>
                     <th className="text-center px-3 py-2.5 font-medium text-muted-foreground w-[80px]">Đ.vị</th>
+                    <th className="text-right px-3 py-2.5 font-medium text-muted-foreground w-[88px]">Tồn SX</th>
+                    <th className="text-left px-3 py-2.5 font-medium text-muted-foreground w-[140px]">HSD lô gần</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -234,7 +235,19 @@ export default function ProductionRecipeDetailPage() {
                           )}
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums font-medium">{c.qtyPerOutput}</td>
-                        <td className="px-3 py-2.5 text-center font-mono text-xs">{c.unit}</td>
+                        <td className="px-3 py-2.5 text-center font-mono text-xs">
+                          <span title={c.sellUnit && c.importUnit ? `${c.sellUnit} · nhập ${c.importUnit}` : undefined}>
+                            {c.unit}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-xs text-muted-foreground">
+                          {c.availableQty != null ? c.availableQty : "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                          {c.nearestExpiryDateIso
+                            ? new Date(c.nearestExpiryDateIso).toLocaleDateString("vi-VN")
+                            : "—"}
+                        </td>
                       </tr>
                     );
                   })}

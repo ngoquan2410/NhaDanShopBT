@@ -15,7 +15,12 @@ public record ProductVariantResponse(
         Integer piecesPerUnit,
         BigDecimal sellPrice,
         BigDecimal costPrice,
+        /** Physical / ledger aggregate stock on the variant. */
         Integer stockQty,
+        /**
+         * Tồn có thể bán online/POS (lô active, chưa hết hạn, variant sellable). Null nếu backend chưa tính.
+         */
+        Integer sellableStockQty,
         Integer minStockQty,
         boolean lowStock,      // stockQty <= minStockQty
         Integer expiryDays,

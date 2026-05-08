@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { Link } from "react-router-dom";
-import { ArrowRight, ChevronLeft, ChevronRight, Package, ShoppingBag, Sparkles } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, Package, ShoppingBag, ShoppingCart, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { cartActions } from "@/lib/cart";
 import type { StorefrontProduct } from "@/services/catalog/publicCatalog";
 
 type Product = StorefrontProduct;
@@ -175,20 +177,67 @@ export function HeroSlider({ items }: { items: Product[] }) {
                             <p className="text-[10px] uppercase tracking-wider opacity-60">Giá bán</p>
                             <p className={cn("font-bold", isActive ? "text-xl md:text-2xl" : "text-lg")}>{price}</p>
                             <p className="text-[10px] opacity-60 mt-0.5">/ {dv.sellUnit}</p>
+                            <p
+                              className={cn(
+                                "text-[11px] font-medium mt-1.5",
+                                dv.stock === 0
+                                  ? "text-red-300"
+                                  : dv.stock <= dv.minStock
+                                  ? "text-amber-300"
+                                  : "text-emerald-300/90"
+                              )}
+                            >
+                              {dv.stock === 0
+                                ? "Hết hàng"
+                                : dv.stock <= dv.minStock
+                                ? `Sắp hết · còn ${dv.stock} ${dv.sellUnit}`
+                                : `Còn ${dv.stock} ${dv.sellUnit}`}
+                            </p>
                           </div>
                           {isActive && (
                             <div className="flex flex-col gap-2 animate-fade-in">
-                              <Link
-                                to={`/products/${p.id}`}
-                                className="inline-flex items-center justify-center gap-1.5 bg-white text-foreground px-4 py-2.5 rounded-full text-xs md:text-sm font-semibold hover:bg-white/90 transition-colors shadow-lg whitespace-nowrap"
+                              <button
+                                type="button"
+                                disabled={dv.stock === 0}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (dv.stock === 0) {
+                                    toast.error("Sản phẩm đã hết hàng");
+                                    return;
+                                  }
+                                  cartActions.add({
+                                    productId: p.id,
+                                    variantId: dv.id,
+                                    productCode: p.code,
+                                    variantCode: dv.code,
+                                    productName: p.name,
+                                    variantName: dv.name,
+                                    categoryId: p.categoryId,
+                                    categoryName: p.categoryName,
+                                    qty: 1,
+                                    unitPrice: dv.sellPrice,
+                                    stock: dv.stock,
+                                    catalogSource: "backend",
+                                    schemaVersion: 2,
+                                  });
+                                  toast.success(`Đã thêm ${p.name} vào giỏ`);
+                                }}
+                                className={cn(
+                                  "inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full text-xs md:text-sm font-semibold transition-all shadow-lg whitespace-nowrap",
+                                  dv.stock === 0
+                                    ? "bg-white/30 text-white/60 cursor-not-allowed"
+                                    : "bg-white text-foreground hover:bg-white/90 active:scale-[0.97] cursor-pointer"
+                                )}
                               >
-                                <ShoppingBag className="h-3.5 w-3.5" /> Mua ngay
-                              </Link>
+                                <ShoppingCart className="h-3.5 w-3.5" />
+                                {dv.stock === 0 ? "Hết hàng" : "Thêm vào giỏ"}
+                              </button>
                               <Link
                                 to={`/products/${p.id}`}
                                 className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold border border-white/30 text-storefront-hero-foreground hover:bg-white/10 transition-colors whitespace-nowrap"
                               >
-                                Chi tiết <ArrowRight className="h-3 w-3" />
+                                <ShoppingBag className="h-3.5 w-3.5" /> Mua ngay <ArrowRight className="h-3 w-3" />
                               </Link>
                             </div>
                           )}

@@ -39,8 +39,9 @@ public class SalesQuoteService {
     private final SalesQuoteRepository salesQuoteRepository;
     private final VoucherRepository voucherRepository;
     private final ShippingQuoteService shippingQuoteService;
+    private final PromotionEvaluationService promotionEvaluationService;
     private final ObjectMapper objectMapper;
-    private final Clock clock;
+    private final Clock businessClock;
     private final UserRepository userRepository;
     private final AccountService accountService;
     private final CustomerLoyaltyService loyaltyService;
@@ -64,13 +65,22 @@ public class SalesQuoteService {
 
         String voucherCode = req.voucherCode() != null ? req.voucherCode().trim() : "";
 
-        Promotion promo = null;
+        String selectedPromotionInvalidReason = null;
+        Promotion selectedPromo = null;
         if (req.promotionId() != null) {
-            promo = promotionRepository.findById(req.promotionId()).orElse(null);
-            if (promo == null || !promo.isCurrentlyActive()) {
-                throw new IllegalArgumentException("Chuong trinh khuyen mai khong ton tai hoac da het han");
+            Promotion loaded = promotionRepository.findByIdWithDetails(req.promotionId()).orElse(null);
+            if (loaded == null) {
+                selectedPromotionInvalidReason = "Chương trình khuyến mãi không tồn tại";
+            } else if (!loaded.isCurrentlyActive()) {
+                selectedPromotionInvalidReason = "Chương trình khuyến mãi không còn hiệu lực";
+            } else {
+                try {
+                    assertQuoteSupportedPromotionType(loaded);
+                    selectedPromo = loaded;
+                } catch (IllegalArgumentException ex) {
+                    selectedPromotionInvalidReason = ex.getMessage();
+                }
             }
-            assertQuoteSupportedPromotionType(promo);
         }
 
         BigDecimal merchandiseSubtotal = BigDecimal.ZERO;
@@ -153,7 +163,7 @@ public class SalesQuoteService {
                 if (!batch.getVariant().getId().equals(variant.getId())) {
                     throw new IllegalArgumentException("batchId khong thuoc variant da chon — chi dung trace kho.");
                 }
-                LocalDate today = LocalDate.now(clock);
+                LocalDate today = LocalDate.now(businessClock);
                 if (batch.getExpiryDate() != null && batch.getExpiryDate().isBefore(today)) {
                     throw new IllegalArgumentException("Lo hang da het han, khong the bao gia voi batchId chi dinh.");
                 }
@@ -182,7 +192,29 @@ public class SalesQuoteService {
             promoLines.add(new CommercialPricingEngine.PromoPricingLine(product, lineSubtotal));
         }
 
-        capturedRewards.addAll(buildPromotionRewardLines(promo, req.lines(), merchandiseSubtotal));
+        Promotion appliedPromo = selectedPromo;
+        try {
+            capturedRewards.addAll(buildPromotionRewardLines(appliedPromo, req.lines(), merchandiseSubtotal));
+        } catch (IllegalArgumentException ex) {
+            if (req.promotionId() != null) {
+                selectedPromotionInvalidReason = selectedPromotionInvalidReason != null
+                        ? selectedPromotionInvalidReason
+                        : ex.getMessage();
+                appliedPromo = null;
+                capturedRewards.clear();
+            } else {
+                throw ex;
+            }
+        }
+        if (appliedPromo != null
+                && ("BUY_X_GET_Y".equals(appliedPromo.getType()) || "QUANTITY_GIFT".equals(appliedPromo.getType()))
+                && capturedRewards.isEmpty()
+                && req.promotionId() != null) {
+            if (selectedPromotionInvalidReason == null) {
+                selectedPromotionInvalidReason = "Khuyến mãi đã chọn không đủ điều kiện";
+            }
+            appliedPromo = null;
+        }
         assertVariantDemandAvailable(capturedBillableBare, capturedRewards);
 
         BigDecimal manual = req.manualDiscount() != null ? req.manualDiscount() : BigDecimal.ZERO;
@@ -230,14 +262,15 @@ public class SalesQuoteService {
         if (!voucherCode.isEmpty()) {
             voucherRow = voucherRepository.findByCodeIgnoreCase(voucherCode)
                     .orElseThrow(() -> new IllegalArgumentException("Khong tim thay voucher: " + voucherCode));
-            VoucherQuoteEvaluator.assertEligibleOrThrow(voucherRow, voucherCode, clock);
+            VoucherQuoteEvaluator.assertEligibleOrThrow(voucherRow, voucherCode, businessClock);
             var rawDisc = VoucherQuoteEvaluator.computeRawDiscounts(
                     voucherRow, merchandiseSubtotal, shipFee, voucherCode);
             rawVoucherDiscount = rawDisc.voucherDiscount();
             rawShippingDiscountFromVoucher = rawDisc.shippingDiscount();
         }
 
-        BigDecimal rawShippingDiscountFromPromotion = computePromotionShippingDiscount(promo, req.lines(), merchandiseSubtotal, shipFee);
+        BigDecimal rawShippingDiscountFromPromotion =
+                computePromotionShippingDiscount(appliedPromo, req.lines(), merchandiseSubtotal, shipFee);
         BigDecimal actualPromoShippingDiscount = rawShippingDiscountFromPromotion.min(shipFee).max(BigDecimal.ZERO);
         BigDecimal remainingShippingForVoucher = shipFee.subtract(actualPromoShippingDiscount).max(BigDecimal.ZERO);
         BigDecimal actualVoucherShippingDiscount = rawShippingDiscountFromVoucher.min(remainingShippingForVoucher).max(BigDecimal.ZERO);
@@ -248,7 +281,7 @@ public class SalesQuoteService {
                 CommercialPricingEngine.computeMerchandiseQuoteAllocation(
                         merchandiseSubtotal,
                         manual,
-                        promo,
+                        appliedPromo,
                         promoLines,
                         billableRows,
                         rawVoucherDiscount,
@@ -287,7 +320,7 @@ public class SalesQuoteService {
                 CommercialPricingEngine.computeMerchandiseQuoteAllocation(
                         merchandiseSubtotal,
                         manual,
-                        promo,
+                        appliedPromo,
                         promoLines,
                         billableRows,
                         rawVoucherDiscount,
@@ -323,15 +356,16 @@ public class SalesQuoteService {
             }
         }
 
-        List<GiftLineSnapshotDto> giftSnapshots = mapGiftSnapshots(capturedRewards, promo);
-        PromotionSnapshotDto promotionSnapshot = promo == null ? null : new PromotionSnapshotDto(
-                String.valueOf(promo.getId()),
-                promo.getName(),
-                promo.getType(),
+        List<PromotionAffectedLineDto> affectedSnapshots = mapAffectedLineSnapshots(capturedBillable);
+        List<GiftLineSnapshotDto> giftSnapshots = mapGiftSnapshots(capturedRewards, appliedPromo);
+        PromotionSnapshotDto promotionSnapshot = appliedPromo == null ? null : new PromotionSnapshotDto(
+                String.valueOf(appliedPromo.getId()),
+                appliedPromo.getName(),
+                appliedPromo.getType(),
                 null,
                 breakdown.promotionDiscount(),
                 actualPromoShippingDiscount,
-                null,
+                affectedSnapshots,
                 giftSnapshots
         );
 
@@ -353,7 +387,7 @@ public class SalesQuoteService {
         );
 
         String publicId = UUID.randomUUID().toString();
-        LocalDateTime expiresAt = LocalDateTime.now(clock).plusMinutes(QUOTE_TTL_MINUTES);
+        LocalDateTime expiresAt = LocalDateTime.now(businessClock).plusMinutes(QUOTE_TTL_MINUTES);
 
         SalesQuote entity = new SalesQuote();
         entity.setPublicId(publicId);
@@ -374,6 +408,9 @@ public class SalesQuoteService {
             rewardResponses.add(toLineResponse(c));
         }
 
+        Long fallbackPromotionId = resolveFallbackPromotionId(
+                req, selectedPromotionInvalidReason, capturedBillableBare, merchandiseSubtotal, shipFee);
+
         return new SalesQuoteResponse(
                 publicId,
                 expiresAt,
@@ -383,8 +420,58 @@ public class SalesQuoteService {
                 voucherSnapshot,
                 shipSnap,
                 breakdown,
-                loyaltySnapshot
+                loyaltySnapshot,
+                appliedPromo != null ? appliedPromo.getId() : null,
+                appliedPromo != null ? appliedPromo.getName() : null,
+                appliedPromo != null ? appliedPromo.getType() : null,
+                selectedPromotionInvalidReason,
+                fallbackPromotionId
         );
+    }
+
+    /**
+     * When the shopper's chosen promotion cannot be applied, suggest another eligible program (if any),
+     * using the same preview rules as POST /api/promotions/pick-best.
+     */
+    private Long resolveFallbackPromotionId(
+            SalesQuoteRequest req,
+            String selectedPromotionInvalidReason,
+            List<SalesQuoteCapturedLineDto> billableBare,
+            BigDecimal merchandiseSubtotal,
+            BigDecimal shipFee
+    ) {
+        if (req.promotionId() == null || selectedPromotionInvalidReason == null || billableBare.isEmpty()) {
+            return null;
+        }
+        List<PromotionEvaluationLineRequest> evalLines = new ArrayList<>();
+        for (SalesQuoteCapturedLineDto c : billableBare) {
+            if (c.rewardLine()) {
+                continue;
+            }
+            evalLines.add(new PromotionEvaluationLineRequest(
+                    null,
+                    c.productId(),
+                    c.variantId(),
+                    c.quantity(),
+                    c.unitPrice(),
+                    c.lineSubtotal()));
+        }
+        if (evalLines.isEmpty()) {
+            return null;
+        }
+        BigDecimal fee = shipFee != null ? shipFee : BigDecimal.ZERO;
+        boolean pendingShip = fee.compareTo(BigDecimal.ZERO) <= 0;
+        PromotionEvaluationResponse best = promotionEvaluationService.pickBest(
+                new PromotionEvaluationRequest(null, evalLines, merchandiseSubtotal, fee, pendingShip));
+        if (best == null || best.promotionId() == null) {
+            return null;
+        }
+        try {
+            long picked = Long.parseLong(best.promotionId());
+            return picked != req.promotionId() ? picked : null;
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private Long parseNullableLong(String value) {
@@ -412,7 +499,8 @@ public class SalesQuoteService {
             return BigDecimal.ZERO;
         }
         BigDecimal minOrder = promo.getMinOrderValue() != null ? promo.getMinOrderValue() : BigDecimal.ZERO;
-        if (merchandiseSubtotal.compareTo(minOrder) < 0) {
+        BigDecimal minOrderBasis = minOrderBasisForQuote(promo, reqLines, merchandiseSubtotal);
+        if (minOrderBasis.compareTo(minOrder) < 0) {
             return BigDecimal.ZERO;
         }
         if (eligiblePromoUnits(promo, reqLines) <= 0) {
@@ -437,7 +525,8 @@ public class SalesQuoteService {
             return List.of();
         }
         BigDecimal minOrder = promo.getMinOrderValue() != null ? promo.getMinOrderValue() : BigDecimal.ZERO;
-        if (merchandiseSubtotal.compareTo(minOrder) < 0) {
+        BigDecimal minOrderBasis = minOrderBasisForQuote(promo, reqLines, merchandiseSubtotal);
+        if (minOrderBasis.compareTo(minOrder) < 0) {
             return List.of();
         }
         if ("BUY_X_GET_Y".equals(type)) {
@@ -482,45 +571,123 @@ public class SalesQuoteService {
         return true;
     }
 
+    private boolean minOrderWholeOrder(Promotion promo) {
+        if (promo.getAppliesTo() == null || "ALL".equals(promo.getAppliesTo())) {
+            return true;
+        }
+        return "WHOLE_ORDER".equalsIgnoreCase(promo.getMinOrderScope());
+    }
+
+    private BigDecimal eligibleSubtotalForQuote(Promotion promo, List<SalesQuoteLineRequest> reqLines) {
+        BigDecimal subtotal = BigDecimal.ZERO;
+        for (SalesQuoteLineRequest line : reqLines) {
+            if (line.rewardLine()) continue;
+            Product p = productRepo.findById(line.productId())
+                    .orElseThrow(() -> new EntityNotFoundException("Khong tim thay san pham ID: " + line.productId()));
+            if (!productMatchesPromotion(promo, p)) continue;
+            ProductVariant variant = variantService.resolveVariant(line.variantId(), p.getId(), true);
+            BigDecimal lineDisc = line.discountPercent() != null ? line.discountPercent() : BigDecimal.ZERO;
+            BigDecimal factor = BigDecimal.ONE.subtract(
+                    lineDisc.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP));
+            BigDecimal snappedUnit = variant.getSellPrice().multiply(factor).setScale(0, RoundingMode.HALF_UP);
+            subtotal = subtotal.add(snappedUnit.multiply(BigDecimal.valueOf(line.quantity())));
+        }
+        return subtotal;
+    }
+
+    private BigDecimal minOrderBasisForQuote(Promotion promo, List<SalesQuoteLineRequest> reqLines, BigDecimal merchandiseSubtotal) {
+        if (minOrderWholeOrder(promo)) {
+            return merchandiseSubtotal != null ? merchandiseSubtotal : BigDecimal.ZERO;
+        }
+        return eligibleSubtotalForQuote(promo, reqLines);
+    }
+
     private List<SalesQuoteCapturedLineDto> buildBuyXGetYRewards(Promotion promo, List<SalesQuoteLineRequest> reqLines) {
-        Integer x = promo.getBuyQty();
+        Integer buyQty = promo.getBuyQty();
         Integer yQty = promo.getGetQty();
         Long giftPid = promo.getGetProductId();
-        if (x == null || x <= 0 || yQty == null || yQty <= 0 || giftPid == null) {
+        if (buyQty == null || buyQty <= 0 || yQty == null || yQty <= 0 || giftPid == null) {
             throw new IllegalArgumentException("Khuyen mai BUY_X_GET_Y thieu buy_qty / get_qty / get_product_id hop le");
         }
-        int eligible = eligiblePromoUnits(promo, reqLines);
-        int times = eligible / x;
+        List<PromotionRewardCalculator.BuyRequirement> requirements = PromotionRewardCalculator.buyRequirements(promo);
+        if (requirements.isEmpty()) {
+            if (!isLegacyAllScopeBuyXGetY(promo)) {
+                return List.of();
+            }
+            int eligibleQty = 0;
+            for (SalesQuoteLineRequest line : reqLines) {
+                if (!line.rewardLine()) {
+                    eligibleQty += line.quantity();
+                }
+            }
+            boolean repeatable = Boolean.TRUE.equals(promo.getRepeatable());
+            int times = repeatable ? (eligibleQty / buyQty) : (eligibleQty >= buyQty ? 1 : 0);
+            if (times <= 0) {
+                return List.of();
+            }
+            return List.of(mkRewardCapturedLine(giftPid, times * yQty));
+        }
+        Map<Long, Integer> qtyByProduct = qtyByProductMatchingPromotion(promo, reqLines);
+        int times = PromotionRewardCalculator.buyXGetYTimes(promo, qtyByProduct);
         if (times <= 0) {
             return List.of();
         }
-        int rewardQty = times * yQty;
-        return List.of(mkRewardCapturedLine(giftPid, rewardQty));
+        return List.of(mkRewardCapturedLine(giftPid, times * yQty));
+    }
+
+    private static boolean isLegacyAllScopeBuyXGetY(Promotion promo) {
+        if (promo == null) {
+            return false;
+        }
+        boolean allScope = promo.getAppliesTo() == null || "ALL".equals(promo.getAppliesTo());
+        boolean noBuyItems = promo.getBuyItems() == null || promo.getBuyItems().isEmpty();
+        boolean noProductScope = promo.getProducts() == null || promo.getProducts().isEmpty();
+        return allScope && noBuyItems && noProductScope;
+    }
+
+    private static boolean isOrderOnlyQuantityGift(Promotion p) {
+        return p.getProducts() == null || p.getProducts().isEmpty();
     }
 
     private List<SalesQuoteCapturedLineDto> buildQuantityGiftRewards(Promotion promo, List<SalesQuoteLineRequest> reqLines) {
-        Integer minB = promo.getMinBuyQty();
-        Integer maxB = promo.getMaxBuyQty();
         Integer yQty = promo.getGetQty();
         Long giftPid = promo.getGetProductId();
         if (yQty == null || yQty <= 0 || giftPid == null) {
             throw new IllegalArgumentException(
                     "Khuyen mai QUANTITY_GIFT thieu get_qty / get_product_id hop le");
         }
-        if (minB != null && minB <= 0) {
-            throw new IllegalArgumentException("Khuyen mai QUANTITY_GIFT: min_buy_qty khong hop le");
+        Map<Long, Integer> qtyByProduct;
+        if (isOrderOnlyQuantityGift(promo)) {
+            qtyByProduct = new HashMap<>();
+            for (SalesQuoteLineRequest line : reqLines) {
+                if (line.rewardLine()) {
+                    continue;
+                }
+                qtyByProduct.merge(line.productId(), line.quantity(), Integer::sum);
+            }
+        } else {
+            qtyByProduct = qtyByProductMatchingPromotion(promo, reqLines);
         }
-        if (maxB != null && minB != null && maxB < minB) {
-            throw new IllegalArgumentException("Khuyen mai QUANTITY_GIFT: max_buy_qty < min_buy_qty");
-        }
-        int eligible = eligiblePromoUnits(promo, reqLines);
-        if (minB != null && eligible < minB) {
+        int times = PromotionRewardCalculator.quantityGiftTimes(promo, qtyByProduct);
+        if (times <= 0) {
             return List.of();
         }
-        if (maxB != null && eligible > maxB) {
-            return List.of();
+        return List.of(mkRewardCapturedLine(giftPid, times * yQty));
+    }
+
+    private Map<Long, Integer> qtyByProductMatchingPromotion(Promotion promo, List<SalesQuoteLineRequest> reqLines) {
+        Map<Long, Integer> m = new HashMap<>();
+        for (SalesQuoteLineRequest line : reqLines) {
+            if (line.rewardLine()) {
+                continue;
+            }
+            Product p = productRepo.findById(line.productId())
+                    .orElseThrow(() -> new EntityNotFoundException("Khong tim thay san pham ID: " + line.productId()));
+            if (productMatchesPromotion(promo, p)) {
+                m.merge(line.productId(), line.quantity(), Integer::sum);
+            }
         }
-        return List.of(mkRewardCapturedLine(giftPid, yQty));
+        return m;
     }
 
     private void assertVariantDemandAvailable(
@@ -535,11 +702,13 @@ public class SalesQuoteService {
         }
         for (Map.Entry<Long, Integer> entry : demandByVariant.entrySet()) {
             ProductVariant variant = variantRepo.findById(entry.getKey()).orElseThrow();
-            int stockQty = variant.getStockQty() != null ? variant.getStockQty() : 0;
-            if (stockQty < entry.getValue()) {
+            int sellableQty = batchRepo.sumSellableRemainingQtyByVariantId(
+                    entry.getKey(),
+                    LocalDate.now(businessClock));
+            if (sellableQty < entry.getValue()) {
                 throw new IllegalArgumentException(
-                        "Khong du ton cho don hang va qua tang [" + variant.getVariantCode()
-                                + "]. Can " + entry.getValue() + ", con " + stockQty);
+                        "Không đủ tồn bán được cho đơn hàng và quà tặng [" + variant.getVariantCode()
+                                + "]. Cần " + entry.getValue() + ", còn " + sellableQty + ".");
             }
         }
     }
@@ -557,11 +726,6 @@ public class SalesQuoteService {
         giftVariant = variantRepo.findById(giftVariant.getId()).orElseThrow();
         if (!Boolean.TRUE.equals(giftVariant.getActive()) || !Boolean.TRUE.equals(giftVariant.getIsSellable())) {
             throw new IllegalArgumentException("Qua tang: variant khong ban duoc");
-        }
-        if (giftVariant.getStockQty() < rewardQty) {
-            throw new IllegalArgumentException(
-                    "Khong du ton qua tang '" + giftProduct.getName() + "' [" + giftVariant.getVariantCode()
-                            + "] — can " + rewardQty + ", co " + giftVariant.getStockQty());
         }
         BigDecimal sell = giftVariant.getSellPrice();
         BigDecimal lineGross = sell.multiply(BigDecimal.valueOf(rewardQty)).setScale(0, RoundingMode.HALF_UP);
@@ -612,6 +776,33 @@ public class SalesQuoteService {
                     r.lineSubtotal(),
                     promoId,
                     promoName
+            ));
+        }
+        return out;
+    }
+
+    private List<PromotionAffectedLineDto> mapAffectedLineSnapshots(List<SalesQuoteCapturedLineDto> billableLines) {
+        List<PromotionAffectedLineDto> out = new ArrayList<>();
+        for (SalesQuoteCapturedLineDto line : billableLines) {
+            if (line.rewardLine() || line.commercialSnapshot() == null) {
+                continue;
+            }
+            BigDecimal allocatedPromotionDiscount = line.commercialSnapshot().allocatedPromotionDiscount();
+            if (allocatedPromotionDiscount == null || allocatedPromotionDiscount.compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
+            }
+            Product product = productRepo.findById(line.productId()).orElseThrow();
+            ProductVariant variant = variantRepo.findById(line.variantId()).orElseThrow();
+            out.add(new PromotionAffectedLineDto(
+                    null,
+                    String.valueOf(line.productId()),
+                    String.valueOf(line.variantId()),
+                    product.getName(),
+                    variant.getVariantName(),
+                    line.quantity(),
+                    allocatedPromotionDiscount,
+                    null,
+                    null
             ));
         }
         return out;

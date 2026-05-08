@@ -1,6 +1,7 @@
 package com.example.nhadanshop.service;
 
 import com.example.nhadanshop.dto.*;
+import com.example.nhadanshop.exception.BusinessConflictException;
 import com.example.nhadanshop.entity.Customer;
 import com.example.nhadanshop.entity.RefreshToken;
 import com.example.nhadanshop.entity.PasswordResetToken;
@@ -25,6 +26,7 @@ import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -70,7 +72,9 @@ public class AuthService {
     public LoginResponse signUp(SignUpRequest req) {
         PasswordPolicy.validate(req.password(), req.username());
         if (userRepo.existsByUsername(req.username())) {
-            throw new IllegalStateException("Tên đăng nhập '" + req.username() + "' đã tồn tại");
+            throw new BusinessConflictException(
+                    "USERNAME_ALREADY_EXISTS",
+                    "Tên đăng nhập '" + req.username() + "' đã tồn tại");
         }
 
         Role userRole = roleRepo.findByName("ROLE_USER")
@@ -83,29 +87,52 @@ public class AuthService {
         user.setActive(true);
         user.getRoles().add(userRole);
 
-        Customer customer = resolveSignupCustomer(req, user.getFullName());
-        user.setCustomer(customer);
-        userRepo.save(user);
+        SignupCustomerResolution resolution = resolveSignupCustomer(req, user.getFullName());
+        user.setCustomer(resolution.customer());
+        try {
+            userRepo.save(user);
+        } catch (DataIntegrityViolationException ex) {
+            String root = ex.getMostSpecificCause() != null
+                    ? ex.getMostSpecificCause().getMessage()
+                    : ex.getMessage();
+            String lower = root != null ? root.toLowerCase() : "";
+            if (lower.contains("uk_users_customer_id")) {
+                throw new BusinessConflictException(
+                        "PHONE_ALREADY_REGISTERED",
+                        "Số điện thoại này đã được đăng ký tài khoản. Vui lòng đăng nhập hoặc dùng số khác.");
+            }
+            throw ex;
+        }
 
         // Tự động login sau khi đăng ký thành công
         Set<String> roles = Set.of("ROLE_USER");
-        return issueFullTokens(user, roles);
+        return issueFullTokens(user, roles, resolution.duplicatePhoneMatch());
     }
 
-    private Customer resolveSignupCustomer(SignUpRequest req, String fullName) {
+    private record SignupCustomerResolution(Customer customer, boolean duplicatePhoneMatch) {}
+
+    private SignupCustomerResolution resolveSignupCustomer(SignUpRequest req, String fullName) {
         String phone = normalizePhone(req.phone());
         if (phone != null) {
             List<Customer> matches = customerRepository.findAllByPhoneAndActiveTrue(phone);
             if (!matches.isEmpty()) {
-                if (matches.size() > 1) {
-                    log.warn("Signup phone {} matched {} active customers; linking to customer with latest completed invoice", phone, matches.size());
+                boolean dup = matches.size() > 1;
+                if (dup) {
+                    log.warn("Signup phone {} matched {} active customers; linking to customer with latest completed invoice",
+                            phone, matches.size());
                 }
-                return matches.stream()
+                Customer chosen = matches.stream()
                         .max(Comparator.comparing(c -> {
                             LocalDateTime last = salesInvoiceRepository.lastCompletedAtForCustomerIdentity(c.getId(), phone);
                             return last != null ? last : LocalDateTime.MIN;
                         }))
                         .orElse(matches.get(0));
+                if (userRepo.findByCustomerId(chosen.getId()).isPresent()) {
+                    throw new BusinessConflictException(
+                            "PHONE_ALREADY_REGISTERED",
+                            "Số điện thoại này đã được đăng ký tài khoản. Vui lòng đăng nhập hoặc dùng số khác.");
+                }
+                return new SignupCustomerResolution(chosen, dup);
             }
         }
         Customer customer = new Customer();
@@ -113,7 +140,7 @@ public class AuthService {
         customer.setName(fullName);
         customer.setPhone(phone);
         customer.setActive(true);
-        return customerRepository.save(customer);
+        return new SignupCustomerResolution(customerRepository.save(customer), false);
     }
 
     private String normalizePhone(String phone) {
@@ -154,12 +181,13 @@ public class AuthService {
                     roles,
                     user.getCustomer() != null ? user.getCustomer().getId() : null,
                     true,
-                    true            // totpRequired = true → FE hiện màn hình nhập OTP
+                    true,           // totpRequired = true → FE hiện màn hình nhập OTP
+                    false
             );
         }
 
         // Không có TOTP → cấp token ngay
-        return issueFullTokens(user, roles);
+        return issueFullTokens(user, roles, false);
     }
 
     // ── Step 2: Xác thực TOTP ────────────────────────────────────────────────
@@ -187,7 +215,7 @@ public class AuthService {
                 .map(r -> r.getName())
                 .collect(Collectors.toSet());
 
-        return issueFullTokens(user, roles);
+        return issueFullTokens(user, roles, false);
     }
 
     // ── Refresh Access Token ─────────────────────────────────────────────────
@@ -219,7 +247,7 @@ public class AuthService {
                 .map(r -> r.getName())
                 .collect(Collectors.toSet());
 
-        return issueFullTokens(user, roles);
+        return issueFullTokens(user, roles, false);
     }
 
     // ── Logout ───────────────────────────────────────────────────────────────
@@ -360,7 +388,7 @@ public class AuthService {
     }
 
     // ── Helper: cấp đầy đủ access + refresh token ─────────────────────────────
-    private LoginResponse issueFullTokens(User user, Set<String> roles) {
+    private LoginResponse issueFullTokens(User user, Set<String> roles, boolean duplicateCustomerPhoneMatch) {
         UserDetails userDetails = userDetailsService.loadUserByUsername(user.getUsername());
         String accessToken = jwtTokenProvider.generateAccessToken(userDetails);
 
@@ -384,7 +412,8 @@ public class AuthService {
                 roles,
                 user.getCustomer() != null ? user.getCustomer().getId() : null,
                 Boolean.TRUE.equals(user.getTotpEnabled()),
-                false // totpRequired = false vì đã xác thực xong
+                false, // totpRequired = false vì đã xác thực xong
+                duplicateCustomerPhoneMatch
         );
     }
 

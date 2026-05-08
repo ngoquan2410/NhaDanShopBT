@@ -22,8 +22,34 @@ describe("promotionEvaluationApi", () => {
       promotionId: 7,
       subtotal: 120000,
       shippingFee: 15000,
+      pendingShippingAddress: false,
       lines: [{ id: "l1", productId: 10, variantId: 20, qty: 2, unitPrice: 60000, lineSubtotal: 120000 }],
     });
+  });
+
+  it("marks shipping as pending when quote missing or fee not known yet", () => {
+    const lines = [
+      { id: "l1", productId: "10", variantId: "20", productName: "P", qty: 1, unitPrice: 1000, lineSubtotal: 1000 },
+    ];
+    expect(cartContextToPromotionEvaluationPayload({ subtotal: 1000, lines }, null).pendingShippingAddress).toBe(true);
+    expect(
+      cartContextToPromotionEvaluationPayload(
+        { subtotal: 1000, lines, shippingQuote: { status: "quoted", fee: null } },
+        null,
+      ).pendingShippingAddress,
+    ).toBe(true);
+    expect(
+      cartContextToPromotionEvaluationPayload(
+        { subtotal: 1000, lines, shippingQuote: { status: "quoted", fee: 0 } },
+        null,
+      ).pendingShippingAddress,
+    ).toBe(true);
+    expect(
+      cartContextToPromotionEvaluationPayload(
+        { subtotal: 1000, lines, shippingQuote: { status: "pending", fee: null } },
+        null,
+      ).pendingShippingAddress,
+    ).toBe(true);
   });
 
   it("maps backend uppercase response into FE evaluated promotion shape", () => {

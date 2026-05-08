@@ -14,14 +14,27 @@ import {
   Truck,
   Gift,
 } from "lucide-react";
-import { toast } from "sonner";
-import { useCart, useSelectedPromotionId, cartActions, type CartItem } from "@/lib/cart";
+import { useCart, useSelectedPromotionId, useSelectedPromotionMode, cartActions, type CartItem } from "@/lib/cart";
 import { promotions } from "@/services";
 import type { CartContext, EvaluatedPromotion } from "@/services/types";
+import { PROMOTION_TYPE_LABEL, parseProgressFromReason } from "@/components/promotions/PromotionLabels";
+
+const PROGRESS_BASIS_LABEL: Record<string, string> = {
+  ELIGIBLE_ITEMS: "Tính theo hàng trong phạm vi khuyến mãi",
+  WHOLE_ORDER: "Tính theo toàn bộ đơn hàng",
+  ITEM_QUANTITY: "Tính theo số lượng sản phẩm",
+  SHIPPING_ADDRESS: "Cần địa chỉ giao hàng",
+};
+
+function isGiftPromotionType(type: string | null | undefined): boolean {
+  const normalized = String(type ?? "").trim().toLowerCase();
+  return normalized === "buy_x_get_y" || normalized === "gift" || normalized === "quantity_gift";
+}
 
 export default function CartPage() {
   const items = useCart();
   const persistedPromoId = useSelectedPromotionId();
+  const persistedPromoMode = useSelectedPromotionMode();
 
   const subtotal = useMemo(
     () => items.reduce((s, i) => s + i.lineSubtotal, 0),
@@ -31,55 +44,79 @@ export default function CartPage() {
   // Evaluate ALL promotions so users can pick the one they want instead of being
   // locked into the auto-best. Voucher discounts apply later on Checkout.
   const [allPromos, setAllPromos] = useState<EvaluatedPromotion[]>([]);
+  const [promotionEvaluationStatus, setPromotionEvaluationStatus] = useState<"idle" | "loading" | "loaded">("idle");
   useEffect(() => {
     let cancel = false;
     if (!items.length) {
       setAllPromos([]);
+      setPromotionEvaluationStatus("idle");
       return;
     }
+    setPromotionEvaluationStatus("loading");
     const ctx: CartContext = { lines: items, subtotal };
     void promotions.evaluateAll(ctx).then((list) => {
       if (cancel) return;
       setAllPromos(list);
+      setPromotionEvaluationStatus("loaded");
     });
     return () => {
       cancel = true;
     };
   }, [items, subtotal]);
 
-  const eligiblePromos = useMemo(() => allPromos.filter((p) => p.eligible), [allPromos]);
+  const pendingAddressFreeShippingPromos = useMemo(
+    () =>
+      allPromos.filter((p) =>
+        String(p.type).toLowerCase().replace(/-/g, "_") === "free_shipping" &&
+        !p.eligible &&
+        (
+          p.progress?.basis === "SHIPPING_ADDRESS" ||
+          /địa chỉ|shipping/i.test(p.reasonIfIneligible ?? "")
+        )),
+    [allPromos],
+  );
+  const selectablePromos = useMemo(
+    () => allPromos.filter((p) => p.eligible).concat(
+      pendingAddressFreeShippingPromos.filter((p) => !allPromos.some((x) => x.promotionId === p.promotionId && x.eligible)),
+    ),
+    [allPromos, pendingAddressFreeShippingPromos],
+  );
   // Default to the first eligible (best by value — adapter sorts) if user hasn't picked.
   const sortedEligible = useMemo(
-    () => [...eligiblePromos].sort(
+    () => [...selectablePromos].sort(
       (a, b) =>
         b.discountAmount + b.shippingDiscountAmount -
         (a.discountAmount + a.shippingDiscountAmount),
     ),
-    [eligiblePromos],
+    [selectablePromos],
   );
   const bestPromo: EvaluatedPromotion | null = useMemo(() => {
-    if (persistedPromoId) {
-      return sortedEligible.find((p) => p.promotionId === persistedPromoId) ?? sortedEligible[0] ?? null;
+    if (persistedPromoId != null) {
+      return allPromos.find((p) => p.promotionId === persistedPromoId) ?? null;
     }
     return sortedEligible[0] ?? null;
-  }, [sortedEligible, persistedPromoId]);
+  }, [sortedEligible, persistedPromoId, allPromos]);
 
   useEffect(() => {
-    if (!sortedEligible.length) {
-      if (persistedPromoId) cartActions.setSelectedPromotionId(null);
-      return;
+    if (promotionEvaluationStatus !== "loaded") return;
+    if (!persistedPromoId) return;
+    const exists = allPromos.some((p) => p.promotionId === persistedPromoId);
+    if (!exists) {
+      cartActions.clearSelectedPromotion("auto");
     }
-    if (!persistedPromoId || !sortedEligible.some((p) => p.promotionId === persistedPromoId)) {
-      cartActions.setSelectedPromotionId(sortedEligible[0].promotionId);
-    }
-  }, [persistedPromoId, sortedEligible]);
+  }, [promotionEvaluationStatus, persistedPromoId, allPromos]);
 
-  const promoDiscount = bestPromo?.discountAmount ?? 0;
+  const promoDiscount = bestPromo?.type !== "free_shipping" ? (bestPromo?.discountAmount ?? 0) : 0;
+  const promoGiftLines = bestPromo?.giftLines ?? [];
+  const promoIsGift = isGiftPromotionType(bestPromo?.type);
   const promoShipFree = bestPromo?.type === "free_shipping";
   const total = Math.max(0, subtotal - promoDiscount);
   const hasStockIssue = items.some((i) => i.qty > i.stock);
   const hasInvalidBackendLine = items.some((i) => i.catalogSource !== "backend" || i.schemaVersion !== 2 || !/^\d+$/.test(String(i.productId)) || !/^\d+$/.test(String(i.variantId)));
-  const freeShippingGap = 0;
+  const ineligiblePromos = useMemo(
+    () => allPromos.filter((p) => !p.eligible && p.reasonIfIneligible && !pendingAddressFreeShippingPromos.some((x) => x.promotionId === p.promotionId)),
+    [allPromos, pendingAddressFreeShippingPromos],
+  );
 
   const removeItem = (id: string, name: string) => {
     cartActions.remove(id);
@@ -116,24 +153,8 @@ export default function CartPage() {
           </h1>
         </div>
 
-        {/* Free shipping progress */}
-        {false && promoShipFree && (
-          <div className="mb-5 p-3 rounded-xl bg-primary-soft border border-primary/20 flex items-center gap-3">
-            <Truck className="h-4 w-4 text-primary shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs">
-                Mua thêm <span className="font-bold text-primary">{formatVND(freeShippingGap)}</span> để được{" "}
-                <span className="font-bold">miễn phí giao hàng</span>
-              </p>
-              <div className="mt-1.5 h-1.5 bg-card rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary rounded-full transition-all"
-                  style={{ width: `${Math.min(100, (subtotal / 200000) * 100)}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Free-shipping banners are intentionally not hardcoded.
+            Eligibility/progress comes from backend evaluation in `allPromos`. */}
 
         <div className="lg:grid lg:grid-cols-3 lg:gap-6">
           {/* Items */}
@@ -158,7 +179,8 @@ export default function CartPage() {
                       <button
                         key={p.promotionId}
                         type="button"
-                        onClick={() => cartActions.setSelectedPromotionId(p.promotionId)}
+                        data-testid={`cart-promo-option-${p.promotionId}`}
+                        onClick={() => cartActions.setSelectedPromotion(p.promotionId, "manual")}
                         className={`w-full text-left p-2.5 rounded-xl border-2 transition-all ${
                           selected ? "border-success bg-card" : "border-transparent bg-card/60 hover:border-success/40"
                         }`}
@@ -179,7 +201,22 @@ export default function CartPage() {
                                 <span className="text-xs font-bold text-success shrink-0">Free ship</span>
                               )}
                             </div>
-                            <p className="text-[11px] text-muted-foreground mt-0.5">{p.ruleSummary}</p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              <span className="inline-block px-1.5 py-0.5 mr-1 rounded bg-muted text-foreground/70 text-[10px] font-semibold">
+                                {PROMOTION_TYPE_LABEL[p.type]}
+                              </span>
+                              {p.ruleSummary}
+                            </p>
+                            {p.type === "free_shipping" && (
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                Phí ship cuối cùng được xác nhận sau khi nhập địa chỉ giao hàng.
+                              </p>
+                            )}
+                            {String(p.type).toLowerCase().replace(/-/g, "_") === "free_shipping" && !p.eligible && (
+                              <span data-testid={`cart-promo-needs-address-${p.promotionId}`} className="inline-block mt-1 text-[10px] font-semibold rounded-full bg-warning-soft text-warning px-2 py-0.5">
+                                Cần địa chỉ giao hàng
+                              </span>
+                            )}
                             {p.giftLines.length > 0 && (
                               <p className="text-[11px] text-success mt-0.5">
                                 🎁 {p.giftLines.map((g) => `${g.productName} ×${g.qty}`).join(", ")}
@@ -191,6 +228,103 @@ export default function CartPage() {
                     );
                   })}
                 </div>
+              </div>
+            )}
+
+            <div className="hidden" data-testid="cart-promo-selected-id">{persistedPromoId ?? ""}</div>
+            <div className="hidden" data-testid="cart-promo-selected-mode">{persistedPromoMode}</div>
+            <div className="hidden" data-testid="cart-promo-eval-status">{promotionEvaluationStatus}</div>
+            {persistedPromoId && bestPromo && !bestPromo.eligible && (
+              <div className="bg-warning-soft/40 border border-warning/40 rounded-2xl p-3 text-xs text-warning">
+                <b>Khuyến mãi đã chọn hiện chưa đủ điều kiện.</b> {bestPromo.reasonIfIneligible ?? "Vui lòng cập nhật giỏ hoặc địa chỉ giao hàng."}
+              </div>
+            )}
+
+
+            {ineligiblePromos.length > 0 && (
+              <div className="bg-storefront-surface border rounded-2xl p-4 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <Truck className="h-4 w-4 text-muted-foreground" /> Sắp đạt khuyến mãi ({ineligiblePromos.length})
+                </div>
+                <ul className="space-y-3">
+                  {ineligiblePromos.map((p) => {
+                    const fallbackProgress = parseProgressFromReason(p.reasonIfIneligible, p.ruleSummary);
+                    const basisLabel = p.progress?.basis ? (PROGRESS_BASIS_LABEL[p.progress.basis] ?? p.progress.basis) : undefined;
+                    const progress =
+                      p.progress != null
+                        ? {
+                            kind: p.progress.type === "multi_quantity" ? "qty" : "money",
+                            current: p.progress.currentAmount,
+                            target: p.progress.requiredAmount,
+                            remaining: p.progress.remainingAmount,
+                          }
+                        : fallbackProgress;
+                    let pct = 0;
+                    if (progress.kind === "money" && progress.target && progress.target > 0) {
+                      const cur = progress.current ?? Math.max(0, progress.target - (progress.remaining ?? progress.target));
+                      pct = Math.min(100, Math.round((cur / progress.target) * 100));
+                    } else if (progress.kind === "qty" && progress.target && progress.target > 0) {
+                      const cur = progress.current ?? Math.max(0, progress.target - (progress.remaining ?? progress.target));
+                      pct = Math.min(100, Math.round((cur / progress.target) * 100));
+                    }
+                    return (
+                      <li key={p.promotionId} className="space-y-1.5" data-testid={`cart-promo-near-miss-${p.promotionId}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-foreground">{p.name}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              <span className="inline-block px-1.5 py-0.5 mr-1 rounded bg-muted text-foreground/70 text-[10px] font-semibold">
+                                {PROMOTION_TYPE_LABEL[p.type]}
+                              </span>
+                              {p.ruleSummary}
+                            </p>
+                          </div>
+                          {p.type === "free_shipping" && (
+                            <span data-testid={`cart-promo-needs-address-${p.promotionId}`} className="text-[10px] font-semibold rounded-full bg-warning-soft text-warning px-2 py-0.5 shrink-0">
+                              Cần địa chỉ giao hàng
+                            </span>
+                          )}
+                        </div>
+                        {progress.kind !== "unknown" && (
+                          <>
+                            {basisLabel && (
+                              <p className="text-[11px] text-muted-foreground">{basisLabel}</p>
+                            )}
+                            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                              <div
+                                className="h-full bg-success transition-all"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            {progress.kind === "money" ? (
+                              <p className="text-[11px] text-muted-foreground">
+                                {progress.target != null && progress.current != null ? (
+                                  <>Đã đạt <b>{formatVND(progress.current)}</b> / {formatVND(progress.target)}. </>
+                                ) : null}
+                                {progress.remaining != null && progress.remaining > 0 ? (
+                                  <>Còn thiếu <b>{formatVND(progress.remaining)}</b>.</>
+                                ) : null}
+                              </p>
+                            ) : (
+                              <p className="text-[11px] text-muted-foreground">
+                                Cần {progress.target ?? "?"}, đang có {progress.current ?? 0}
+                                {progress.remaining != null && progress.remaining > 0 ? <>, còn thiếu <b>{progress.remaining}</b></> : null}
+                              </p>
+                            )}
+                          </>
+                        )}
+                        {progress.kind === "unknown" && p.reasonIfIneligible && (
+                          <p className="text-[11px] text-muted-foreground">{p.reasonIfIneligible}</p>
+                        )}
+                        {(p.type === "buy_x_get_y" || p.type === "gift" || p.type === "fixed_discount" || p.type === "percent_discount") && (
+                          <p className="text-[10px] text-muted-foreground/80 italic">
+                            Đơn tối thiểu có thể tính theo hàng trong phạm vi hoặc toàn bộ đơn, tùy cấu hình admin.
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
             )}
 
@@ -214,12 +348,29 @@ export default function CartPage() {
                     <span className="font-semibold">−{formatVND(promoDiscount)}</span>
                   </div>
                 )}
+                {promoIsGift && bestPromo && (
+                  <div data-testid="cart-summary-promotion-gifts" className="rounded-lg bg-success-soft/40 px-3 py-2 text-xs text-success space-y-0.5">
+                    <p className="font-semibold">Quà tặng: {bestPromo.name}</p>
+                    {promoGiftLines.length > 0 ? (
+                      promoGiftLines.map((g) => (
+                        <p key={`${g.variantId ?? g.productId}`} data-testid={`cart-summary-promotion-gift-line-${g.variantId ?? g.productId}`}>
+                          🎁 {g.productName} ×{g.qty}
+                        </p>
+                      ))
+                    ) : (
+                      <p data-testid="cart-summary-promotion-gifts-pending">Đang xác nhận quà tặng cho khuyến mãi này...</p>
+                    )}
+                  </div>
+                )}
                 <div className="flex justify-between gap-3">
                   <span className="text-muted-foreground">Phí giao hàng</span>
-                  <span className="font-semibold text-right">
-                    {promoShipFree ? <span className="text-success">Miễn phí</span> : "Tính ở bước thanh toán"}
-                  </span>
+                  <span className="font-semibold text-right text-muted-foreground">Tính ở bước thanh toán</span>
                 </div>
+                {promoShipFree && (
+                  <p className="text-[11px] text-success">
+                    Miễn phí ship sẽ được xác nhận sau khi nhập địa chỉ giao hàng.
+                  </p>
+                )}
                 <div className="border-t pt-3 mt-3 flex justify-between items-baseline">
                   <span className="font-semibold">Tổng cộng</span>
                   <span className="font-bold text-foreground text-xl">{formatVND(total)}</span>

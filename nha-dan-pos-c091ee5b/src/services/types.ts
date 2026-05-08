@@ -109,6 +109,7 @@ export interface ShippingAddress {
   wardCode: string;
   wardName: string;
   street: string;
+  rawAddress?: string;
   note?: string;
 }
 
@@ -302,6 +303,23 @@ export interface PromotionAffectedLine {
   note?: string;
 }
 
+export interface PromotionProgressItem {
+  productId?: ID;
+  variantId?: ID;
+  requiredQty?: number;
+  currentQty?: number;
+  remainingQty?: number;
+}
+
+export interface PromotionProgress {
+  type?: string;
+  basis?: "ELIGIBLE_ITEMS" | "WHOLE_ORDER" | "ITEM_QUANTITY" | "SHIPPING_ADDRESS" | string;
+  currentAmount?: Money;
+  remainingAmount?: Money;
+  requiredAmount?: Money;
+  items?: PromotionProgressItem[];
+}
+
 export interface EvaluatedPromotion {
   promotionId: ID;
   name: string;
@@ -314,6 +332,7 @@ export interface EvaluatedPromotion {
   voucherDiscountAmount: Money;
   affectedLines: PromotionAffectedLine[];
   giftLines: GiftLine[];
+  progress?: PromotionProgress;
 }
 
 export interface CartPricingBreakdown {

@@ -66,6 +66,12 @@ function normalizePricingBreakdown(value: any): PricingBreakdownSnapshot {
   );
   const vatPercent = Number(value?.vatPercent ?? 0);
   const vatAmount = Number(value?.vatAmount ?? value?.vat ?? 0);
+  const loyaltyDiscount =
+    value?.loyaltyDiscount == null ? undefined : Number(value.loyaltyDiscount);
+  const loyaltyRedeemedPoints =
+    value?.loyaltyRedeemedPoints == null
+      ? undefined
+      : Number(value.loyaltyRedeemedPoints);
   const total = Number(value?.total ?? 0);
 
   return {
@@ -78,6 +84,8 @@ function normalizePricingBreakdown(value: any): PricingBreakdownSnapshot {
     vatBase,
     vatPercent,
     vatAmount,
+    loyaltyDiscount,
+    loyaltyRedeemedPoints,
     vat: Number(value?.vat ?? vatAmount),
     total,
   };
@@ -174,6 +182,8 @@ export class CloudPendingOrderAdapter implements PendingOrderService {
       vatBase: p.vatBase,
       vatPercent: p.vatPercent,
       vatAmount: p.vatAmount,
+      loyaltyDiscount: p.loyaltyDiscount,
+      loyaltyRedeemedPoints: p.loyaltyRedeemedPoints,
       total: p.total,
     };
   }

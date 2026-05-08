@@ -211,6 +211,45 @@ export function PromotionFormShell({ promo, onClose, onSave }: Props) {
             </Section>
           )}
 
+          {/* Section 5b: Min-order basis selector — UI only, drives display & saves
+              the user's intent so backend can honor it later. */}
+          {(form.type === "percent" || form.type === "fixed" || form.type === "free-shipping") && (
+            <Section title="Đơn tối thiểu tính theo">
+              <div className="grid sm:grid-cols-2 gap-2">
+                {([
+                  {
+                    v: "scoped" as const,
+                    l: "Hàng trong phạm vi khuyến mãi",
+                    d: "Chỉ cộng tiền sản phẩm/danh mục được áp dụng khuyến mãi.",
+                  },
+                  {
+                    v: "whole-order" as const,
+                    l: "Toàn bộ đơn hàng",
+                    d: "Cộng toàn bộ giỏ hàng để xét điều kiện, nhưng chỉ giảm trên phạm vi đã chọn.",
+                  },
+                ]).map((opt) => {
+                  const selected = (form.minOrderBasis ?? "scoped") === opt.v;
+                  return (
+                    <button
+                      key={opt.v}
+                      type="button"
+                      onClick={() => setBase("minOrderBasis", opt.v)}
+                      className={`text-left p-3 rounded-md border-2 transition-all ${selected ? "border-primary bg-primary-soft/40" : "border-border hover:border-primary/40"}`}
+                    >
+                      <p className="text-xs font-semibold">{opt.l}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">{opt.d}</p>
+                    </button>
+                  );
+                })}
+              </div>
+              {supportsScope(form.type) && form.scope.kind === "all" && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Với phạm vi toàn bộ đơn, hai cách tính cho kết quả như nhau.
+                </p>
+              )}
+            </Section>
+          )}
+
           {/* Section 6: Status */}
           <Section title="Trạng thái">
             <label className="flex items-center gap-2 cursor-pointer">
@@ -220,9 +259,29 @@ export function PromotionFormShell({ promo, onClose, onSave }: Props) {
           </Section>
 
           {/* Live preview */}
-          <div className="rounded-md border bg-primary-soft/50 p-3">
+          <div className="rounded-md border bg-primary-soft/50 p-3 space-y-1">
             <p className="text-[11px] font-medium text-muted-foreground mb-1">Tóm tắt khuyến mãi</p>
-            <p className="text-sm font-medium text-primary">{summary}</p>
+            <p className="text-sm font-semibold text-primary">{summary}</p>
+            <dl className="text-[11px] text-muted-foreground space-y-0.5 mt-1">
+              <div className="flex justify-between gap-2"><dt>Loại</dt><dd className="text-foreground font-medium text-right">{PROMOTION_TYPE_LABELS[form.type]}</dd></div>
+              <div className="flex justify-between gap-2"><dt>Phạm vi</dt><dd className="text-foreground text-right">{
+                form.scope.kind === "all" ? "Toàn bộ sản phẩm" :
+                form.scope.kind === "categories" ? `Danh mục (${form.scope.categoryIds.length})` :
+                `Sản phẩm (${form.scope.productIds.length})`
+              }</dd></div>
+              {(form.type === "percent" || form.type === "fixed" || form.type === "free-shipping") && (
+                <>
+                  <div className="flex justify-between gap-2"><dt>Đơn tối thiểu</dt><dd className="text-foreground text-right">{(form.type === "percent" || form.type === "fixed" || form.type === "free-shipping") && form.minOrder ? `${form.minOrder.toLocaleString("vi-VN")}đ` : "—"}</dd></div>
+                  <div className="flex justify-between gap-2"><dt>Đơn tối thiểu tính theo</dt><dd className="text-foreground text-right">{(form.minOrderBasis ?? "scoped") === "scoped" ? "Hàng trong phạm vi" : "Toàn bộ đơn"}</dd></div>
+                </>
+              )}
+              {form.type === "percent" && form.maxDiscount && form.maxDiscount > 0 && (
+                <div className="flex justify-between gap-2"><dt>Mức giảm tối đa</dt><dd className="text-foreground text-right">{form.maxDiscount.toLocaleString("vi-VN")}đ</dd></div>
+              )}
+              {form.type === "free-shipping" && (
+                <div className="flex justify-between gap-2"><dt>Mức giảm phí ship</dt><dd className="text-foreground text-right">{form.maxShippingDiscount && form.maxShippingDiscount > 0 ? `Tối đa ${form.maxShippingDiscount.toLocaleString("vi-VN")}đ` : "Toàn bộ phí ship"}</dd></div>
+              )}
+            </dl>
           </div>
         </div>
 
