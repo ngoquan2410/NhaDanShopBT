@@ -17,20 +17,29 @@ import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
+import jakarta.persistence.criteria.Predicate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.Locale;
 
 @Service
 @RequiredArgsConstructor
 @Transactional
 public class PromotionService {
+    private static final Set<String> PROMOTION_SORT_WHITELIST = Set.of(
+            "createdAt", "updatedAt", "name", "startDate", "endDate", "active");
+
 
     private final PromotionRepository promotionRepo;
     private final CategoryRepository categoryRepo;
@@ -60,8 +69,22 @@ public class PromotionService {
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy khuyến mãi ID: " + id)));
     }
 
-    public Page<PromotionResponse> list(Pageable pageable) {
-        return promotionRepo.findByActiveTrueOrderByStartDateDesc(pageable).map(this::toResponse);
+    public Page<PromotionResponse> list(
+            Integer page,
+            Integer size,
+            String search,
+            String status,
+            String type,
+            Boolean includeArchived,
+            Pageable pageable) {
+        Pageable safePageable = sanitizePageable(page, size, pageable);
+        String normalizedSearch = normalizeBlank(search);
+        String normalizedStatus = normalizeStatus(status);
+        String normalizedType = normalizeBlank(type);
+        boolean safeIncludeArchived = Boolean.TRUE.equals(includeArchived);
+        return promotionRepo
+                .findAll(buildAdminListSpec(normalizedSearch, normalizedStatus, normalizedType, safeIncludeArchived), safePageable)
+                .map(this::toResponse);
     }
 
     public List<PromotionResponse> listActive() {
@@ -116,10 +139,11 @@ public class PromotionService {
         p.setMinOrderScope(req.minOrderScope() != null ? req.minOrderScope() : "ELIGIBLE_ITEMS");
         if (req.active() != null) p.setActive(req.active());
 
+        boolean giftPromotionType = "BUY_X_GET_Y".equals(req.type()) || "QUANTITY_GIFT".equals(req.type());
         if (req.repeatable() != null) {
             p.setRepeatable(req.repeatable());
         } else if (p.getRepeatable() == null) {
-            p.setRepeatable(true);
+            p.setRepeatable(!giftPromotionType);
         }
 
         // BUY_X_GET_Y + QUANTITY_GIFT fields
@@ -218,5 +242,74 @@ public class PromotionService {
                 maxGiftApplications,
                 p.getCreatedAt(), p.getUpdatedAt()
         );
+    }
+
+    private Pageable sanitizePageable(Integer page, Integer size, Pageable pageable) {
+        int safePage = page != null ? Math.max(0, page) : Math.max(0, pageable.getPageNumber());
+        int requestedSize = size != null ? size : pageable.getPageSize();
+        int safeSize = Math.min(Math.max(1, requestedSize), 100);
+        Sort safeSort = Sort.unsorted();
+        for (Sort.Order order : pageable.getSort()) {
+            if (PROMOTION_SORT_WHITELIST.contains(order.getProperty())) {
+                safeSort = safeSort.and(Sort.by(order));
+            }
+        }
+        if (safeSort.isUnsorted()) {
+            safeSort = Sort.by(Sort.Order.desc("createdAt"));
+        }
+        return PageRequest.of(safePage, safeSize, safeSort);
+    }
+
+    private String normalizeBlank(String input) {
+        if (input == null || input.isBlank()) {
+            return null;
+        }
+        return input.trim();
+    }
+
+    private String normalizeStatus(String input) {
+        String normalized = normalizeBlank(input);
+        if (normalized == null) {
+            return null;
+        }
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        return switch (lower) {
+            case "active", "inactive", "archived" -> lower;
+            default -> throw new IllegalArgumentException("status không hợp lệ: " + input);
+        };
+    }
+
+    private Specification<Promotion> buildAdminListSpec(
+            String search,
+            String status,
+            String type,
+            boolean includeArchived) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (!includeArchived) {
+                // NOTE: current schema has no archived flag; preserve legacy behavior.
+                predicates.add(cb.isTrue(root.get("active")));
+            }
+            if (type != null) {
+                predicates.add(cb.equal(
+                        cb.upper(cb.coalesce(root.get("type"), "")),
+                        type.toUpperCase(Locale.ROOT)));
+            }
+            if (status != null) {
+                if ("active".equals(status)) {
+                    predicates.add(cb.isTrue(root.get("active")));
+                } else {
+                    predicates.add(cb.isFalse(root.get("active")));
+                }
+            }
+            if (search != null) {
+                String likePattern = "%" + search.toUpperCase(Locale.ROOT) + "%";
+                predicates.add(cb.or(
+                        cb.like(cb.upper(cb.coalesce(root.get("name"), "")), likePattern),
+                        cb.like(cb.upper(cb.coalesce(root.get("description"), "")), likePattern)
+                ));
+            }
+            return cb.and(predicates.toArray(Predicate[]::new));
+        };
     }
 }

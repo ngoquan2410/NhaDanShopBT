@@ -7,6 +7,7 @@ import {
   buildPromotionUpsertBody,
   createAdminPromotion,
   parseAdminPromotionRow,
+  fetchAdminPromotionPage,
   updateAdminPromotion,
 } from "./adminPromotionsApi";
 import type { Promotion } from "@/lib/promotions";
@@ -83,6 +84,40 @@ describe("adminPromotionsApi", () => {
     await updateAdminPromotion(1, { name: "P2" });
     expect(adminApi.adminFetchJson).toHaveBeenNthCalledWith(1, "/api/promotions", expect.objectContaining({ method: "POST" }));
     expect(adminApi.adminFetchJson).toHaveBeenNthCalledWith(2, "/api/promotions/1", expect.objectContaining({ method: "PUT" }));
+  });
+
+  it("sends server-side list query params for promotions page", async () => {
+    vi.mocked(adminApi.adminFetchJson).mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, number: 0, size: 20 });
+    await fetchAdminPromotionPage({
+      page: 0,
+      size: 20,
+      search: "flash sale",
+      status: "active",
+      type: "BUY_X_GET_Y",
+      includeArchived: true,
+      sort: "name,asc",
+    });
+    expect(adminApi.adminFetchJson).toHaveBeenCalledWith(
+      "/api/promotions?page=0&size=20&sort=name%2Casc&search=flash+sale&status=active&type=BUY_X_GET_Y&includeArchived=true",
+    );
+  });
+
+  it("gift promotion default repeatable=false and mapping preserves repeatable", () => {
+    const gift = buildPromotionUpsertBody({
+      id: "",
+      name: "Gift promo",
+      description: "",
+      active: true,
+      startDate: "2026-05-01",
+      endDate: "2026-05-31",
+      scope: { kind: "all" },
+      type: "gift",
+      triggerType: "min-order",
+      triggerValue: 100000,
+      giftItems: [{ productId: "5", productName: "X", quantity: 1 }],
+      repeatable: false,
+    });
+    expect(gift.repeatable).toBe(false);
   });
 });
 

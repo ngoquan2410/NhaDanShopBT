@@ -78,7 +78,8 @@ public class AuthService {
         }
 
         Role userRole = roleRepo.findByName("ROLE_USER")
-                .orElseThrow(() -> new IllegalStateException("Role ROLE_USER không tìm thấy trong hệ thống"));
+                .or(() -> roleRepo.findByName("ROLE_CUSTOMER"))
+                .orElseThrow(() -> new IllegalStateException("Role ROLE_USER/ROLE_CUSTOMER không tìm thấy trong hệ thống"));
 
         User user = new User();
         user.setUsername(req.username());
@@ -105,7 +106,7 @@ public class AuthService {
         }
 
         // Tự động login sau khi đăng ký thành công
-        Set<String> roles = Set.of("ROLE_USER");
+        Set<String> roles = Set.of(userRole.getName());
         return issueFullTokens(user, roles, resolution.duplicatePhoneMatch());
     }
 

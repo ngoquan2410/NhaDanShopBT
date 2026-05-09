@@ -9,6 +9,10 @@ import com.example.nhadanshop.service.IdempotencyService;
 import com.example.nhadanshop.service.PaymentEventService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -27,8 +31,10 @@ public class PaymentEventController {
     }
 
     @GetMapping("/unmatched")
-    public List<PaymentEventResponse> listUnmatched(@RequestParam(defaultValue = "100") int limit) {
-        return paymentEventService.listUnmatched(limit);
+    public Page<PaymentEventResponse> listUnmatched(
+            @RequestParam(required = false) String search,
+            @PageableDefault(size = 50, sort = "txTime", direction = Sort.Direction.DESC) Pageable pageable) {
+        return paymentEventService.listUnmatchedPage(search, pageable);
     }
 
     @GetMapping("/ignored")

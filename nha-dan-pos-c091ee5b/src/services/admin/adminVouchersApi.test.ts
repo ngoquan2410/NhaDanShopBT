@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { buildVoucherUpsertBody, parseAdminVoucherRow, toLocalDateInput } from "./adminVouchersApi";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as adminApi from "@/services/auth/adminApi";
+import { buildVoucherUpsertBody, fetchAdminVoucherPage, parseAdminVoucherRow, toLocalDateInput } from "./adminVouchersApi";
+
+vi.mock("@/services/auth/adminApi", () => ({
+  adminFetchJson: vi.fn(),
+}));
 
 describe("adminVouchersApi", () => {
+  beforeEach(() => {
+    vi.mocked(adminApi.adminFetchJson).mockReset();
+  });
   it("parseAdminVoucherRow maps freeShipping and rule fields from backend DTO", () => {
     const row = parseAdminVoucherRow({
       id: 1,
@@ -51,5 +59,32 @@ describe("adminVouchersApi", () => {
 
   it("toLocalDateInput strips time from ISO", () => {
     expect(toLocalDateInput("2026-04-01T15:30:00")).toBe("2026-04-01");
+  });
+
+  it("sends server-side list query params for voucher page", async () => {
+    vi.mocked(adminApi.adminFetchJson).mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, number: 0, size: 20 });
+    await fetchAdminVoucherPage({
+      page: 0,
+      size: 20,
+      search: "ship free",
+      status: "active",
+      sort: [{ field: "code", direction: "asc" }],
+    });
+    expect(adminApi.adminFetchJson).toHaveBeenCalledWith(
+      "/api/vouchers?page=0&size=20&sort=code%2Casc&search=ship+free&status=active",
+    );
+  });
+
+  it("omits blank search and all status params", async () => {
+    vi.mocked(adminApi.adminFetchJson).mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, number: 0, size: 20 });
+    await fetchAdminVoucherPage({
+      page: 1,
+      size: 20,
+      search: "   ",
+      status: "all",
+    });
+    expect(adminApi.adminFetchJson).toHaveBeenCalledWith(
+      "/api/vouchers?page=1&size=20&sort=createdAt%2Cdesc",
+    );
   });
 });

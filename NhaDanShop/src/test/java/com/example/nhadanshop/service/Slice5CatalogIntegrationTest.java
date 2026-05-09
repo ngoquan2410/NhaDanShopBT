@@ -12,15 +12,21 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.TestPropertySource;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.when;
 
 /**
  * Slice 5: isSellable sales guards, safe product delete, category archive when in use.
@@ -32,6 +38,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 })
 @Import({ProductVariantService.class, ProductService.class, CategoryService.class})
 class Slice5CatalogIntegrationTest {
+
+    @MockBean
+    private StockedCatalogGuardService stockedCatalogGuardService;
+
+    @MockBean
+    private Clock businessClock;
 
     @Autowired
     private ProductVariantService productVariantService;
@@ -111,6 +123,54 @@ class Slice5CatalogIntegrationTest {
         long id = c.getId();
         categoryService.deleteOrArchive(id);
         assertFalse(categoryRepository.findById(id).isPresent());
+    }
+
+    @Test
+    void productDetail_uses_sellable_stock_zero_when_batches_expired() {
+        when(businessClock.instant()).thenReturn(Instant.parse("2026-05-09T00:00:00Z"));
+        when(businessClock.getZone()).thenReturn(ZoneId.of("UTC"));
+        Product p = newProduct("SL5-DET-EXPIRED");
+        ProductVariant v = newVariant("SL5-V-EXPIRED", p, true, true);
+        v.setStockQty(12);
+        v = variantRepository.save(v);
+        ProductBatch b = new ProductBatch();
+        b.setProduct(p);
+        b.setVariant(v);
+        b.setBatchCode("B-SL5-DET-EX");
+        b.setExpiryDate(LocalDate.of(2026, 5, 8));
+        b.setImportQty(12);
+        b.setRemainingQty(12);
+        b.setCostPrice(BigDecimal.ONE);
+        b.setStatus(ProductBatch.STATUS_ACTIVE);
+        batchRepository.save(b);
+
+        var resp = productService.findById(p.getId());
+        assertEquals(1, resp.variants().size());
+        assertEquals(12, resp.variants().get(0).stockQty());
+        assertEquals(0, resp.variants().get(0).sellableStockQty());
+    }
+
+    @Test
+    void productDetail_uses_sellable_stock_from_active_non_expired_batches() {
+        when(businessClock.instant()).thenReturn(Instant.parse("2026-05-09T00:00:00Z"));
+        when(businessClock.getZone()).thenReturn(ZoneId.of("UTC"));
+        Product p = newProduct("SL5-DET-ACT");
+        ProductVariant v = newVariant("SL5-V-ACT", p, true, true);
+        v.setStockQty(20);
+        v = variantRepository.save(v);
+        ProductBatch b = new ProductBatch();
+        b.setProduct(p);
+        b.setVariant(v);
+        b.setBatchCode("B-SL5-DET-ACT");
+        b.setExpiryDate(LocalDate.of(2026, 5, 10));
+        b.setImportQty(9);
+        b.setRemainingQty(9);
+        b.setCostPrice(BigDecimal.ONE);
+        b.setStatus(ProductBatch.STATUS_ACTIVE);
+        batchRepository.save(b);
+
+        var resp = productService.findById(p.getId());
+        assertEquals(9, resp.variants().get(0).sellableStockQty());
     }
 
     private Product newProduct(String code) {

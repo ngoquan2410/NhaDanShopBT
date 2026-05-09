@@ -68,6 +68,7 @@ export interface GiftPromotion extends PromotionBase {
   triggerProductName?: string;
   giftItems: GiftItemRef[];
   giftStockLimit?: number;
+  repeatable: boolean;
 }
 
 export interface FreeShippingPromotion extends PromotionBase {
@@ -112,9 +113,9 @@ export function makeEmptyPromotion(type: PromotionType): Promotion {
     case "fixed":
       return { ...base, type: "fixed", amount: 10000 };
     case "buy-x-get-y":
-      return { ...base, type: "buy-x-get-y", buyItems: [], getItems: [], mode: "same", repeatable: true };
+      return { ...base, type: "buy-x-get-y", buyItems: [], getItems: [], mode: "same", repeatable: false };
     case "gift":
-      return { ...base, type: "gift", triggerType: "min-order", triggerValue: 0, giftItems: [] };
+      return { ...base, type: "gift", triggerType: "min-order", triggerValue: 0, giftItems: [], repeatable: false };
     case "free-shipping":
       return { ...base, type: "free-shipping" };
   }
@@ -150,6 +151,7 @@ export function migratePromotion(raw: any): Promotion {
         triggerProductName: raw.triggerProductName,
         giftItems: raw.giftItems ?? [],
         giftStockLimit: raw.giftStockLimit,
+        repeatable: raw.repeatable ?? false,
       };
     case "free-shipping":
       return { ...base, type: "free-shipping", minOrder: Number(raw.minOrderValue) || undefined, maxShippingDiscount: Number(raw.maxDiscount) || undefined };
@@ -253,7 +255,8 @@ export function formatPromotionSummary(p: Promotion): string {
       else if (p.triggerType === "buy-product") trigger = `Mua ${p.triggerProductName ?? "?"}`;
       else trigger = `Mua ${p.triggerValue} ${p.triggerProductName ?? "?"}`;
       const limit = p.giftStockLimit ? ` (tối đa ${p.giftStockLimit} lần tặng)` : "";
-      return `${trigger} tặng ${gifts}${limit}`;
+      const rep = p.repeatable ? " (lặp theo bội số)" : " (không lặp)";
+      return `${trigger} tặng ${gifts}${rep}${limit}`;
     }
     case "free-shipping": {
       const min = p.minOrder && p.minOrder > 0 ? ` cho đơn từ ${formatVND(p.minOrder)}` : "";

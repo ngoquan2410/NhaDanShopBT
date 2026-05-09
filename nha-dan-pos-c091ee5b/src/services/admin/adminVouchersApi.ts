@@ -4,6 +4,7 @@
  */
 
 import { adminFetchJson } from "@/services/auth/adminApi";
+import type { MultiSortRule } from "@/services/types";
 
 /** Row as returned by Spring `VoucherResponse` (camelCase JSON). */
 export type AdminVoucherRow = {
@@ -115,12 +116,35 @@ export function buildVoucherUpsertBody(input: AdminVoucherUpsertBody): Record<st
   };
 }
 
-export async function fetchAdminVoucherPage(page = 0, size = 200): Promise<AdminVoucherRow[]> {
-  const q = new URLSearchParams({ page: String(page), size: String(size), sort: "createdAt,desc" });
+export async function fetchAdminVoucherPage(params?: {
+  page?: number;
+  size?: number;
+  search?: string;
+  status?: "all" | "active" | "inactive";
+  sort?: MultiSortRule[] | { field: string; direction: "asc" | "desc" };
+}): Promise<{ items: AdminVoucherRow[]; total: number; totalPages: number; page: number; size: number }> {
+  const page = Math.max(0, params?.page ?? 0);
+  const size = Math.max(1, params?.size ?? 20);
+  const q = new URLSearchParams({ page: String(page), size: String(size) });
+  const sortRule = Array.isArray(params?.sort) ? params?.sort[0] : params?.sort;
+  if (sortRule?.field && sortRule.direction) {
+    q.set("sort", `${sortRule.field},${sortRule.direction}`);
+  } else {
+    q.set("sort", "createdAt,desc");
+  }
+  const normalizedSearch = params?.search?.trim();
+  if (normalizedSearch) q.set("search", normalizedSearch);
+  if (params?.status && params.status !== "all") q.set("status", params.status);
   const raw = await adminFetchJson<Record<string, unknown>>(`/api/vouchers?${q.toString()}`);
   const content = raw.content as unknown[] | undefined;
-  if (!Array.isArray(content)) return [];
-  return content.map((row) => parseAdminVoucherRow(row as Record<string, unknown>));
+  const items = Array.isArray(content) ? content.map((row) => parseAdminVoucherRow(row as Record<string, unknown>)) : [];
+  return {
+    items,
+    total: num(raw.totalElements, items.length),
+    totalPages: num(raw.totalPages, 1),
+    page: num(raw.number, page),
+    size: num(raw.size, size),
+  };
 }
 
 export async function createAdminVoucher(body: Record<string, unknown>): Promise<AdminVoucherRow> {

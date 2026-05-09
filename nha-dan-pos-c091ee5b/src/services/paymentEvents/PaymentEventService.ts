@@ -24,6 +24,14 @@ export interface PaymentEventService {
   listRecentPaymentEvents(limit?: number): Promise<PaymentEvent[]>;
   /** Events not yet linked to any order (admin worklist). */
   listUnmatchedPaymentEvents(limit?: number): Promise<PaymentEvent[]>;
+  /** Server-side paged unmatched worklist for admin table. */
+  listUnmatchedPaymentEventsPage(params?: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    sortField?: "txTime" | "createdAt" | "amount" | "status";
+    sortDir?: "asc" | "desc";
+  }): Promise<{ items: PaymentEvent[]; total: number; page: number; pageSize: number }>;
   /** Events whose matched/linked order code equals the given order code. */
   getPaymentEventsByOrderCode(code: string): Promise<PaymentEvent[]>;
   /** Manually link an event to an order. This must not confirm the order or

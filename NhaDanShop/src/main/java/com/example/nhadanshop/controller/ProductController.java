@@ -11,6 +11,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.*;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -40,7 +43,18 @@ public class ProductController {
             @RequestParam(required = false, defaultValue = "false") boolean includeInactive,
             @RequestParam(required = false) String productType,
             @PageableDefault(size = 50, sort = "name") Pageable pageable) {
+        if (includeInactive && !isRoleAdmin()) {
+            throw new AccessDeniedException("Không có quyền xem sản phẩm không hoạt động");
+        }
         return productService.search(search, categoryId, includeInactive, productType, pageable);
+    }
+
+    private boolean isRoleAdmin() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            return false;
+        }
+        return auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
     }
 
     /**

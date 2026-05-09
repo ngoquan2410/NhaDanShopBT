@@ -10,13 +10,23 @@ export function isAdminAppPath(pathname: string): boolean {
  */
 export function resolvePostLoginPath(next: string | null, roles: string[]): string {
   const isAdmin = roles.includes("ROLE_ADMIN");
+  const isStaff = roles.includes("ROLE_STAFF");
   if (!next) {
-    return isAdmin ? "/admin" : "/account";
+    if (isAdmin) return "/admin";
+    if (isStaff) return "/admin/pos";
+    return "/account";
   }
   try {
     const pathOnly = next.split("?")[0] ?? next;
-    if (isAdminAppPath(pathOnly) && !isAdmin) {
+    if (isAdminAppPath(pathOnly) && !isAdmin && !isStaff) {
       return "/account";
+    }
+    if (isAdminAppPath(pathOnly) && isStaff) {
+      const staffAllowed = pathOnly === "/admin"
+        || pathOnly.startsWith("/admin/pos")
+        || pathOnly.startsWith("/admin/invoices")
+        || pathOnly.startsWith("/admin/pending-orders");
+      if (!staffAllowed) return "/admin/pos";
     }
   } catch {
     /* ignore malformed next */

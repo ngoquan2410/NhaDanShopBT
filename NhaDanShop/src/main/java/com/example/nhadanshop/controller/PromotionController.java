@@ -26,8 +26,15 @@ public class PromotionController {
 
     /** GET /api/promotions?page=&size= — Danh sách tất cả khuyến mãi (có phân trang) */
     @GetMapping
-    public Page<PromotionResponse> list(@PageableDefault(size = 20) Pageable pageable) {
-        return promotionService.list(pageable);
+    public Page<PromotionResponse> list(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) Boolean includeArchived,
+            @PageableDefault(size = 20) Pageable pageable) {
+        return promotionService.list(page, size, search, status, type, includeArchived, pageable);
     }
 
     /** GET /api/promotions/active — Các khuyến mãi đang còn hiệu lực */

@@ -370,7 +370,7 @@ export function AddressAutocomplete({
 
   return (
     <div ref={containerRef} className={cn("relative", className)}>
-      <label className="text-xs font-semibold text-muted-foreground">Tìm địa chỉ / dán địa chỉ đầy đủ</label>
+      <label className="text-xs font-semibold text-muted-foreground">Tìm địa chỉ (có thể nhập thủ công)</label>
       <div className="relative mt-1.5">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <input

@@ -86,7 +86,13 @@ public class ProductService {
         Product p = findEntityById(id);
         if (p.getProductType() == Product.ProductType.SINGLE) {
             List<ProductVariant> vv = variantRepository.findByProductIdOrderByIsDefaultDescVariantCodeAsc(id);
-            return DtoMapper.toResponse(p, vv);
+            LocalDate today = LocalDate.now(businessClock);
+            List<Long> variantIds = vv.stream().map(ProductVariant::getId).toList();
+            Map<Long, Integer> sellableByVid = buildSellableStockMap(variantIds, today);
+            List<ProductVariantResponse> variantRows = vv.stream()
+                    .map(v -> DtoMapper.toResponse(v, sellableByVid.getOrDefault(v.getId(), 0)))
+                    .toList();
+            return DtoMapper.toResponseWithVariants(p, variantRows);
         }
         return DtoMapper.toResponse(p);
     }

@@ -68,6 +68,8 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        // POS allowlist: staff is only allowed to quote/create/read invoice surface
+        // required by checkout-at-counter flow. All management/admin APIs stay admin-only.
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
@@ -90,8 +92,21 @@ public class SecurityConfig {
                         // Image
                         .requestMatchers(HttpMethod.GET, "/api/images/status").permitAll()
                         .requestMatchers("/api/images/**").hasRole("ADMIN")
-                        // Store public
-                        .requestMatchers(HttpMethod.GET, "/api/products/**", "/api/categories/**").permitAll()
+                        // Product admin/inventory-like GETs (must never be public storefront)
+                        .requestMatchers(HttpMethod.GET, "/api/products/next-code").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/products/template").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/products/expiry-warnings").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/products/expired").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/products/low-stock-variants").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/products/*/variants")
+                        .hasAnyAuthority("ROLE_ADMIN", "ROLE_STAFF")
+                        .requestMatchers(HttpMethod.GET, "/api/products/variants/by-code/*")
+                        .hasAnyAuthority("ROLE_ADMIN", "ROLE_STAFF")
+                        // Storefront-safe public catalog endpoints only.
+                        .requestMatchers(HttpMethod.GET, "/api/products").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/products/category/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/products/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/categories/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/combos/active").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/vouchers/active").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/promotions/active").permitAll()
@@ -115,51 +130,59 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/vietqr/generate").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/webhooks/casso").permitAll()
                         .requestMatchers(HttpMethod.PUT, "/api/store/payment-settings").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.POST, "/api/products/check-availability").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/products/check-availability")
+                        .hasAnyAuthority("ROLE_ADMIN", "ROLE_STAFF")
                         // Admin
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/reports/**").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.GET, "/api/inventory/**").authenticated()
                         .requestMatchers("/api/inventory/**").hasRole("ADMIN")
                         // Receipts
-                        .requestMatchers(HttpMethod.GET, "/api/receipts/**").authenticated()
                         .requestMatchers("/api/receipts/**").hasRole("ADMIN")
-                        // Invoices — list/read for authenticated (admin UI + customer/session parity);
-                        // mutate (create POS/hủy): admin-only.
-                        .requestMatchers(HttpMethod.GET, "/api/invoices/**").authenticated()
+                        // POS surface (admin + staff)
+                        .requestMatchers(HttpMethod.GET, "/api/invoices/**").hasAnyAuthority("ROLE_ADMIN", "ROLE_STAFF")
                         .requestMatchers(HttpMethod.POST, "/api/sales/quote").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/invoices/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/invoices/**").hasAnyAuthority("ROLE_ADMIN", "ROLE_STAFF")
+                        // invoice mutation authority kept admin-only
                         .requestMatchers(HttpMethod.PATCH, "/api/invoices/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/invoices/**").hasRole("ADMIN")
-                        // POS traceability scan (Slice 6B): authenticated same as invoice create/read surface
-                        .requestMatchers(HttpMethod.GET, "/api/pos/scan/**").authenticated()
+                        // POS traceability scan
+                        .requestMatchers(HttpMethod.GET, "/api/pos/scan/**").hasAnyAuthority("ROLE_ADMIN", "ROLE_STAFF")
                         // Pending orders
                         .requestMatchers(HttpMethod.POST, "/api/pending-orders").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/pending-orders").hasAnyAuthority("ROLE_ADMIN", "ROLE_STAFF")
+                        .requestMatchers(HttpMethod.GET, "/api/pending-orders/counts").hasAnyAuthority("ROLE_ADMIN", "ROLE_STAFF")
                         .requestMatchers(HttpMethod.GET, "/api/pending-orders/by-code/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/pending-orders/*").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/pending-orders/*/mark-waiting-confirm").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/pending-orders/*/change-payment-method").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/pending-orders").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/pending-orders/*/confirm").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/pending-orders/*/cancel").hasRole("ADMIN")
                         .requestMatchers("/api/payment-events/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/promotions").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/promotions/*").hasRole("ADMIN")
                         // Products & categories CRUD
                         .requestMatchers(HttpMethod.POST, "/api/promotions").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/promotions/*").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/promotions/*/toggle").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/promotions/*").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/vouchers").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/vouchers/*").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/vouchers").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/vouchers/*").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/vouchers/*/toggle").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/vouchers/*").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/categories/**", "/api/products/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/categories/**", "/api/products/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/categories/**", "/api/products/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/categories/**", "/api/products/**").hasRole("ADMIN")
                         // Batches
-                        .requestMatchers(HttpMethod.GET, "/api/batches/**").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/batches/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/batches/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/batches/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/batches/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/batches/**").hasRole("ADMIN")
                         // Suppliers (Sprint 1 S1-3)
-                        .requestMatchers(HttpMethod.GET, "/api/suppliers/**").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/suppliers/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/suppliers/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/suppliers/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/suppliers/**").hasRole("ADMIN")

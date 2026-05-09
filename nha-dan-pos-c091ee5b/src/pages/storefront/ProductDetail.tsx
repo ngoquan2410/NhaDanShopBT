@@ -80,13 +80,14 @@ export default function StorefrontProductDetail() {
   const variant = product.variants.find((v) => v.id === variantId) || product.variants[0];
   const imageUrl = resolveProductImage(product, variant);
   const stockStatus = getStockStatus(variant.stock, variant.minStock);
+  const isOutOfStock = variant.stock <= 0;
   const related = allProducts
     .filter((p) => p.id !== product.id && p.categoryId === product.categoryId && p.active)
     .slice(0, 5);
 
   const addToCart = () => {
-    if (variant.stock === 0) {
-      toast.error("Sản phẩm đã hết hàng");
+    if (isOutOfStock) {
+      toast.error("Sản phẩm hiện không có tồn bán được.");
       return;
     }
     if (qty > variant.stock) {
@@ -112,7 +113,7 @@ export default function StorefrontProductDetail() {
   };
 
   const buyNow = () => {
-    if (variant.stock === 0) return toast.error("Sản phẩm đã hết hàng");
+    if (isOutOfStock) return toast.error("Sản phẩm hiện không có tồn bán được.");
     addToCart();
     navigate("/cart");
   };
@@ -254,33 +255,40 @@ export default function StorefrontProductDetail() {
             )}
 
             {/* Quantity */}
-            <div className="mt-5">
-              <p className="text-sm font-semibold mb-2.5">Số lượng</p>
-              <div className="flex items-center gap-3">
-                <QuantityStepper
-                  value={qty}
-                  onChange={setQty}
-                  min={1}
-                  max={Math.max(1, variant.stock)}
-                />
-                <span className="text-xs text-muted-foreground">
-                  Tối đa {variant.stock} {variant.sellUnit}
-                </span>
+            {!isOutOfStock && (
+              <div className="mt-5">
+                <p className="text-sm font-semibold mb-2.5">Số lượng</p>
+                <div className="flex items-center gap-3">
+                  <QuantityStepper
+                    value={qty}
+                    onChange={setQty}
+                    min={1}
+                    max={variant.stock}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    Tối đa {variant.stock} {variant.sellUnit}
+                  </span>
+                </div>
               </div>
-            </div>
+            )}
+            {isOutOfStock && (
+              <p className="mt-5 text-sm font-medium text-danger">
+                Sản phẩm hiện không có tồn bán được.
+              </p>
+            )}
 
             {/* Desktop CTAs */}
             <div className="mt-6 hidden md:grid grid-cols-2 gap-3">
               <button
                 onClick={addToCart}
-                disabled={variant.stock === 0}
+                disabled={isOutOfStock}
                 className="inline-flex items-center justify-center gap-2 h-12 border-2 border-foreground text-foreground rounded-full text-sm font-semibold hover:bg-foreground hover:text-background transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <ShoppingCart className="h-4 w-4" /> Thêm vào giỏ
               </button>
               <button
                 onClick={buyNow}
-                disabled={variant.stock === 0}
+                disabled={isOutOfStock}
                 className="inline-flex items-center justify-center gap-2 h-12 bg-storefront-accent text-white rounded-full text-sm font-semibold hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed sf-shadow-cta"
               >
                 Mua ngay
@@ -341,14 +349,14 @@ export default function StorefrontProductDetail() {
       <div className="md:hidden fixed bottom-14 left-0 right-0 z-20 bg-card/95 backdrop-blur border-t p-3 flex gap-2">
         <button
           onClick={addToCart}
-          disabled={variant.stock === 0}
+          disabled={isOutOfStock}
           className="flex-1 inline-flex items-center justify-center gap-1.5 h-11 border-2 border-foreground text-foreground rounded-full text-sm font-semibold disabled:opacity-50"
         >
           <ShoppingCart className="h-4 w-4" /> Thêm
         </button>
         <button
           onClick={buyNow}
-          disabled={variant.stock === 0}
+          disabled={isOutOfStock}
           className="flex-1 inline-flex items-center justify-center h-11 bg-storefront-accent text-white rounded-full text-sm font-semibold disabled:opacity-50"
         >
           Mua ngay

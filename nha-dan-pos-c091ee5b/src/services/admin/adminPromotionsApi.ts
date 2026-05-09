@@ -213,6 +213,7 @@ export function adminPromotionRowToUi(row: AdminPromotionRow): Promotion {
         triggerProductName: row.productNames[0],
         giftItems: [{ productId: row.getProductId?.toString() ?? "", productName: row.getProductName ?? "", quantity: row.getQty ?? 1 }],
         giftStockLimit: row.maxGiftApplications ?? row.maxBuyQty ?? undefined,
+        repeatable: row.repeatable ?? false,
       };
     case "free-shipping":
       return { ...base, type: "free-shipping", minOrder: row.minOrderValue || undefined, maxShippingDiscount: row.maxDiscount || undefined };
@@ -284,6 +285,7 @@ export function buildPromotionUpsertBody(promo: Promotion): Record<string, unkno
         minBuyQty: promo.triggerType === "buy-quantity" ? promo.triggerValue : promo.triggerType === "buy-product" ? 1 : null,
         maxGiftApplications: promo.giftStockLimit ?? null,
         maxBuyQty: null,
+        repeatable: promo.repeatable ?? false,
         getProductId: gift?.productId ? Number(gift.productId) : null,
         getQty: gift?.quantity ?? 1,
       };
@@ -291,10 +293,35 @@ export function buildPromotionUpsertBody(promo: Promotion): Record<string, unkno
   }
 }
 
-export async function fetchAdminPromotionPage(page = 0, size = 200): Promise<AdminPromotionRow[]> {
-  const q = new URLSearchParams({ page: String(page), size: String(size), sort: "createdAt,desc" });
+export async function fetchAdminPromotionPage(params?: {
+  page?: number;
+  size?: number;
+  search?: string;
+  status?: "active" | "inactive" | "archived";
+  type?: BackendPromotionType;
+  includeArchived?: boolean;
+  sort?: string;
+}): Promise<{ items: AdminPromotionRow[]; total: number; totalPages: number; page: number; size: number }> {
+  const page = Math.max(0, params?.page ?? 0);
+  const size = Math.max(1, params?.size ?? 20);
+  const q = new URLSearchParams({
+    page: String(page),
+    size: String(size),
+    sort: params?.sort ?? "createdAt,desc",
+  });
+  if (params?.search?.trim()) q.set("search", params.search.trim());
+  if (params?.status) q.set("status", params.status);
+  if (params?.type) q.set("type", params.type);
+  if (params?.includeArchived) q.set("includeArchived", "true");
   const raw = await adminFetchJson<SpringPage<Record<string, unknown>>>(`/api/promotions?${q.toString()}`);
-  return Array.isArray(raw.content) ? raw.content.map(parseAdminPromotionRow) : [];
+  const items = Array.isArray(raw.content) ? raw.content.map(parseAdminPromotionRow) : [];
+  return {
+    items,
+    total: Number(raw.totalElements ?? items.length),
+    totalPages: Number(raw.totalPages ?? 1),
+    page: Number(raw.number ?? page),
+    size: Number(raw.size ?? size),
+  };
 }
 
 export async function getAdminPromotion(id: number): Promise<AdminPromotionRow> {

@@ -21,8 +21,13 @@ public class VoucherController {
     private final VoucherService voucherService;
 
     @GetMapping
-    public Page<VoucherResponse> list(@PageableDefault(size = 50) Pageable pageable) {
-        return voucherService.list(pageable);
+    public Page<VoucherResponse> list(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String status,
+            @PageableDefault(size = 50) Pageable pageable) {
+        return voucherService.list(page, size, search, status, pageable);
     }
 
     /** Voucher còn hiệu lực — dùng cho chọn ưu đãi ở checkout */

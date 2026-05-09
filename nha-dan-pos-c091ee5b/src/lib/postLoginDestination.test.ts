@@ -25,6 +25,14 @@ describe("postLoginDestination", () => {
 
   it("defaults ROLE_ADMIN without next to /admin and ROLE_USER to /account", () => {
     expect(resolvePostLoginPath(null, ["ROLE_ADMIN"])).toBe("/admin");
+    expect(resolvePostLoginPath(null, ["ROLE_STAFF"])).toBe("/admin/pos");
     expect(resolvePostLoginPath(null, ["ROLE_USER"])).toBe("/account");
+  });
+
+  it("restricts ROLE_STAFF to POS admin routes", () => {
+    expect(resolvePostLoginPath("/admin/promotions", ["ROLE_STAFF"])).toBe("/admin/pos");
+    expect(resolvePostLoginPath("/admin/pos", ["ROLE_STAFF"])).toBe("/admin/pos");
+    expect(resolvePostLoginPath("/admin/invoices", ["ROLE_STAFF"])).toBe("/admin/invoices");
+    expect(resolvePostLoginPath("/admin/pending-orders", ["ROLE_STAFF"])).toBe("/admin/pending-orders");
   });
 });

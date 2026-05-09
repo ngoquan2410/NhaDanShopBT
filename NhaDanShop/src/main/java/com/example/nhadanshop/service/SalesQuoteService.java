@@ -225,6 +225,9 @@ public class SalesQuoteService {
             if (addr == null) {
                 throw new IllegalArgumentException("Storefront quote requires shippingAddress to compute shipping");
             }
+            if (isBlank(addr.street())) {
+                throw new IllegalArgumentException("Vui lòng nhập số nhà/tên đường.");
+            }
             ShippingQuoteResponse shipRes = shippingQuoteService.quote(new ShippingQuoteRequest(
                     addr, merchandiseSubtotal, null, null, null, null));
             if (!"quoted".equals(shipRes.status())) {
@@ -600,6 +603,10 @@ public class SalesQuoteService {
             return merchandiseSubtotal != null ? merchandiseSubtotal : BigDecimal.ZERO;
         }
         return eligibleSubtotalForQuote(promo, reqLines);
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     private List<SalesQuoteCapturedLineDto> buildBuyXGetYRewards(Promotion promo, List<SalesQuoteLineRequest> reqLines) {

@@ -55,8 +55,44 @@ export class BackendPaymentEventAdapter implements PaymentEventService {
   }
 
   async listUnmatchedPaymentEvents(limit = 200): Promise<PaymentEvent[]> {
-    const rows = await adminFetchJson<BackendPaymentEvent[]>(withLimit("/api/payment-events/unmatched", limit));
+    const pageSize = Math.max(1, Math.min(200, limit));
+    const data = await adminFetchJson<
+      BackendPaymentEvent[] | { content?: BackendPaymentEvent[] }
+    >(`/api/payment-events/unmatched?page=0&size=${encodeURIComponent(String(pageSize))}&sort=txTime,desc`);
+    const rows = Array.isArray(data) ? data : Array.isArray(data.content) ? data.content : [];
     return rows.map(toEvent);
+  }
+
+  async listUnmatchedPaymentEventsPage(params?: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    sortField?: "txTime" | "createdAt" | "amount" | "status";
+    sortDir?: "asc" | "desc";
+  }): Promise<{ items: PaymentEvent[]; total: number; page: number; pageSize: number }> {
+    const page = Math.max(1, params?.page ?? 1);
+    const pageSize = Math.max(1, Math.min(200, params?.pageSize ?? 50));
+    const sortField = params?.sortField ?? "txTime";
+    const sortDir = params?.sortDir ?? "desc";
+    const q = new URLSearchParams({
+      page: String(page - 1),
+      size: String(pageSize),
+      sort: `${sortField},${sortDir}`,
+    });
+    if (params?.search?.trim()) q.set("search", params.search.trim());
+    const data = await adminFetchJson<{
+      content?: BackendPaymentEvent[];
+      totalElements?: number;
+      number?: number;
+      size?: number;
+    }>(`/api/payment-events/unmatched?${q.toString()}`);
+    const items = (Array.isArray(data.content) ? data.content : []).map(toEvent);
+    return {
+      items,
+      total: Number(data.totalElements ?? items.length),
+      page: Number(data.number ?? page - 1) + 1,
+      pageSize: Number(data.size ?? pageSize),
+    };
   }
 
   async getPaymentEventsByOrderCode(code: string): Promise<PaymentEvent[]> {

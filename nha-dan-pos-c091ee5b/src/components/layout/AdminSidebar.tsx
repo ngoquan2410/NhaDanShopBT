@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { ADMIN_BADGES_REFRESH_EVENT } from "@/lib/adminBadges";
 import { paymentEvents, pendingOrders } from "@/services";
+import { useAdminAuth } from "@/lib/admin-auth";
 import {
   LayoutDashboard, FolderTree, Package, Layers, Factory, FileInput, Receipt,
   ShoppingCart, Clock, Tags, Users, Truck, ClipboardCheck,
@@ -72,6 +73,20 @@ const navGroups = [
   },
 ];
 
+export function filterNavGroupsForRole(isAdmin: boolean, isStaff: boolean) {
+  if (isStaff && !isAdmin) {
+    return navGroups
+      .filter((group) => group.label === "Bán hàng")
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) =>
+          ["/admin/pos", "/admin/invoices", "/admin/pending-orders"].includes(item.path),
+        ),
+      }));
+  }
+  return navGroups;
+}
+
 interface AdminSidebarProps {
   collapsed: boolean;
   onToggle: () => void;
@@ -81,6 +96,7 @@ interface AdminSidebarProps {
 
 export function AdminSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: AdminSidebarProps) {
   const location = useLocation();
+  const { isAdmin, isStaff } = useAdminAuth();
   const [unmatchedCount, setUnmatchedCount] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
 
@@ -139,7 +155,7 @@ export function AdminSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }:
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto scrollbar-thin py-2 px-2 space-y-4">
-        {navGroups.map((group) => (
+        {filterNavGroupsForRole(isAdmin, isStaff).map((group) => (
           <div key={group.label}>
             {!collapsed && (
               <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-muted">

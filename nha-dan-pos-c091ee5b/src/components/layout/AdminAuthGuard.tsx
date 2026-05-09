@@ -3,8 +3,9 @@ import type { ReactNode } from "react";
 import { useAdminAuth } from "@/lib/admin-auth";
 
 export function AdminAuthGuard({ children }: { children: ReactNode }) {
-  const { loading, session, isAdmin } = useAdminAuth();
+  const { loading, session, isAdmin, isStaff } = useAdminAuth();
   const location = useLocation();
+  const path = location.pathname;
 
   if (loading) {
     return (
@@ -18,8 +19,24 @@ export function AdminAuthGuard({ children }: { children: ReactNode }) {
     return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace state={{ from: location }} />;
   }
 
-  if (!isAdmin) {
+  if (!isAdmin && !isStaff) {
     return <Navigate to="/account" replace />;
+  }
+
+  if (isStaff) {
+    const allowedStaffPrefixes = [
+      "/admin/pos",
+      "/admin/invoices",
+      "/admin/pending-orders",
+      "/admin",
+    ];
+    const staffAllowed = allowedStaffPrefixes.some((prefix) => {
+      if (prefix === "/admin") return path === "/admin";
+      return path === prefix || path.startsWith(`${prefix}/`);
+    });
+    if (!staffAllowed) {
+      return <Navigate to="/admin/pos" replace />;
+    }
   }
 
   return <>{children}</>;

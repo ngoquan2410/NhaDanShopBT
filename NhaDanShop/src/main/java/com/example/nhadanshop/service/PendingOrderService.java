@@ -10,6 +10,9 @@ import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -27,6 +30,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.stream.Stream;
+import java.util.Locale;
+import jakarta.persistence.criteria.Predicate;
 
 @Service
 @RequiredArgsConstructor
@@ -52,6 +57,8 @@ public class PendingOrderService {
 
     private static final Set<String> ONLINE_PAYMENT_METHODS = Set.of(
             "bank_transfer", "momo", "zalopay", "cod", "cash_on_delivery");
+    private static final Set<String> PENDING_ORDER_SORT_WHITELIST = Set.of(
+            "createdAt", "totalAmount", "status", "paymentMethod", "customerName", "orderNo", "expiresAt");
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private final AtomicInteger orderSeq = new AtomicInteger(0);
     private volatile String orderLastDate = "";
@@ -85,6 +92,7 @@ public class PendingOrderService {
         if (req.pricingBreakdownSnapshot() == null) {
             throw new IllegalArgumentException("Thiếu pricingBreakdownSnapshot");
         }
+        validateCheckoutShippingAddress(req.shippingAddress());
 
         Long boundCustomerId = resolveAllowedCustomerBinding(req.customerId(), null);
         if (boundCustomerId != null) {
@@ -369,6 +377,47 @@ public class PendingOrderService {
     }
 
     @Transactional
+    public Page<PendingOrderResponse> listAdminPage(
+            Integer page,
+            Integer size,
+            String status,
+            String paymentMethod,
+            String search,
+            Pageable pageable) {
+        Pageable safePageable = sanitizePageable(page, size, pageable);
+        PendingOrder.Status statusEnum = parseStatus(status);
+        String normalizedPaymentMethod = normalizeBlank(paymentMethod);
+        String normalizedSearch = normalizeBlank(search);
+        return pendingOrderRepo
+                .findAll(buildAdminListSpec(statusEnum, normalizedPaymentMethod, normalizedSearch), safePageable)
+                .map(this::toResponse);
+    }
+
+    @Transactional
+    public PendingOrderCountsResponse countAdmin(String paymentMethod, String search) {
+        String normalizedPaymentMethod = normalizeBlank(paymentMethod);
+        String normalizedSearch = normalizeBlank(search);
+        long pendingPayment = pendingOrderRepo.count(
+                buildAdminListSpec(PendingOrder.Status.PENDING_PAYMENT, normalizedPaymentMethod, normalizedSearch));
+        long waitingConfirm = pendingOrderRepo.count(
+                buildAdminListSpec(PendingOrder.Status.WAITING_CONFIRM, normalizedPaymentMethod, normalizedSearch));
+        long paidAuto = pendingOrderRepo.count(
+                buildAdminListSpec(PendingOrder.Status.PAID_AUTO, normalizedPaymentMethod, normalizedSearch));
+        long confirmed = pendingOrderRepo.count(
+                buildAdminListSpec(PendingOrder.Status.CONFIRMED, normalizedPaymentMethod, normalizedSearch));
+        long cancelled = pendingOrderRepo.count(
+                buildAdminListSpec(PendingOrder.Status.CANCELLED, normalizedPaymentMethod, normalizedSearch));
+        return new PendingOrderCountsResponse(
+                pendingPayment + waitingConfirm + paidAuto + confirmed + cancelled,
+                pendingPayment,
+                waitingConfirm,
+                paidAuto,
+                confirmed,
+                cancelled
+        );
+    }
+
+    @Transactional
     public List<PendingOrderResponse> listAll() {
         return pendingOrderRepo.findAllByOrderByCreatedAtDesc()
                 .stream().map(this::toResponse).toList();
@@ -592,8 +641,9 @@ public class PendingOrderService {
         }
         boolean admin = auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
         if (admin) return requested;
-        boolean roleUser = auth.getAuthorities().stream().anyMatch(a -> "ROLE_USER".equals(a.getAuthority()));
-        if (!roleUser) return requested;
+        boolean customerRole = auth.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_USER".equals(a.getAuthority()) || "ROLE_CUSTOMER".equals(a.getAuthority()));
+        if (!customerRole) return requested;
         Customer own = accountService.ensureLinkedCustomer(auth.getName());
         if (requested != null && !requested.equals(own.getId())) {
             throw new IllegalArgumentException("Không thể tạo đơn cho customerId không thuộc tài khoản đăng nhập");
@@ -630,6 +680,15 @@ public class PendingOrderService {
 
     private BigDecimal nvl(BigDecimal value) {
         return value != null ? value : BigDecimal.ZERO;
+    }
+
+    private void validateCheckoutShippingAddress(ShippingAddressDto address) {
+        if (address == null) {
+            throw new IllegalArgumentException("Vui lòng nhập địa chỉ giao hàng.");
+        }
+        if (address.street() == null || address.street().trim().isEmpty()) {
+            throw new IllegalArgumentException("Vui lòng nhập số nhà/tên đường.");
+        }
     }
 
     private String writeJson(Object value) {
@@ -686,5 +745,68 @@ public class PendingOrderService {
         item.setLineVatBase(snap.lineVatBase());
         item.setLineVatAmount(snap.lineVatAmount());
         item.setCommercialAllocationVersion(snap.commercialAllocationVersion());
+    }
+
+    private PendingOrder.Status parseStatus(String raw) {
+        String normalized = normalizeBlank(raw);
+        if (normalized == null) {
+            return null;
+        }
+        String enumName = normalized.trim().toUpperCase(Locale.ROOT);
+        try {
+            return PendingOrder.Status.valueOf(enumName);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("status không hợp lệ: " + raw);
+        }
+    }
+
+    private Pageable sanitizePageable(Integer page, Integer size, Pageable pageable) {
+        int safePage = page != null ? Math.max(0, page) : Math.max(0, pageable.getPageNumber());
+        int requestedSize = size != null ? size : pageable.getPageSize();
+        int safeSize = Math.min(Math.max(1, requestedSize), 100);
+        Sort safeSort = Sort.unsorted();
+        for (Sort.Order order : pageable.getSort()) {
+            if (PENDING_ORDER_SORT_WHITELIST.contains(order.getProperty())) {
+                safeSort = safeSort.and(Sort.by(order));
+            }
+        }
+        if (safeSort.isUnsorted()) {
+            safeSort = Sort.by(Sort.Order.desc("createdAt"));
+        }
+        return PageRequest.of(safePage, safeSize, safeSort);
+    }
+
+    private String normalizeBlank(String input) {
+        if (input == null || input.isBlank()) {
+            return null;
+        }
+        return input.trim();
+    }
+
+    private Specification<PendingOrder> buildAdminListSpec(
+            PendingOrder.Status status,
+            String paymentMethod,
+            String search) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (status != null) {
+                predicates.add(cb.equal(root.get("status"), status));
+            }
+            if (paymentMethod != null) {
+                predicates.add(cb.equal(
+                        cb.upper(cb.coalesce(root.get("paymentMethod"), "")),
+                        paymentMethod.toUpperCase(Locale.ROOT)));
+            }
+            if (search != null) {
+                String likePattern = "%" + search.toUpperCase(Locale.ROOT) + "%";
+                predicates.add(cb.or(
+                        cb.like(cb.upper(cb.coalesce(root.get("orderNo"), "")), likePattern),
+                        cb.like(cb.upper(cb.coalesce(root.get("customerName"), "")), likePattern),
+                        cb.like(cb.upper(cb.coalesce(root.get("customerPhone"), "")), likePattern),
+                        cb.like(cb.upper(cb.coalesce(root.get("paymentReference"), "")), likePattern)
+                ));
+            }
+            return cb.and(predicates.toArray(Predicate[]::new));
+        };
     }
 }

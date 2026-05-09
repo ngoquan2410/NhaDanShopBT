@@ -60,6 +60,18 @@ export class LocalPendingOrderAdapter implements PendingOrderService {
     };
   }
 
+  async counts(): Promise<Record<string, number>> {
+    const all = load();
+    return {
+      all: all.length,
+      pending_payment: all.filter((o) => o.status === "pending_payment").length,
+      waiting_confirm: all.filter((o) => o.status === "waiting_confirm").length,
+      paid_auto: all.filter((o) => o.status === "paid_auto").length,
+      confirmed: all.filter((o) => o.status === "confirmed").length,
+      cancelled: all.filter((o) => o.status === "cancelled").length,
+    };
+  }
+
   async get(id: string): Promise<PendingOrder | null> {
     return load().find((o) => o.id === id) ?? null;
   }

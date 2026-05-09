@@ -16,7 +16,6 @@ import {
 } from "@/lib/promotions";
 import { PromotionFormShell } from "@/components/promotions/PromotionFormShell";
 import { TablePagination } from "@/components/shared/TablePagination";
-import { useTableControls } from "@/hooks/useTableControls";
 import { Plus, Tags, Calendar, Pencil, Trash2, Power } from "lucide-react";
 import { toast } from "sonner";
 import { categories as categoryService, products as productService, promotionsCrud } from "@/services";
@@ -38,6 +37,9 @@ export default function AdminPromotions() {
   const [filterType, setFilterType] = useState<PromotionType | null>(null);
   const [editing, setEditing] = useState<Promotion | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
   const { data: categoryData } = useService(() => categoryService.list({ active: false }), []);
   const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 200 }), []);
   const categories = categoryData?.items ?? [];
@@ -49,10 +51,17 @@ export default function AdminPromotions() {
   useEffect(() => {
     let cancel = false;
     setLoading(true);
-    promotionsCrud.list({ page: 1, pageSize: 200 })
+    promotionsCrud.list({
+      page,
+      pageSize,
+      query: search || undefined,
+      active: filterStatus === null ? undefined : filterStatus === "active",
+      kinds: filterType ? [filterType] : undefined,
+    })
       .then((page) => {
         if (cancel) return;
         setPromoList(page.items);
+        setTotal(page.total);
         setApiError(null);
       })
       .catch((err) => {
@@ -65,21 +74,7 @@ export default function AdminPromotions() {
         if (!cancel) setLoading(false);
       });
     return () => { cancel = true; };
-  }, []);
-
-  const filtered = promoList.filter((p) => {
-    if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (filterStatus === "active" && !p.active) return false;
-    if (filterStatus === "inactive" && p.active) return false;
-    if (filterType && p.type !== filterType) return false;
-    return true;
-  });
-
-  const tc = useTableControls<typeof filtered[number], "name" | "type" | "start">({
-    data: filtered, pageSize: 20, initialSort: { key: "start", dir: "desc" },
-    sortAccessors: { name: (p) => p.name, type: (p) => p.type, start: (p) => new Date(p.startDate) },
-    resetToken: `${search}|${filterStatus}|${filterType}`,
-  });
+  }, [page, pageSize, search, filterStatus, filterType]);
 
   const handleSave = async (promo: Promotion) => {
     try {
@@ -151,22 +146,25 @@ export default function AdminPromotions() {
 
       <DataTableToolbar
         search={search}
-        onSearchChange={setSearch}
+        onSearchChange={(value) => {
+          setPage(1);
+          setSearch(value);
+        }}
         searchPlaceholder="Tìm khuyến mãi..."
         filters={
           <>
-            <FilterChip label="Tất cả" active={!filterStatus && !filterType} onClick={() => { setFilterStatus(null); setFilterType(null); }} />
-            <FilterChip label="Đang chạy" active={filterStatus === "active"} onClick={() => setFilterStatus(filterStatus === "active" ? null : "active")} />
-            <FilterChip label="Tạm dừng" active={filterStatus === "inactive"} onClick={() => setFilterStatus(filterStatus === "inactive" ? null : "inactive")} />
+            <FilterChip label="Tất cả" active={!filterStatus && !filterType} onClick={() => { setPage(1); setFilterStatus(null); setFilterType(null); }} />
+            <FilterChip label="Đang chạy" active={filterStatus === "active"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "active" ? null : "active"); }} />
+            <FilterChip label="Tạm dừng" active={filterStatus === "inactive"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "inactive" ? null : "inactive"); }} />
             <span className="w-px h-5 bg-border mx-1" />
             {(Object.entries(PROMOTION_TYPE_LABELS) as [PromotionType, string][]).map(([k, label]) => (
-              <FilterChip key={k} label={label} active={filterType === k} onClick={() => setFilterType(filterType === k ? null : k)} />
+              <FilterChip key={k} label={label} active={filterType === k} onClick={() => { setPage(1); setFilterType(filterType === k ? null : k); }} />
             ))}
           </>
         }
       />
 
-      {filtered.length === 0 ? (
+      {promoList.length === 0 ? (
         <EmptyState
           icon={Tags}
           title="Chưa có khuyến mãi"
@@ -182,7 +180,7 @@ export default function AdminPromotions() {
         />
       ) : (
         <div className="space-y-2">
-          {tc.pageRows.map((p) => {
+          {promoList.map((p) => {
             const summary = formatPromotionSummary(p);
             const scopeText = formatScope(p, { categoryNames, productNames });
             return (
@@ -222,7 +220,19 @@ export default function AdminPromotions() {
               </div>
             );
           })}
-          <TablePagination page={tc.page} totalPages={tc.totalPages} total={tc.total} rangeStart={tc.rangeStart} rangeEnd={tc.rangeEnd} pageSize={tc.pageSize} onPageChange={tc.setPage} onPageSizeChange={tc.setPageSize} />
+          <TablePagination
+            page={page}
+            totalPages={Math.max(1, Math.ceil(total / pageSize))}
+            total={total}
+            rangeStart={total === 0 ? 0 : (page - 1) * pageSize + 1}
+            rangeEnd={Math.min(page * pageSize, total)}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={(value) => {
+              setPage(1);
+              setPageSize(value);
+            }}
+          />
         </div>
       )}
 

@@ -50,6 +50,33 @@ export class CloudPaymentEventAdapter implements PaymentEventService {
     return this.listUnmatched(limit);
   }
 
+  async listUnmatchedPaymentEventsPage(params?: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    sortField?: "txTime" | "createdAt" | "amount" | "status";
+    sortDir?: "asc" | "desc";
+  }): Promise<{ items: PaymentEvent[]; total: number; page: number; pageSize: number }> {
+    const page = Math.max(1, params?.page ?? 1);
+    const pageSize = Math.max(1, Math.min(200, params?.pageSize ?? 50));
+    const search = params?.search?.trim().toLowerCase();
+    const all = await this.listUnmatched(500);
+    const filtered = search
+      ? all.filter((e) =>
+          [e.providerTxId, e.transferContent, e.matchedCode, e.linkedOrderCode, e.bankAccount, e.bankSubAcc]
+            .filter(Boolean)
+            .some((v) => String(v).toLowerCase().includes(search)),
+        )
+      : all;
+    const start = (page - 1) * pageSize;
+    return {
+      items: filtered.slice(start, start + pageSize),
+      total: filtered.length,
+      page,
+      pageSize,
+    };
+  }
+
   async getPaymentEventsByOrderCode(code: string): Promise<PaymentEvent[]> {
     return this.findByOrderCode(code);
   }

@@ -14,7 +14,10 @@ import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.crypto.codec.Hex;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -33,6 +36,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import jakarta.persistence.criteria.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -71,6 +75,11 @@ public class PaymentEventService {
                 .stream()
                 .map(this::toResponse)
                 .toList();
+    }
+
+    @Transactional
+    public Page<PaymentEventResponse> listUnmatchedPage(String search, Pageable pageable) {
+        return paymentEventRepository.findAll(buildUnmatchedSpec(normalizeBlank(search)), pageable).map(this::toResponse);
     }
 
     @Transactional
@@ -385,6 +394,33 @@ public class PaymentEventService {
     private int sanitizeLimit(int limit, int fallback) {
         if (limit <= 0) return fallback;
         return Math.min(limit, 500);
+    }
+
+    private String normalizeBlank(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private Specification<PaymentEvent> buildUnmatchedSpec(String search) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.isNull(root.get("linkedPendingOrder")));
+            predicates.add(cb.notEqual(root.get("status"), PaymentEvent.Status.IGNORED));
+            if (search != null) {
+                String likePattern = "%" + search.toUpperCase(Locale.ROOT) + "%";
+                predicates.add(cb.or(
+                        cb.like(cb.upper(cb.coalesce(root.get("providerTxId"), "")), likePattern),
+                        cb.like(cb.upper(cb.coalesce(root.get("transferContent"), "")), likePattern),
+                        cb.like(cb.upper(cb.coalesce(root.get("matchedCode"), "")), likePattern),
+                        cb.like(cb.upper(cb.coalesce(root.get("linkedOrderCode"), "")), likePattern),
+                        cb.like(cb.upper(cb.coalesce(root.get("bankAccount"), "")), likePattern),
+                        cb.like(cb.upper(cb.coalesce(root.get("bankSubAcc"), "")), likePattern)
+                ));
+            }
+            return cb.and(predicates.toArray(Predicate[]::new));
+        };
     }
 
     private String extractOrderCode(String transferContent) {

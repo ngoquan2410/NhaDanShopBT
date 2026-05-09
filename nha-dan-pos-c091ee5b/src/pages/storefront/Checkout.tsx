@@ -321,6 +321,13 @@ export default function CheckoutPage() {
       setManualPromotionInvalidReason(null);
       return;
     }
+    if (!shippingAddress.street || shippingAddress.street.trim().length === 0) {
+      setBeQuote(null);
+      setBeQuoteErr("Vui lòng nhập số nhà/tên đường.");
+      setBeQuoteLoading(false);
+      setManualPromotionInvalidReason(null);
+      return;
+    }
     setBeQuoteLoading(true);
     setBeQuoteErr(null);
     const handle = window.setTimeout(() => {
@@ -407,14 +414,15 @@ export default function CheckoutPage() {
     selectedPromotionMode === "manual"
       ? manualSelectedPromo
       : bestPromo;
-  const previewPromoIsFreeShipping = effectivePreviewPromo?.type === "free_shipping";
+  const appliedPreviewPromo = effectivePreviewPromo?.eligible ? effectivePreviewPromo : null;
+  const previewPromoIsFreeShipping = appliedPreviewPromo?.type === "free_shipping";
   const promoDiscountPreview =
     previewPromoIsFreeShipping
       ? 0
-      : (effectivePreviewPromo?.discountAmount ?? 0);
+      : (appliedPreviewPromo?.discountAmount ?? 0);
   const promoShippingDiscountPreview =
     previewPromoIsFreeShipping && quote.status === "quoted"
-      ? Math.min(effectivePreviewPromo?.shippingDiscountAmount ?? 0, baseShippingFee)
+      ? Math.min(appliedPreviewPromo?.shippingDiscountAmount ?? 0, baseShippingFee)
       : 0;
   const shippingFeePreview = Math.max(0, baseShippingFee - promoShippingDiscountPreview);
   const totalPreview = Math.max(0, subtotal - promoDiscountPreview + shippingFeePreview);
@@ -432,13 +440,11 @@ export default function CheckoutPage() {
   const rowShipPayable = Math.max(0, rowShipFee - rowShipDisc);
   const displayTotal = pb ? pb.total : totalPreview;
   const previewPromotionLabel =
-    selectedPromotionMode === "manual"
-      ? (manualSelectedPromo?.name ?? null)
-      : (bestPromo?.name ?? null);
+    appliedPreviewPromo?.name ?? null;
   const quotedPromotionLabel =
     beQuote?.effectivePromotionName
     ?? null;
-  const previewGiftLines = effectivePreviewPromo?.giftLines ?? [];
+  const previewGiftLines = appliedPreviewPromo?.giftLines ?? [];
   const giftSummaryLines = buildCheckoutGiftSummaryLines(
     serverOk,
     beQuote?.rewardLines,
@@ -447,10 +453,11 @@ export default function CheckoutPage() {
   );
   const effectiveGiftType = serverOk
     ? (beQuote?.effectivePromotionType ?? beQuote?.promotionSnapshot?.type ?? null)
-    : (effectivePreviewPromo?.type ?? null);
+    : (appliedPreviewPromo?.type ?? null);
   const shouldShowGiftSummary = isGiftPromotionType(effectiveGiftType);
 
   const phoneOk = /^[\d+]{9,12}$/.test(phone.replace(/\s/g, ""));
+  const streetMissing = street.trim().length === 0;
   // Block submit if GHN couldn't map the ward — the address is ambiguous and
   // the local zone fallback may underprice it. User must pick a different ward.
   const addressUnmapped = quote.usedFallback && quote.fallbackReason === "address_unmapped";
@@ -459,6 +466,7 @@ export default function CheckoutPage() {
     cartItems.every((i) => i.catalogSource === "backend" && i.schemaVersion === 2 && /^\d+$/.test(String(i.productId)) && /^\d+$/.test(String(i.variantId))) &&
     name.trim().length > 0 &&
     phoneOk &&
+    !streetMissing &&
     quote.status === "quoted" &&
     !addressUnmapped &&
     !submitting &&
@@ -488,6 +496,10 @@ export default function CheckoutPage() {
   const submit = async () => {
     if (!name.trim() || !phoneOk) {
       toast.error("Vui lòng nhập đầy đủ họ tên và SĐT hợp lệ");
+      return;
+    }
+    if (streetMissing) {
+      toast.error("Vui lòng nhập số nhà/tên đường.");
       return;
     }
     if (beQuoteErr && appliedVoucherCode) {
@@ -708,6 +720,9 @@ export default function CheckoutPage() {
               )}
               <div className="mt-3.5">
                 <Field label="Số nhà, đường" value={street} onChange={setStreet} placeholder="VD: Tên tiệm, số nhà, tên đường" />
+                {streetMissing && (
+                  <p className="mt-1 text-[11px] text-danger">Vui lòng nhập số nhà/tên đường.</p>
+                )}
                 {originalAddressInput.trim().length > 0 && street.trim().length > 0 && street.trim().length < 6 && (
                   <p className="mt-1 text-[11px] text-warning-foreground">
                     Kiểm tra lại Số nhà, đường để shipper tìm đúng địa chỉ.
@@ -877,7 +892,7 @@ export default function CheckoutPage() {
                     dataTestId="checkout-promotion-discount"
                   />
                 )}
-                {!serverOk && effectivePreviewPromo?.type === "free_shipping" && (
+                {!serverOk && appliedPreviewPromo?.type === "free_shipping" && (
                   <p className="rounded-lg bg-info-soft px-3 py-2 text-[11px] text-info">
                     Miễn phí ship sẽ áp dụng sau khi nhập địa chỉ.
                   </p>

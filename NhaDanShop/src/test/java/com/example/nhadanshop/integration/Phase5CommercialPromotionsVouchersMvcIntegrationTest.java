@@ -199,6 +199,24 @@ class Phase5CommercialPromotionsVouchersMvcIntegrationTest {
         long comboId = combo.get("id").asLong();
         long comboVarId = variantRepository.findByProductIdAndIsDefaultTrue(comboId).orElseThrow().getId();
 
+        String comboReceiptBody = """
+                {
+                  "supplierName": "NCC-P5-COMBO",
+                  "shippingFee": 0,
+                  "vatPercent": 0,
+                  "comboItems": [],
+                  "items": [
+                    {"productId": %d, "quantity": 20, "unitCost": 1000, "discountPercent": 0, "importUnit": "cai", "piecesOverride": 1, "variantId": %d, "expiryDateOverride": "2030-12-31"}
+                  ],
+                  "receiptDate": "2026-04-05T10:00:00"
+                }
+                """.formatted(comboId, comboVarId);
+        mockMvc.perform(post("/api/receipts")
+                        .header("Authorization", "Bearer " + tok)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(comboReceiptBody))
+                .andExpect(status().isCreated());
+
         String quoteBody = """
                 {
                   "source": "pos",

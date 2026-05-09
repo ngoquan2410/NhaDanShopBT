@@ -8,7 +8,10 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { SortableTh } from "@/components/shared/SortableTh";
 import { formatVND } from "@/lib/format";
+import { TablePagination } from "@/components/shared/TablePagination";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { toast } from "sonner";
 import type { AdminVoucherRow } from "@/services/admin/adminVouchersApi";
 import {
@@ -22,6 +25,8 @@ import {
   toggleAdminVoucherActive,
   updateAdminVoucher,
 } from "@/services/admin/adminVouchersApi";
+import type { SortDirection } from "@/services/types";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type Draft = {
   code: string;
@@ -133,6 +138,16 @@ export default function VouchersPage() {
   const [rows, setRows] = useState<AdminVoucherRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const debouncedSearch = useDebouncedValue(searchInput, 350);
+  const [status, setStatus] = useState<"all" | "active" | "inactive">("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [sort, setSort] = useState<{ field: string; direction: SortDirection } | null>({
+    field: "createdAt",
+    direction: "desc",
+  });
 
   const [editing, setEditing] = useState<AdminVoucherRow | null>(null);
   const [open, setOpen] = useState(false);
@@ -145,14 +160,30 @@ export default function VouchersPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const data = await fetchAdminVoucherPage(0, 200);
-      setRows(data);
+      const data = await fetchAdminVoucherPage({
+        page: page - 1,
+        size: pageSize,
+        search: debouncedSearch || undefined,
+        status,
+        sort: sort ? [sort] : undefined,
+      });
+      setRows(data.items);
+      setTotal(data.total);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Không tải được danh sách voucher từ backend");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [debouncedSearch, page, pageSize, sort, status]);
+  const toggleSort = (field: string) => {
+    setPage(1);
+    setSort((prev) => {
+      if (!prev || prev.field !== field) return { field, direction: "asc" };
+      if (prev.direction === "asc") return { field, direction: "desc" };
+      return { field: "createdAt", direction: "desc" };
+    });
+  };
+
 
   useEffect(() => {
     void refresh();
@@ -234,7 +265,11 @@ export default function VouchersPage() {
       await deleteAdminVoucher(confirmDelete.id);
       toast.success(`Đã xử lý xóa ${confirmDelete.code} (mã đã dùng trước đây có thể được lưu trữ thay vì xóa hẳn)`);
       setConfirmDelete(null);
-      await refresh();
+      if (rows.length === 1 && page > 1) {
+        setPage((p) => Math.max(1, p - 1));
+      } else {
+        await refresh();
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Không xóa được trên backend");
     } finally {
@@ -262,6 +297,31 @@ export default function VouchersPage() {
         description="Quản lý mã trên backend — đồng bộ với thanh toán / quote Slice 6C"
         actions={
           <div className="flex items-center gap-2">
+            <Input
+              value={searchInput}
+              onChange={(e) => {
+                setPage(1);
+                setSearchInput(e.target.value);
+              }}
+              placeholder="Tìm mã/code hoặc mô tả voucher..."
+              className="w-72"
+            />
+            <Select
+              value={status}
+              onValueChange={(next) => {
+                setPage(1);
+                setStatus(next as "all" | "active" | "inactive");
+              }}
+            >
+              <SelectTrigger className="w-[160px] h-9 text-xs">
+                <SelectValue placeholder="Tất cả trạng thái" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tất cả</SelectItem>
+                <SelectItem value="active">Đang dùng</SelectItem>
+                <SelectItem value="inactive">Tạm tắt</SelectItem>
+              </SelectContent>
+            </Select>
             <button
               type="button"
               onClick={() => void refresh()}
@@ -304,12 +364,38 @@ export default function VouchersPage() {
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
               <tr>
-                <th className="text-left px-3 py-2 font-semibold">Mã</th>
+                <SortableTh
+                  label="Mã"
+                  sortKey="code"
+                  sort={{ key: sort?.field ?? null, dir: sort?.direction ?? "desc" }}
+                  onSort={toggleSort}
+                  className="text-xs uppercase font-semibold"
+                />
                 <th className="text-left px-3 py-2 font-semibold">Mô tả</th>
-                <th className="text-right px-3 py-2 font-semibold">Đơn tối thiểu</th>
+                <SortableTh
+                  label="Đơn tối thiểu"
+                  sortKey="minSubtotal"
+                  sort={{ key: sort?.field ?? null, dir: sort?.direction ?? "desc" }}
+                  onSort={toggleSort}
+                  align="right"
+                  className="text-xs uppercase font-semibold"
+                />
                 <th className="text-right px-3 py-2 font-semibold">Giảm / Ship</th>
-                <th className="text-left px-3 py-2 font-semibold">Hiệu lực</th>
-                <th className="text-center px-3 py-2 font-semibold">Trạng thái</th>
+                <SortableTh
+                  label="Hiệu lực"
+                  sortKey="startAt"
+                  sort={{ key: sort?.field ?? null, dir: sort?.direction ?? "desc" }}
+                  onSort={toggleSort}
+                  className="text-xs uppercase font-semibold"
+                />
+                <SortableTh
+                  label="Trạng thái"
+                  sortKey="active"
+                  sort={{ key: sort?.field ?? null, dir: sort?.direction ?? "desc" }}
+                  onSort={toggleSort}
+                  align="center"
+                  className="text-xs uppercase font-semibold"
+                />
                 <th className="text-right px-3 py-2 font-semibold w-1">Hành động</th>
               </tr>
             </thead>
@@ -378,6 +464,19 @@ export default function VouchersPage() {
           </table>
         </div>
       ) : null}
+      <TablePagination
+        page={page}
+        totalPages={Math.max(1, Math.ceil(total / pageSize))}
+        total={total}
+        rangeStart={total === 0 ? 0 : (page - 1) * pageSize + 1}
+        rangeEnd={Math.min(page * pageSize, total)}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={(value) => {
+          setPage(1);
+          setPageSize(value);
+        }}
+      />
 
       <FormDrawer
         open={open}

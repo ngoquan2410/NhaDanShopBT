@@ -11,7 +11,9 @@ import com.example.nhadanshop.repository.*;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -45,6 +47,8 @@ public class ProductionOrderService {
     private final InvoiceNumberGenerator invoiceNumberGenerator;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private static final Set<String> ORDER_SORT_WHITELIST = Set.of(
+            "id", "orderNo", "status", "outputQty", "createdAt");
 
     @Transactional(readOnly = true)
     public ProductionPreviewResponse preview(ProductionPreviewRequest req) {
@@ -213,16 +217,43 @@ public class ProductionOrderService {
             String query,
             LocalDate dateFrom,
             LocalDate dateTo) {
+        Pageable safePageable = sanitizePageable(pg);
         String q = StringUtils.hasText(query) ? query.trim() : null;
-        String st = StringUtils.hasText(status) ? status.trim() : null;
+        String st = normalizeStatus(status);
         LocalDateTime fromDt = dateFrom != null ? dateFrom.atStartOfDay() : LocalDateTime.of(2000, 1, 1, 0, 0);
         LocalDateTime toDt = dateTo != null ? dateTo.atTime(LocalTime.MAX) : LocalDateTime.of(2100, 12, 31, 23, 59, 59);
         if (q == null) {
-            return orderRepo.searchOrdersWithoutText(st, recipeId, variantId, fromDt, toDt, pg)
+            return orderRepo.searchOrdersWithoutText(st, recipeId, variantId, fromDt, toDt, safePageable)
                     .map(o -> mapOrder(o, false));
         }
-        return orderRepo.searchOrdersWithText(st, recipeId, variantId, fromDt, toDt, q, pg)
+        return orderRepo.searchOrdersWithText(st, recipeId, variantId, fromDt, toDt, q, safePageable)
                 .map(o -> mapOrder(o, false));
+    }
+
+    private String normalizeStatus(String status) {
+        if (!StringUtils.hasText(status)) {
+            return null;
+        }
+        String normalized = status.trim().toLowerCase(Locale.ROOT);
+        if (!ProductionOrder.STATUS_COMPLETED.equals(normalized) && !ProductionOrder.STATUS_VOIDED.equals(normalized)) {
+            throw new IllegalArgumentException("status không hợp lệ: " + status);
+        }
+        return normalized;
+    }
+
+    private Pageable sanitizePageable(Pageable pageable) {
+        int page = Math.max(0, pageable.getPageNumber());
+        int size = Math.min(Math.max(1, pageable.getPageSize()), 100);
+        Sort sort = Sort.unsorted();
+        for (Sort.Order order : pageable.getSort()) {
+            if (ORDER_SORT_WHITELIST.contains(order.getProperty())) {
+                sort = sort.and(Sort.by(order));
+            }
+        }
+        if (sort.isUnsorted()) {
+            sort = Sort.by(Sort.Order.desc("createdAt"));
+        }
+        return PageRequest.of(page, size, sort);
     }
 
     /** Working pool for production FEFO simulation (remaining qty mutated). */

@@ -190,53 +190,57 @@ export class CloudPendingOrderAdapter implements PendingOrderService {
 
   async list(params?: PendingOrderListParams): Promise<PagedResult<PendingOrder>> {
     if (isTestEnv) return this.local.list(params);
-
-    const all: BackendPendingOrder[] = [];
-    let pageIdx = 0;
-    const chunk = 100;
-    for (;;) {
-      const url = `${API_BASE}?page=${pageIdx}&size=${chunk}&sort=createdAt,desc`;
-      const data = await adminFetchJson<{
-        content?: BackendPendingOrder[];
-        last?: boolean;
-        totalPages?: number;
-      }>(url);
-      const batch = Array.isArray(data.content) ? data.content : [];
-      if (batch.length === 0) break;
-      all.push(...batch);
-      if (data.last === true) break;
-      if (batch.length < chunk) break;
-      pageIdx += 1;
-      if (pageIdx > 200) break;
-    }
-
-    let items = all.map(backendToOrder);
-
-    if (params?.status) {
-      items = items.filter((item) => item.status === params.status);
-    }
-
-    if (params?.query?.trim()) {
-      const q = params.query.trim().toLowerCase();
-      items = items.filter((item) =>
-        [item.code, item.customerName, item.customerPhone]
-          .filter(Boolean)
-          .some((value) => String(value).toLowerCase().includes(q)),
-      );
-    }
-
-    items = items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-
-    const page = params?.page ?? 1;
-    const pageSize = params?.pageSize ?? 50;
-    const from = (page - 1) * pageSize;
-    const paged = items.slice(from, from + pageSize);
+    const page = Math.max(1, params?.page ?? 1);
+    const pageSize = Math.min(100, Math.max(1, params?.pageSize ?? 50));
+    const sortRule = params?.sort?.[0];
+    const sortField = sortRule?.field?.trim() ? sortRule.field : "createdAt";
+    const sortDir = sortRule?.direction === "asc" ? "asc" : "desc";
+    const search = params?.query?.trim();
+    const query = new URLSearchParams();
+    query.set("page", String(page - 1));
+    query.set("size", String(pageSize));
+    query.set("sort", `${sortField},${sortDir}`);
+    if (params?.status) query.set("status", params.status);
+    const paymentMethod = (params?.filters?.paymentMethod as string | undefined)?.trim();
+    if (paymentMethod) query.set("paymentMethod", paymentMethod);
+    if (search) query.set("search", search);
+    const data = await adminFetchJson<{
+      content?: BackendPendingOrder[];
+      totalElements?: number;
+      number?: number;
+      size?: number;
+    }>(`${API_BASE}?${query.toString()}`);
+    const items = (Array.isArray(data.content) ? data.content : []).map(backendToOrder);
 
     return {
-      items: paged,
-      total: items.length,
-      page,
-      pageSize,
+      items,
+      total: Number(data.totalElements ?? items.length),
+      page: Number(data.number ?? page - 1) + 1,
+      pageSize: Number(data.size ?? pageSize),
+    };
+  }
+
+  async counts(params?: { paymentMethod?: string; search?: string }): Promise<Record<string, number>> {
+    if (isTestEnv) return this.local.counts(params);
+    const query = new URLSearchParams();
+    const paymentMethod = params?.paymentMethod?.trim();
+    if (paymentMethod) query.set("paymentMethod", paymentMethod);
+    if (params?.search?.trim()) query.set("search", params.search.trim());
+    const response = await adminFetchJson<{
+      all?: number;
+      pendingPayment?: number;
+      waitingConfirm?: number;
+      paidAuto?: number;
+      confirmed?: number;
+      cancelled?: number;
+    }>(`${API_BASE}/counts?${query.toString()}`);
+    return {
+      all: Number(response.all ?? 0),
+      pending_payment: Number(response.pendingPayment ?? 0),
+      waiting_confirm: Number(response.waitingConfirm ?? 0),
+      paid_auto: Number(response.paidAuto ?? 0),
+      confirmed: Number(response.confirmed ?? 0),
+      cancelled: Number(response.cancelled ?? 0),
     };
   }
 

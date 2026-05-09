@@ -26,6 +26,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Link } from "react-router-dom";
 import { dispatchAdminBadgesRefresh } from "@/lib/adminBadges";
+import { TablePagination } from "@/components/shared/TablePagination";
 
 type TabId = "unmatched" | "matched" | "ignored";
 
@@ -40,18 +41,29 @@ export default function UnmatchedPaymentsPage() {
   const [unmatched, setUnmatched] = useState<PaymentEvent[]>([]);
   const [matched, setMatched] = useState<PaymentEvent[]>([]);
   const [ignored, setIgnored] = useState<PaymentEvent[]>([]);
+  const [unmatchedTotal, setUnmatchedTotal] = useState(0);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [linking, setLinking] = useState<PaymentEvent | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [u, recent, ig] = await Promise.all([
-        paymentEvents.listUnmatched(200),
+      const [uPage, recent, ig] = await Promise.all([
+        paymentEvents.listUnmatchedPaymentEventsPage({
+          page,
+          pageSize,
+          search,
+          sortField: "txTime",
+          sortDir: "desc",
+        }),
         paymentEvents.listRecent(100),
         paymentEvents.listIgnored(100),
       ]);
-      setUnmatched(u);
+      setUnmatched(uPage.items);
+      setUnmatchedTotal(uPage.total);
       // "matched" tab = anything already linked to an order, excluding ignored
       setMatched(
         recent.filter(
@@ -66,7 +78,7 @@ export default function UnmatchedPaymentsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize, search]);
 
   // Near-real-time polling keeps the worklist current without browser realtime channels.
   useEffect(() => {
@@ -87,7 +99,7 @@ export default function UnmatchedPaymentsPage() {
 
   const rows = tab === "unmatched" ? unmatched : tab === "matched" ? matched : ignored;
   const counts = {
-    unmatched: unmatched.length,
+    unmatched: unmatchedTotal,
     matched: matched.length,
     ignored: ignored.length,
   };
@@ -113,7 +125,10 @@ export default function UnmatchedPaymentsPage() {
           return (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => {
+                setTab(t.id);
+                if (t.id === "unmatched") setPage(1);
+              }}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
                 active
@@ -141,6 +156,18 @@ export default function UnmatchedPaymentsPage() {
       </div>
 
       <div className="bg-card border rounded-lg overflow-hidden">
+        {tab === "unmatched" && (
+          <div className="p-3 border-b">
+            <Input
+              value={search}
+              onChange={(e) => {
+                setPage(1);
+                setSearch(e.target.value);
+              }}
+              placeholder="Tìm txId, nội dung CK, mã đơn, tài khoản..."
+            />
+          </div>
+        )}
         {rows.length === 0 && !loading ? (
           <EmptyState
             icon={Inbox}
@@ -277,6 +304,21 @@ export default function UnmatchedPaymentsPage() {
           </div>
         )}
       </div>
+      {tab === "unmatched" && (
+        <TablePagination
+          page={page}
+          totalPages={Math.max(1, Math.ceil(unmatchedTotal / pageSize))}
+          total={unmatchedTotal}
+          rangeStart={unmatchedTotal === 0 ? 0 : (page - 1) * pageSize + 1}
+          rangeEnd={Math.min(page * pageSize, unmatchedTotal)}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(value) => {
+            setPage(1);
+            setPageSize(value);
+          }}
+        />
+      )}
 
       <LinkDialog
         event={linking}

@@ -30,7 +30,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { BarcodePrintDialog, type BarcodeItem } from "@/components/shared/BarcodePrintDialog";
-import { Loader2, Plus, RefreshCw, Factory, Eye, Trash2, Printer } from "lucide-react";
+import { Loader2, Plus, RefreshCw, Factory, Eye, Trash2, Printer, ChevronsUpDown, Check } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
   Select,
@@ -39,12 +39,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { TablePagination } from "@/components/shared/TablePagination";
+import { SortableTh } from "@/components/shared/SortableTh";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import type { SortDirection } from "@/services/types";
 
 /** Admin Production (Slice 6): recipes, preview/create orders, void. Dense layout — matches other admin pages. */
 export default function AdminProduction() {
   const [loading, setLoading] = useState(false);
   const [recipes, setRecipes] = useState<ProductionRecipeDto[]>([]);
   const [orders, setOrders] = useState<ProductionOrderDto[]>([]);
+  const [recipesTotal, setRecipesTotal] = useState(0);
+  const [ordersTotal, setOrdersTotal] = useState(0);
   const [productOptions, setProductOptions] = useState<Product[]>([]);
   const [preview, setPreview] = useState<ProductionPreviewDto | null>(null);
   const [orderDetail, setOrderDetail] = useState<ProductionOrderDto | null>(null);
@@ -53,16 +61,23 @@ export default function AdminProduction() {
   const [outputLabelOpen, setOutputLabelOpen] = useState(false);
   const [outputLabelItems, setOutputLabelItems] = useState<BarcodeItem[]>([]);
 
-  const [recipeSearch, setRecipeSearch] = useState("");
-  const [orderQuery, setOrderQuery] = useState("");
+  const [recipeSearchInput, setRecipeSearchInput] = useState("");
+  const [orderSearchInput, setOrderSearchInput] = useState("");
+  const debouncedRecipeSearch = useDebouncedValue(recipeSearchInput, 350);
+  const debouncedOrderSearch = useDebouncedValue(orderSearchInput, 350);
+  const [recipePage, setRecipePage] = useState(1);
+  const [recipePageSize, setRecipePageSize] = useState(20);
+  const [orderPage, setOrderPage] = useState(1);
+  const [orderPageSize, setOrderPageSize] = useState(20);
   const [orderStatus, setOrderStatus] = useState<string>("");
-
-  const recipeSearchRef = useRef(recipeSearch);
-  const orderQueryRef = useRef(orderQuery);
-  const orderStatusRef = useRef(orderStatus);
-  recipeSearchRef.current = recipeSearch;
-  orderQueryRef.current = orderQuery;
-  orderStatusRef.current = orderStatus;
+  const [recipeSort, setRecipeSort] = useState<{ field: string; direction: SortDirection }>({
+    field: "id",
+    direction: "desc",
+  });
+  const [orderSort, setOrderSort] = useState<{ field: string; direction: SortDirection }>({
+    field: "createdAt",
+    direction: "desc",
+  });
 
   /** Avoid toast storms when APIs fail repeatedly (e.g. recipe_code BYTEA / 500 loops). */
   const recipeErrToastAt = useRef(0);
@@ -74,11 +89,13 @@ export default function AdminProduction() {
     setLoading(true);
     try {
       const pg = await production.listRecipes({
-        page: 1,
-        pageSize: 100,
-        query: recipeSearchRef.current.trim() || undefined,
+        page: recipePage,
+        pageSize: recipePageSize,
+        query: debouncedRecipeSearch || undefined,
+        sort: [recipeSort],
       });
       setRecipes(pg.items);
+      setRecipesTotal(pg.total);
       recipeErrToastAt.current = 0;
     } catch (e) {
       const now = Date.now();
@@ -89,18 +106,20 @@ export default function AdminProduction() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [debouncedRecipeSearch, recipePage, recipePageSize, recipeSort]);
 
   const loadOrders = useCallback(async () => {
     setLoading(true);
     try {
       const pg = await production.listOrders({
-        page: 1,
-        pageSize: 50,
-        query: orderQueryRef.current.trim() || undefined,
-        status: orderStatusRef.current || undefined,
+        page: orderPage,
+        pageSize: orderPageSize,
+        query: debouncedOrderSearch || undefined,
+        status: orderStatus || undefined,
+        sort: [orderSort],
       });
       setOrders(pg.items);
+      setOrdersTotal(pg.total);
       orderErrToastAt.current = 0;
     } catch (e) {
       const now = Date.now();
@@ -111,7 +130,7 @@ export default function AdminProduction() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [debouncedOrderSearch, orderPage, orderPageSize, orderSort, orderStatus]);
 
   const loadProducts = useCallback(async () => {
     try {
@@ -129,9 +148,32 @@ export default function AdminProduction() {
 
   useEffect(() => {
     void loadRecipes();
-    void loadProducts();
+  }, [loadRecipes]);
+
+  useEffect(() => {
     void loadOrders();
-  }, [loadRecipes, loadOrders, loadProducts]);
+  }, [loadOrders]);
+
+  useEffect(() => {
+    void loadProducts();
+  }, [loadProducts]);
+
+  const toggleRecipeSort = (field: string) => {
+    setRecipePage(1);
+    setRecipeSort((prev) =>
+      prev.field === field
+        ? { field, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { field, direction: "asc" },
+    );
+  };
+  const toggleOrderSort = (field: string) => {
+    setOrderPage(1);
+    setOrderSort((prev) =>
+      prev.field === field
+        ? { field, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { field, direction: "asc" },
+    );
+  };
 
   const openOutputBatchLabel = (o: ProductionOrderDto) => {
     const bid = o.outputBatchId;
@@ -204,15 +246,14 @@ export default function AdminProduction() {
                 <Label className="text-xs font-medium text-muted-foreground">Tìm mã / tên quy trình</Label>
                 <Input
                   className="mt-1"
-                  value={recipeSearch}
-                  onChange={(e) => setRecipeSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && void loadRecipes()}
+                  value={recipeSearchInput}
+                  onChange={(e) => {
+                    setRecipePage(1);
+                    setRecipeSearchInput(e.target.value);
+                  }}
                   placeholder="Lọc…"
                 />
               </div>
-              <Button type="button" variant="secondary" className="shrink-0 self-end" onClick={() => void loadRecipes()}>
-                Áp dụng
-              </Button>
             </div>
           </div>
           <div className="bg-card rounded-lg border overflow-hidden min-w-0">
@@ -220,11 +261,11 @@ export default function AdminProduction() {
             <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="border-b bg-muted/50">
-                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">Mã</th>
-                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">Tên</th>
-                  <th className="text-right px-3 py-2.5 font-medium text-muted-foreground">SL output</th>
-                  <th className="text-center px-3 py-2.5 font-medium text-muted-foreground">Bán/POS</th>
-                  <th className="text-center px-3 py-2.5 font-medium text-muted-foreground">Arch</th>
+                  <SortableTh label="Mã" sortKey="recipeCode" sort={{ key: recipeSort.field, dir: recipeSort.direction }} onSort={toggleRecipeSort} />
+                  <SortableTh label="Tên" sortKey="name" sort={{ key: recipeSort.field, dir: recipeSort.direction }} onSort={toggleRecipeSort} />
+                  <SortableTh label="SL output" sortKey="outputQty" sort={{ key: recipeSort.field, dir: recipeSort.direction }} onSort={toggleRecipeSort} align="right" />
+                  <SortableTh label="Bán/POS" sortKey="outputMustBeSellable" sort={{ key: recipeSort.field, dir: recipeSort.direction }} onSort={toggleRecipeSort} align="center" />
+                  <SortableTh label="Arch" sortKey="archived" sort={{ key: recipeSort.field, dir: recipeSort.direction }} onSort={toggleRecipeSort} align="center" />
                   <th className="text-right w-[140px] px-3 py-2.5 font-medium text-muted-foreground">Thao tác</th>
                 </tr>
               </thead>
@@ -286,6 +327,19 @@ export default function AdminProduction() {
               <p className="p-6 text-center text-muted-foreground text-sm">Chưa có quy trình.</p>
             )}
           </div>
+          <TablePagination
+            page={recipePage}
+            totalPages={Math.max(1, Math.ceil(recipesTotal / recipePageSize))}
+            total={recipesTotal}
+            rangeStart={recipesTotal === 0 ? 0 : (recipePage - 1) * recipePageSize + 1}
+            rangeEnd={Math.min(recipePage * recipePageSize, recipesTotal)}
+            pageSize={recipePageSize}
+            onPageChange={setRecipePage}
+            onPageSizeChange={(value) => {
+              setRecipePage(1);
+              setRecipePageSize(value);
+            }}
+          />
         </TabsContent>
 
         <TabsContent value="run" className="mt-4 space-y-3">
@@ -306,15 +360,20 @@ export default function AdminProduction() {
                 <Label className="text-xs font-medium text-muted-foreground">Tìm số phiếu / mã hay tên công thức</Label>
                 <Input
                   className="mt-1"
-                  value={orderQuery}
-                  onChange={(e) => setOrderQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && void loadOrders()}
+                  value={orderSearchInput}
+                  onChange={(e) => {
+                    setOrderPage(1);
+                    setOrderSearchInput(e.target.value);
+                  }}
                   placeholder="VD: PO-, RCP-, …"
                 />
               </div>
               <div className="w-full sm:w-44 shrink-0">
                 <Label className="text-xs font-medium text-muted-foreground">Trạng thái</Label>
-                <Select value={orderStatus || "__all"} onValueChange={(v) => setOrderStatus(v === "__all" ? "" : v)}>
+                <Select value={orderStatus || "__all"} onValueChange={(v) => {
+                  setOrderPage(1);
+                  setOrderStatus(v === "__all" ? "" : v);
+                }}>
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder="Tất cả" />
                   </SelectTrigger>
@@ -325,9 +384,6 @@ export default function AdminProduction() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button type="button" variant="secondary" className="shrink-0 self-end" onClick={() => void loadOrders()}>
-                Áp dụng
-              </Button>
             </div>
           </div>
           <div className="bg-card rounded-lg border overflow-hidden min-w-0">
@@ -335,9 +391,10 @@ export default function AdminProduction() {
             <table className="w-full text-sm min-w-[480px]">
               <thead>
                 <tr className="border-b bg-muted/50">
-                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">Mã lệnh</th>
-                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">Trạng thái</th>
-                  <th className="text-right px-3 py-2.5 font-medium text-muted-foreground">SL TP</th>
+                  <SortableTh label="Mã lệnh" sortKey="orderNo" sort={{ key: orderSort.field, dir: orderSort.direction }} onSort={toggleOrderSort} />
+                  <SortableTh label="Trạng thái" sortKey="status" sort={{ key: orderSort.field, dir: orderSort.direction }} onSort={toggleOrderSort} />
+                  <SortableTh label="SL TP" sortKey="outputQty" sort={{ key: orderSort.field, dir: orderSort.direction }} onSort={toggleOrderSort} align="right" />
+                  <SortableTh label="Ngày tạo" sortKey="createdAt" sort={{ key: orderSort.field, dir: orderSort.direction }} onSort={toggleOrderSort} align="center" />
                   <th className="text-right px-3 py-2.5 font-medium text-muted-foreground w-[180px]">Thao tác</th>
                 </tr>
               </thead>
@@ -351,6 +408,9 @@ export default function AdminProduction() {
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums">{o.outputQty}</td>
+                    <td className="px-3 py-2.5 text-center text-xs text-muted-foreground">
+                      {o.createdAtIso ? new Date(o.createdAtIso).toLocaleString() : "—"}
+                    </td>
                     <td className="px-3 py-2.5 text-right">
                       <div className="inline-flex gap-1">
                         <Button
@@ -389,6 +449,19 @@ export default function AdminProduction() {
               <p className="p-6 text-center text-muted-foreground text-sm">Chưa có phiếu phù hợp bộ lọc.</p>
             )}
           </div>
+          <TablePagination
+            page={orderPage}
+            totalPages={Math.max(1, Math.ceil(ordersTotal / orderPageSize))}
+            total={ordersTotal}
+            rangeStart={ordersTotal === 0 ? 0 : (orderPage - 1) * orderPageSize + 1}
+            rangeEnd={Math.min(orderPage * orderPageSize, ordersTotal)}
+            pageSize={orderPageSize}
+            onPageChange={setOrderPage}
+            onPageSizeChange={(value) => {
+              setOrderPage(1);
+              setOrderPageSize(value);
+            }}
+          />
         </TabsContent>
       </Tabs>
 
@@ -661,11 +734,49 @@ function RunProductionPanel(props: {
     return `Variant ${variantId}`;
   };
   const [recipeId, setRecipeId] = useState<number | "">("");
+  const [recipeSelectorOpen, setRecipeSelectorOpen] = useState(false);
+  const [selectorSearchInput, setSelectorSearchInput] = useState("");
+  const debouncedSelectorSearch = useDebouncedValue(selectorSearchInput, 350);
+  const [selectorRecipes, setSelectorRecipes] = useState<ProductionRecipeDto[]>([]);
+  const [selectorLoading, setSelectorLoading] = useState(false);
   const [outputQty, setOutputQty] = useState(1);
   const [overhead, setOverhead] = useState("");
   const [busy, setBusy] = useState(false);
   const [shortages, setShortages] = useState<ProductionShortageDetailDto[]>([]);
   const hasMissingFromPreview = (preview?.components ?? []).some((c) => Number(c.missingQty ?? 0) > 0);
+  const selectedRecipeFromList = selectorRecipes.find((r) => r.id === recipeId) ?? recipes.find((r) => r.id === recipeId);
+  const selectedRecipeLabel = selectedRecipeFromList ? `${selectedRecipeFromList.recipeCode} — ${selectedRecipeFromList.name}` : "";
+
+  useEffect(() => {
+    let mounted = true;
+    const loadSelector = async () => {
+      setSelectorLoading(true);
+      try {
+        const page = await production.listRecipes({
+          page: 1,
+          pageSize: 20,
+          query: debouncedSelectorSearch || undefined,
+          active: true,
+          includeArchived: false,
+          sort: [{ field: "id", direction: "desc" }],
+        });
+        if (!mounted) return;
+        const selected = recipes.find((r) => r.id === recipeId);
+        const merged = selected && !page.items.some((r) => r.id === selected.id) ? [selected, ...page.items] : page.items;
+        setSelectorRecipes(merged.filter((r) => !r.archived && r.active));
+      } catch {
+        if (mounted) {
+          setSelectorRecipes(recipes.filter((r) => !r.archived && r.active).slice(0, 20));
+        }
+      } finally {
+        if (mounted) setSelectorLoading(false);
+      }
+    };
+    void loadSelector();
+    return () => {
+      mounted = false;
+    };
+  }, [debouncedSelectorSearch, recipeId, recipes]);
 
   const runPreview = async () => {
     if (recipeId === "") return;
@@ -724,23 +835,42 @@ function RunProductionPanel(props: {
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs font-medium text-muted-foreground">Quy trình</Label>
-          <Select
-            value={recipeId === "" ? "" : String(recipeId)}
-            onValueChange={(v) => setRecipeId(v ? Number(v) : "")}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Chọn recipe" />
-            </SelectTrigger>
-            <SelectContent>
-              {recipes
-                .filter((r) => !r.archived && r.active)
-                .map((r) => (
-                  <SelectItem key={r.id} value={String(r.id)}>
-                    {r.recipeCode} — {r.name}
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
+          <Popover open={recipeSelectorOpen} onOpenChange={setRecipeSelectorOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" role="combobox" aria-expanded={recipeSelectorOpen} className="h-8 text-xs justify-between w-full">
+                <span className="truncate">{selectedRecipeLabel || "Chọn recipe"}</span>
+                <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="p-0 w-[380px] max-w-[90vw]">
+              <Command shouldFilter={false}>
+                <CommandInput
+                  placeholder="Tìm mã/tên quy trình..."
+                  value={selectorSearchInput}
+                  onValueChange={setSelectorSearchInput}
+                />
+                <CommandList>
+                  {selectorLoading ? (
+                    <div className="p-3 text-xs text-muted-foreground">Đang tải…</div>
+                  ) : null}
+                  <CommandEmpty>Không tìm thấy quy trình</CommandEmpty>
+                  {selectorRecipes.map((r) => (
+                    <CommandItem
+                      key={r.id}
+                      value={`${r.recipeCode} ${r.name}`}
+                      onSelect={() => {
+                        setRecipeId(r.id);
+                        setRecipeSelectorOpen(false);
+                      }}
+                    >
+                      <Check className={cn("mr-2 h-3.5 w-3.5", recipeId === r.id ? "opacity-100" : "opacity-0")} />
+                      <span className="text-xs">{r.recipeCode} — {r.name}</span>
+                    </CommandItem>
+                  ))}
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">

@@ -107,12 +107,12 @@ export function StorefrontNav() {
           <div className="hidden md:flex items-center gap-2">
             {loggedIn ? (
               <>
-                {auth.isAdmin && (
+                {(auth.isAdmin || auth.isStaff) && (
                   <Link
-                    to="/admin"
+                    to={auth.isAdmin ? "/admin" : "/admin/pos"}
                     className="inline-flex items-center gap-1 text-xs font-semibold px-3 py-2 rounded-full border border-border hover:bg-muted"
                   >
-                    <LayoutDashboard className="h-3.5 w-3.5" /> Quản trị
+                    <LayoutDashboard className="h-3.5 w-3.5" /> {auth.isAdmin ? "Quản trị" : "POS"}
                   </Link>
                 )}
                 <Link
@@ -175,9 +175,9 @@ export function StorefrontNav() {
             </Link>
             {loggedIn ? (
               <>
-                {auth.isAdmin && (
-                  <Link to="/admin" onClick={() => setMenuOpen(false)} className="flex items-center gap-3 px-3 py-2.5 text-sm font-semibold text-muted-foreground">
-                    <LayoutDashboard className="h-4 w-4" /> Quản trị
+                {(auth.isAdmin || auth.isStaff) && (
+                  <Link to={auth.isAdmin ? "/admin" : "/admin/pos"} onClick={() => setMenuOpen(false)} className="flex items-center gap-3 px-3 py-2.5 text-sm font-semibold text-muted-foreground">
+                    <LayoutDashboard className="h-4 w-4" /> {auth.isAdmin ? "Quản trị" : "POS"}
                   </Link>
                 )}
                 <Link to="/account" onClick={() => setMenuOpen(false)} className="flex items-center gap-3 px-3 py-2.5 text-sm font-semibold text-muted-foreground">

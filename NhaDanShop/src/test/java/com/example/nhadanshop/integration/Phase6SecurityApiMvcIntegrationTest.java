@@ -65,6 +65,7 @@ class Phase6SecurityApiMvcIntegrationTest {
     PasswordEncoder passwordEncoder;
 
     private Role roleAdmin;
+    private Role roleStaff;
     private Role roleUser;
 
     @BeforeEach
@@ -79,6 +80,12 @@ class Phase6SecurityApiMvcIntegrationTest {
             Role r = new Role();
             r.setName("ROLE_USER");
             r.setDescription("U");
+            return roleRepository.save(r);
+        });
+        roleStaff = roleRepository.findByName("ROLE_STAFF").orElseGet(() -> {
+            Role r = new Role();
+            r.setName("ROLE_STAFF");
+            r.setDescription("S");
             return roleRepository.save(r);
         });
     }
@@ -154,7 +161,7 @@ class Phase6SecurityApiMvcIntegrationTest {
                         .param("page", "0")
                         .param("size", "10")
                         .header("Authorization", "Bearer " + userToken))
-                .andExpect(status().isOk());
+                .andExpect(status().isForbidden());
 
         mockMvc.perform(get("/api/payment-events/recent"))
                 .andExpect(status().isForbidden());
@@ -196,14 +203,25 @@ class Phase6SecurityApiMvcIntegrationTest {
 
 
     @Test
-    void pending_orders_list_admin_only_but_post_create_permits_anonymous_flow() throws Exception {
-        mockMvc.perform(get("/api/pending-orders"))
-                .andExpect(status().isForbidden());
-
+    void pending_orders_staff_read_only_admin_mutation_public_create_flow() throws Exception {
         String adminName = PREFIX + "_poa_" + UUID.randomUUID();
+        String staffName = PREFIX + "_pos_" + UUID.randomUUID();
+        String userName = PREFIX + "_pou_" + UUID.randomUUID();
         saveUser(adminName, roleAdmin);
+        saveUser(staffName, roleStaff);
+        saveUser(userName, roleUser);
         String adminTok = loginAccess(adminName, "Secret12!ab");
+        String staffTok = loginAccess(staffName, "Secret12!ab");
+        String userTok = loginAccess(userName, "Secret12!ab");
 
+        mockMvc.perform(get("/api/pending-orders").header("Authorization", "Bearer " + staffTok))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/pending-orders/counts").header("Authorization", "Bearer " + staffTok))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/pending-orders").header("Authorization", "Bearer " + userTok))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/pending-orders/counts").header("Authorization", "Bearer " + userTok))
+                .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/pending-orders").header("Authorization", "Bearer " + adminTok))
                 .andExpect(status().isOk());
 
@@ -220,6 +238,30 @@ class Phase6SecurityApiMvcIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/pending-orders/999/confirm")
+                        .header("Authorization", "Bearer " + staffTok)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/pending-orders/999/cancel")
+                        .header("Authorization", "Bearer " + staffTok)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isForbidden());
+
+        int adminConfirmStatus = mockMvc.perform(post("/api/pending-orders/999/confirm")
+                        .header("Authorization", "Bearer " + adminTok)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andReturn().getResponse().getStatus();
+        int adminCancelStatus = mockMvc.perform(post("/api/pending-orders/999/cancel")
+                        .header("Authorization", "Bearer " + adminTok)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"x\"}"))
+                .andReturn().getResponse().getStatus();
+        assertThat(adminConfirmStatus).isNotEqualTo(403);
+        assertThat(adminCancelStatus).isNotEqualTo(403);
     }
 
     @Test
@@ -293,11 +335,205 @@ class Phase6SecurityApiMvcIntegrationTest {
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isForbidden());
 
+        String staffName = PREFIX + "_repst_" + UUID.randomUUID();
+        saveUser(staffName, roleStaff);
+        String staffToken = loginAccess(staffName, "Secret12!ab");
+        mockMvc.perform(get("/api/reports/profit").param("from", "2026-01-01").param("to", "2026-01-31")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isForbidden());
+
         String adminName = PREFIX + "_repa_" + UUID.randomUUID();
         saveUser(adminName, roleAdmin);
         mockMvc.perform(get("/api/reports/profit").param("from", "2026-01-01").param("to", "2026-01-31")
                         .header("Authorization", "Bearer " + loginAccess(adminName, "Secret12!ab")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalProfit").exists());
+    }
+
+    @Test
+    void role_matrix_admin_staff_customer_for_pos_and_admin_management_endpoints() throws Exception {
+        String adminName = PREFIX + "_rm_a_" + UUID.randomUUID();
+        String staffName = PREFIX + "_rm_s_" + UUID.randomUUID();
+        String customerName = PREFIX + "_rm_u_" + UUID.randomUUID();
+        saveUser(adminName, roleAdmin);
+        saveUser(staffName, roleStaff);
+        saveUser(customerName, roleUser);
+        String adminToken = loginAccess(adminName, "Secret12!ab");
+        String staffToken = loginAccess(staffName, "Secret12!ab");
+        String customerToken = loginAccess(customerName, "Secret12!ab");
+
+        // ADMIN can access admin management APIs.
+        mockMvc.perform(get("/api/promotions")
+                        .param("page", "0")
+                        .param("size", "10")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+
+        // STAFF can access POS invoice read surface.
+        mockMvc.perform(get("/api/invoices")
+                        .param("page", "0")
+                        .param("size", "10")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isOk());
+
+        // STAFF cannot access report/promotion/inventory/production/payment-event management.
+        mockMvc.perform(get("/api/promotions")
+                        .param("page", "0")
+                        .param("size", "10")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/inventory/projections")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/production-recipes")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/payment-events/recent")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isForbidden());
+
+        // CUSTOMER/ROLE_USER cannot access admin endpoints.
+        mockMvc.perform(get("/api/promotions")
+                        .param("page", "0")
+                        .param("size", "10")
+                        .header("Authorization", "Bearer " + customerToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/vouchers")
+                        .param("page", "0")
+                        .param("size", "10")
+                        .header("Authorization", "Bearer " + customerToken))
+                .andExpect(status().isForbidden());
+
+        // Public storefront APIs remain public.
+        mockMvc.perform(get("/api/products"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void vouchers_admin_surface_only_active_remains_public() throws Exception {
+        String adminName = PREFIX + "_v_a_" + UUID.randomUUID();
+        String staffName = PREFIX + "_v_s_" + UUID.randomUUID();
+        String customerName = PREFIX + "_v_u_" + UUID.randomUUID();
+        saveUser(adminName, roleAdmin);
+        saveUser(staffName, roleStaff);
+        saveUser(customerName, roleUser);
+        String adminToken = loginAccess(adminName, "Secret12!ab");
+        String staffToken = loginAccess(staffName, "Secret12!ab");
+        String customerToken = loginAccess(customerName, "Secret12!ab");
+
+        mockMvc.perform(get("/api/vouchers/active"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/vouchers/1").header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/vouchers/1").header("Authorization", "Bearer " + customerToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/vouchers").contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + staffToken)
+                        .content("{}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/vouchers/1").contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + customerToken)
+                        .content("{}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(patch("/api/vouchers/1/toggle").contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + staffToken)
+                        .content("{}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/vouchers/1")
+                        .header("Authorization", "Bearer " + customerToken))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/vouchers/1").header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void promotions_detail_requires_admin_public_endpoints_still_open() throws Exception {
+        String adminName = PREFIX + "_p_a_" + UUID.randomUUID();
+        String staffName = PREFIX + "_p_s_" + UUID.randomUUID();
+        String customerName = PREFIX + "_p_u_" + UUID.randomUUID();
+        saveUser(adminName, roleAdmin);
+        saveUser(staffName, roleStaff);
+        saveUser(customerName, roleUser);
+        String adminToken = loginAccess(adminName, "Secret12!ab");
+        String staffToken = loginAccess(staffName, "Secret12!ab");
+        String customerToken = loginAccess(customerName, "Secret12!ab");
+
+        mockMvc.perform(get("/api/promotions/active"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/promotions/evaluate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lines\":[]}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/promotions/pick-best")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lines\":[]}"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/api/promotions/1").header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/promotions/1").header("Authorization", "Bearer " + customerToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/promotions/1").header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void products_admin_get_surface_is_locked_public_catalog_still_works() throws Exception {
+        String adminName = PREFIX + "_prod_a_" + UUID.randomUUID();
+        String staffName = PREFIX + "_prod_s_" + UUID.randomUUID();
+        String customerName = PREFIX + "_prod_u_" + UUID.randomUUID();
+        saveUser(adminName, roleAdmin);
+        saveUser(staffName, roleStaff);
+        saveUser(customerName, roleUser);
+        String adminToken = loginAccess(adminName, "Secret12!ab");
+        String staffToken = loginAccess(staffName, "Secret12!ab");
+        String customerToken = loginAccess(customerName, "Secret12!ab");
+
+        mockMvc.perform(get("/api/products"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/products")
+                        .param("includeInactive", "true")
+                        .header("Authorization", "Bearer " + customerToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/products")
+                        .param("includeInactive", "true")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isForbidden());
+        int adminIncludeInactive = mockMvc.perform(get("/api/products")
+                        .param("includeInactive", "true")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andReturn().getResponse().getStatus();
+        assertThat(adminIncludeInactive).isNotEqualTo(403);
+
+        int anonNextCode = mockMvc.perform(get("/api/products/next-code").param("categoryId", "1"))
+                .andReturn().getResponse().getStatus();
+        assertThat(anonNextCode == 401 || anonNextCode == 403).isTrue();
+        mockMvc.perform(get("/api/products/next-code").param("categoryId", "1")
+                        .header("Authorization", "Bearer " + customerToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/products/template")
+                        .header("Authorization", "Bearer " + customerToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/products/expiry-warnings")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/products/expired")
+                        .header("Authorization", "Bearer " + customerToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/products/low-stock-variants")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/products/1/variants")
+                        .header("Authorization", "Bearer " + customerToken))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/products/variants/by-code/nope")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/products/next-code").param("categoryId", "1")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isNotFound());
     }
 }

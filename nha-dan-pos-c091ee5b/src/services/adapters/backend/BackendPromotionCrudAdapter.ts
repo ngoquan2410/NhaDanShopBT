@@ -18,11 +18,37 @@ import {
 export class BackendPromotionCrudAdapter implements PromotionCrudService {
   async list(params?: PromotionListParams): Promise<PagedResult<Promotion>> {
     const page = params?.page ?? 1;
-    const pageSize = params?.pageSize ?? 200;
-    let items = (await fetchAdminPromotionPage(Math.max(0, page - 1), pageSize)).map(adminPromotionRowToUi);
-    if (params?.active !== undefined) items = items.filter((p) => p.active === params.active);
-    if (params?.kinds?.length) items = items.filter((p) => params.kinds!.includes(p.type));
-    return { items, total: items.length, page, pageSize };
+    const pageSize = params?.pageSize ?? 20;
+    const backendType = params?.kinds?.[0]
+      ? ({
+          percent: "PERCENT_DISCOUNT",
+          fixed: "FIXED_DISCOUNT",
+          "free-shipping": "FREE_SHIPPING",
+          "buy-x-get-y": "BUY_X_GET_Y",
+          gift: "QUANTITY_GIFT",
+        }[params.kinds[0]] as
+          | "PERCENT_DISCOUNT"
+          | "FIXED_DISCOUNT"
+          | "FREE_SHIPPING"
+          | "BUY_X_GET_Y"
+          | "QUANTITY_GIFT"
+          | undefined)
+      : undefined;
+    const response = await fetchAdminPromotionPage({
+      page: Math.max(0, page - 1),
+      size: pageSize,
+      search: params?.query,
+      status: params?.active === undefined ? undefined : params.active ? "active" : "inactive",
+      type: backendType,
+      includeArchived: params?.active === false,
+      sort: "createdAt,desc",
+    });
+    return {
+      items: response.items.map(adminPromotionRowToUi),
+      total: response.total,
+      page,
+      pageSize,
+    };
   }
 
   async get(id: string): Promise<Promotion | null> {

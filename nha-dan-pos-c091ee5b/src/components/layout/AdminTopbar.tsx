@@ -33,7 +33,7 @@ function startOfDayTopbar(d: Date): Date {
 }
 
 export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
-  const { user, signOut } = useAdminAuth();
+  const { user, signOut, primaryRoleLabel } = useAdminAuth();
   const [userOpen, setUserOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("");
@@ -373,8 +373,8 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
               <User className="h-3.5 w-3.5 text-primary-foreground" />
             </div>
             <div className="hidden sm:block text-left">
-              <p className="text-xs font-medium leading-tight">Admin</p>
-              <p className="text-[10px] text-muted-foreground leading-tight">Quản trị viên</p>
+              <p className="text-xs font-medium leading-tight">{user?.fullName?.trim() || user?.username || "Tài khoản"}</p>
+              <p className="text-[10px] text-muted-foreground leading-tight">{primaryRoleLabel}</p>
             </div>
           </button>
           {userOpen && (
@@ -383,7 +383,9 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
                 <p className="text-sm font-medium">
                   {user?.fullName?.trim() || user?.username || "Admin"}
                 </p>
-                <p className="text-[11px] text-muted-foreground">admin · Quản trị viên</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {user?.username ?? "user"} · {primaryRoleLabel}
+                </p>
               </div>
               <div className="py-1">
                 <button onClick={() => { setUserOpen(false); navigate("/admin/users"); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted text-left">

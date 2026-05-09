@@ -52,6 +52,7 @@ export default function CartPage() {
       setPromotionEvaluationStatus("idle");
       return;
     }
+    setAllPromos([]);
     setPromotionEvaluationStatus("loading");
     const ctx: CartContext = { lines: items, subtotal };
     void promotions.evaluateAll(ctx).then((list) => {
@@ -90,12 +91,19 @@ export default function CartPage() {
     ),
     [selectablePromos],
   );
-  const bestPromo: EvaluatedPromotion | null = useMemo(() => {
+  const selectedPromoCandidate: EvaluatedPromotion | null = useMemo(() => {
     if (persistedPromoId != null) {
       return allPromos.find((p) => p.promotionId === persistedPromoId) ?? null;
     }
-    return sortedEligible[0] ?? null;
-  }, [sortedEligible, persistedPromoId, allPromos]);
+    return null;
+  }, [persistedPromoId, allPromos]);
+  const autoPromo: EvaluatedPromotion | null = useMemo(() => sortedEligible[0] ?? null, [sortedEligible]);
+  const appliedPromo: EvaluatedPromotion | null = useMemo(() => {
+    if (selectedPromoCandidate?.eligible) {
+      return selectedPromoCandidate;
+    }
+    return autoPromo;
+  }, [selectedPromoCandidate, autoPromo]);
 
   useEffect(() => {
     if (promotionEvaluationStatus !== "loaded") return;
@@ -106,10 +114,10 @@ export default function CartPage() {
     }
   }, [promotionEvaluationStatus, persistedPromoId, allPromos]);
 
-  const promoDiscount = bestPromo?.type !== "free_shipping" ? (bestPromo?.discountAmount ?? 0) : 0;
-  const promoGiftLines = bestPromo?.giftLines ?? [];
-  const promoIsGift = isGiftPromotionType(bestPromo?.type);
-  const promoShipFree = bestPromo?.type === "free_shipping";
+  const promoDiscount = appliedPromo?.type !== "free_shipping" ? (appliedPromo?.discountAmount ?? 0) : 0;
+  const promoGiftLines = appliedPromo?.giftLines ?? [];
+  const promoIsGift = isGiftPromotionType(appliedPromo?.type);
+  const promoShipFree = appliedPromo?.type === "free_shipping";
   const total = Math.max(0, subtotal - promoDiscount);
   const hasStockIssue = items.some((i) => i.qty > i.stock);
   const hasInvalidBackendLine = items.some((i) => i.catalogSource !== "backend" || i.schemaVersion !== 2 || !/^\d+$/.test(String(i.productId)) || !/^\d+$/.test(String(i.variantId)));
@@ -174,7 +182,7 @@ export default function CartPage() {
                 </p>
                 <div className="space-y-1.5">
                   {sortedEligible.map((p) => {
-                    const selected = bestPromo?.promotionId === p.promotionId;
+                    const selected = appliedPromo?.promotionId === p.promotionId;
                     return (
                       <button
                         key={p.promotionId}
@@ -234,9 +242,9 @@ export default function CartPage() {
             <div className="hidden" data-testid="cart-promo-selected-id">{persistedPromoId ?? ""}</div>
             <div className="hidden" data-testid="cart-promo-selected-mode">{persistedPromoMode}</div>
             <div className="hidden" data-testid="cart-promo-eval-status">{promotionEvaluationStatus}</div>
-            {persistedPromoId && bestPromo && !bestPromo.eligible && (
+            {persistedPromoId && selectedPromoCandidate && !selectedPromoCandidate.eligible && (
               <div className="bg-warning-soft/40 border border-warning/40 rounded-2xl p-3 text-xs text-warning">
-                <b>Khuyến mãi đã chọn hiện chưa đủ điều kiện.</b> {bestPromo.reasonIfIneligible ?? "Vui lòng cập nhật giỏ hoặc địa chỉ giao hàng."}
+                <b>Khuyến mãi đã chọn hiện chưa đủ điều kiện.</b> {selectedPromoCandidate.reasonIfIneligible ?? "Vui lòng cập nhật giỏ hoặc địa chỉ giao hàng."}
               </div>
             )}
 
@@ -344,13 +352,13 @@ export default function CartPage() {
                 </div>
                 {promoDiscount > 0 && (
                   <div className="flex justify-between text-success">
-                    <span>Khuyến mãi {bestPromo ? `(${bestPromo.name})` : ""}</span>
+                    <span>Khuyến mãi {appliedPromo ? `(${appliedPromo.name})` : ""}</span>
                     <span className="font-semibold">−{formatVND(promoDiscount)}</span>
                   </div>
                 )}
-                {promoIsGift && bestPromo && (
+                {promoIsGift && appliedPromo && (
                   <div data-testid="cart-summary-promotion-gifts" className="rounded-lg bg-success-soft/40 px-3 py-2 text-xs text-success space-y-0.5">
-                    <p className="font-semibold">Quà tặng: {bestPromo.name}</p>
+                    <p className="font-semibold">Quà tặng: {appliedPromo.name}</p>
                     {promoGiftLines.length > 0 ? (
                       promoGiftLines.map((g) => (
                         <p key={`${g.variantId ?? g.productId}`} data-testid={`cart-summary-promotion-gift-line-${g.variantId ?? g.productId}`}>

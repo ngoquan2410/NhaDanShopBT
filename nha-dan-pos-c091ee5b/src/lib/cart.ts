@@ -116,7 +116,14 @@ export const cartActions = {
         };
       }
       const item: CartItem = recompute({ ...input, id: uid(), lineSubtotal: 0 });
-      return { ...s, items: [...s.items, item] };
+      const next = [...s.items, item];
+      const resetPromo = s.items.length === 0;
+      return {
+        ...s,
+        items: next,
+        selectedPromotionId: resetPromo ? null : s.selectedPromotionId ?? null,
+        selectedPromotionMode: resetPromo ? "auto" : (s.selectedPromotionMode ?? "auto"),
+      };
     });
   },
   setQty(id: string, qty: number) {
@@ -128,14 +135,24 @@ export const cartActions = {
     }));
   },
   remove(id: string) {
-    setState((s) => ({ ...s, items: s.items.filter((i) => i.id !== id) }));
+    setState((s) => ({
+      ...s,
+      items: s.items.filter((i) => i.id !== id),
+      selectedPromotionId: null,
+      selectedPromotionMode: "auto",
+    }));
   },
   clear() {
     setState(() => ({ items: [], selectedPromotionId: null, selectedPromotionMode: "auto" }));
   },
   replace(items: CartItem[]) {
     const valid = items.filter(isBackendCartLine);
-    setState((s) => ({ ...s, items: valid.map(recompute) }));
+    setState((s) => ({
+      ...s,
+      items: valid.map(recompute),
+      selectedPromotionId: null,
+      selectedPromotionMode: "auto",
+    }));
   },
   setSelectedPromotionId(promotionId: string) {
     setState((s) => ({ ...s, selectedPromotionId: promotionId, selectedPromotionMode: "manual" }));

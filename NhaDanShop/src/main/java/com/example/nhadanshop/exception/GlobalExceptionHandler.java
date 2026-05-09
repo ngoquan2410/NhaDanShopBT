@@ -2,9 +2,13 @@ package com.example.nhadanshop.exception;
 
 import com.example.nhadanshop.service.ExcelReceiptImportService;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.persistence.PersistenceException;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
@@ -15,9 +19,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -68,6 +72,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ProblemDetail handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        log.error("Data integrity violation", ex);
         String root = ex.getMostSpecificCause() != null
                 ? ex.getMostSpecificCause().getMessage()
                 : ex.getMessage();
@@ -80,6 +85,14 @@ public class GlobalExceptionHandler {
         }
         ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.CONFLICT);
         pd.setDetail("Dữ liệu bị trùng hoặc vi phạm ràng buộc nghiệp vụ.");
+        return pd;
+    }
+
+    @ExceptionHandler({DataAccessException.class, JpaSystemException.class, PersistenceException.class})
+    public ProblemDetail handleDataAccessLayer(Exception ex) {
+        log.error("Data access error", ex);
+        ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.INTERNAL_SERVER_ERROR);
+        pd.setDetail("Lỗi hệ thống. Vui lòng thử lại hoặc liên hệ quản trị.");
         return pd;
     }
 
@@ -141,8 +154,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleGeneral(Exception ex) {
+        log.error("Unhandled exception", ex);
         ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.INTERNAL_SERVER_ERROR);
-        pd.setDetail("Lỗi hệ thống: " + ex.getMessage());
+        pd.setDetail("Lỗi hệ thống. Vui lòng thử lại hoặc liên hệ quản trị.");
         return pd;
     }
 }

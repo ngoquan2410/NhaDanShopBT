@@ -193,6 +193,16 @@ export function GiftForm({ value, onChange, validation }: { value: GiftPromotion
       >
         {numberInput(value.giftStockLimit, (n) => onChange({ ...value, giftStockLimit: n }), { placeholder: "Không giới hạn" })}
       </Field>
+
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={value.repeatable}
+          onChange={(ev) => onChange({ ...value, repeatable: ev.target.checked })}
+          className="h-4 w-4 rounded border-input"
+        />
+        <span className="text-xs">Lặp lại theo bội số (đủ điều kiện nhiều lần thì tặng nhiều lần)</span>
+      </label>
     </div>
   );
 }

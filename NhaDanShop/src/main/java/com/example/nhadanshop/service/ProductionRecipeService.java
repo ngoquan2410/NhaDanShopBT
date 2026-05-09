@@ -7,7 +7,9 @@ import com.example.nhadanshop.repository.*;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -18,6 +20,7 @@ import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -29,6 +32,8 @@ public class ProductionRecipeService {
     private final ProductRepository productRepo;
     private final ProductBatchRepository batchRepository;
     private final Clock businessClock;
+    private static final Set<String> RECIPE_SORT_WHITELIST = Set.of(
+            "id", "recipeCode", "name", "outputQty", "outputMustBeSellable", "archived", "updatedAt");
 
     @Transactional(readOnly = true)
     public Page<ProductionRecipeResponse> list(
@@ -38,6 +43,7 @@ public class ProductionRecipeService {
             Long outputVariantId,
             String query,
             Pageable pageable) {
+        Pageable safePageable = sanitizePageable(pageable);
         String q = StringUtils.hasText(query) ? query.trim() : null;
         String bucket;
         if (Boolean.TRUE.equals(archivedFilter)) {
@@ -52,9 +58,24 @@ public class ProductionRecipeService {
             bucket = "NON_ARCHIVED";
         }
         if (q == null) {
-            return recipeRepo.searchByBucketWithoutText(bucket, outputVariantId, pageable).map(this::map);
+            return recipeRepo.searchByBucketWithoutText(bucket, outputVariantId, safePageable).map(this::map);
         }
-        return recipeRepo.searchByBucketWithText(bucket, outputVariantId, q, pageable).map(this::map);
+        return recipeRepo.searchByBucketWithText(bucket, outputVariantId, q, safePageable).map(this::map);
+    }
+
+    private Pageable sanitizePageable(Pageable pageable) {
+        int page = Math.max(0, pageable.getPageNumber());
+        int size = Math.min(Math.max(1, pageable.getPageSize()), 100);
+        Sort sort = Sort.unsorted();
+        for (Sort.Order order : pageable.getSort()) {
+            if (RECIPE_SORT_WHITELIST.contains(order.getProperty())) {
+                sort = sort.and(Sort.by(order));
+            }
+        }
+        if (sort.isUnsorted()) {
+            sort = Sort.by(Sort.Order.desc("id"));
+        }
+        return PageRequest.of(page, size, sort);
     }
 
     @Transactional(readOnly = true)

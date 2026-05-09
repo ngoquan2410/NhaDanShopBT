@@ -750,7 +750,7 @@ class Slice6cQuotePaymentIntegrationTest {
                 null,
                 null);
         var req = new PendingOrderRequest(
-                null, "Sellable Guard", "0900000000", null, null, "cod",
+                null, "Sellable Guard", "0900000000", storefrontShipAddr(), null, "cod",
                 List.of(billable, reward), null, null, null, pricing, null, null);
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> pendingOrderService.createOrder(req));
@@ -993,7 +993,7 @@ class Slice6cQuotePaymentIntegrationTest {
                 null,
                 null);
         var req = new PendingOrderRequest(
-                null, "N", "1", null, null, "cod",
+                null, "N", "1", storefrontShipAddr(), null, "cod",
                 List.of(line), null, null, null, pricing, null, null);
         assertThrows(IllegalArgumentException.class, () -> pendingOrderService.createOrder(req));
     }
@@ -1031,11 +1031,64 @@ class Slice6cQuotePaymentIntegrationTest {
                 null,
                 null);
         var req = new PendingOrderRequest(
-                null, "N", "1", null, null, "cod",
+                null, "N", "1", storefrontShipAddr(), null, "cod",
                 List.of(line), null, null, null, pricing, null, null);
         var po = pendingOrderService.createOrder(req);
         assertNotNull(po);
         assertTrue(Long.parseLong(po.id()) > 0);
+    }
+
+    @Test
+    void storefront_quote_missing_street_rejected_even_when_raw_address_present() {
+        ProductVariant v = mkVariant("S6C-STREET");
+        mkBatch(v, LocalDate.now().plusDays(10), 5);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+
+        ShippingAddressDto missingStreet = new ShippingAddressDto(
+                "A", "0909", "79", "Ho Chi Minh", "1442", "Quan 1", "21211", "Ben Nghe",
+                "   ", "12 Le Loi, Ben Nghe, Quan 1", null);
+        var req = new SalesQuoteRequest(
+                "storefront",
+                null,
+                List.of(new SalesQuoteLineRequest(v.getProduct().getId(), v.getId(), 1, BigDecimal.ZERO, null, false)),
+                null, null, null, missingStreet, null, BigDecimal.ZERO);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> salesQuoteService.quote(req));
+        assertTrue(ex.getMessage().contains("Vui lòng nhập số nhà/tên đường."));
+    }
+
+    @Test
+    void pending_order_direct_missing_street_rejected() {
+        ProductVariant v = mkVariant("S6C-PO-STREET");
+        mkBatch(v, LocalDate.now().plusDays(20), 3);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+        SecurityContextHolder.getContext().setAuthentication(adminAuth());
+
+        var line = new PendingOrderLineRequest(
+                "l1",
+                String.valueOf(v.getProduct().getId()),
+                String.valueOf(v.getId()),
+                "P",
+                "V",
+                1,
+                v.getSellPrice(),
+                v.getSellPrice(),
+                null,
+                null,
+                null);
+        var pricing = new PricingBreakdownSnapshotDto(
+                v.getSellPrice(), BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, BigDecimal.ZERO, v.getSellPrice(), BigDecimal.ZERO,
+                BigDecimal.ZERO, v.getSellPrice(), null, null, null);
+        ShippingAddressDto badAddress = new ShippingAddressDto(
+                "A", "0909", "79", "Ho Chi Minh", "1442", "Quan 1", "21211", "Ben Nghe",
+                "", "12 Le Loi, Ben Nghe, Quan 1", null);
+        var req = new PendingOrderRequest(
+                null, "N", "1", badAddress, null, "cod",
+                List.of(line), null, null, null, pricing, null, null);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> pendingOrderService.createOrder(req));
+        assertTrue(ex.getMessage().contains("Vui lòng nhập số nhà/tên đường."));
     }
 
     private static PendingOrderRequest poFromQuote(String quotePublicId, String payment, String name, String phone) {
@@ -1043,7 +1096,7 @@ class Slice6cQuotePaymentIntegrationTest {
                 null,
                 name,
                 phone,
-                null,
+                storefrontShipAddr(),
                 null,
                 payment,
                 null,

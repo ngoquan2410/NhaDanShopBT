@@ -5,6 +5,7 @@ import com.example.nhadanshop.dto.ChangePaymentMethodRequest;
 import com.example.nhadanshop.dto.ConfirmPendingOrderRequest;
 import com.example.nhadanshop.dto.MarkWaitingConfirmRequest;
 import com.example.nhadanshop.dto.PendingOrderConfirmResponse;
+import com.example.nhadanshop.dto.PendingOrderCountsResponse;
 import com.example.nhadanshop.dto.PendingOrderRequest;
 import com.example.nhadanshop.dto.PendingOrderResponse;
 import com.example.nhadanshop.service.IdempotencyScopes;
@@ -48,8 +49,20 @@ public class PendingOrderController {
      */
     @GetMapping
     public Page<PendingOrderResponse> listAll(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String paymentMethod,
+            @RequestParam(required = false) String search,
             @PageableDefault(size = 50, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        return pendingOrderService.listPage(pageable);
+        return pendingOrderService.listAdminPage(page, size, status, paymentMethod, search, pageable);
+    }
+
+    @GetMapping("/counts")
+    public PendingOrderCountsResponse counts(
+            @RequestParam(required = false) String paymentMethod,
+            @RequestParam(required = false) String search) {
+        return pendingOrderService.countAdmin(paymentMethod, search);
     }
 
     /**

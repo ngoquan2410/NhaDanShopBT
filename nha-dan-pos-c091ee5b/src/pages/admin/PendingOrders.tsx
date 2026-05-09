@@ -17,6 +17,12 @@ import {
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { dispatchAdminBadgesRefresh } from "@/lib/adminBadges";
+import { TablePagination } from "@/components/shared/TablePagination";
+import { Input } from "@/components/ui/input";
+import { useAdminAuth } from "@/lib/admin-auth";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { SortableTh } from "@/components/shared/SortableTh";
+import type { SortDirection } from "@/services/types";
 
 type TabId = "all" | PendingOrderStatus;
 
@@ -57,19 +63,45 @@ function timeRemaining(expiresAt?: string) {
 }
 
 export default function AdminPendingOrders() {
+  const { isAdmin } = useAdminAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>("all");
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
   const [detailOrder, setDetailOrder] = useState<PendingOrder | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const debouncedSearch = useDebouncedValue(searchInput, 350);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [sort, setSort] = useState<{ field: string; direction: SortDirection }>({
+    field: "createdAt",
+    direction: "desc",
+  });
 
   const { data, loading, error, isEmpty, reload } = useService(
     () =>
       pendingOrdersService.list({
-        sort: [{ field: "createdAt", direction: "desc" }],
+        page,
+        pageSize,
+        query: debouncedSearch || undefined,
+        status: activeTab === "all" ? undefined : activeTab,
+        sort: [sort],
       }),
-    [],
+    [activeTab, debouncedSearch, page, pageSize, sort],
   );
+
+  const { data: counts } = useService(
+    () => pendingOrdersService.counts({ search: debouncedSearch || undefined }),
+    [debouncedSearch],
+  );
+  const toggleSort = (field: string) => {
+    setPage(1);
+    setSort((prev) => {
+      if (prev.field !== field) return { field, direction: "asc" };
+      return { field, direction: prev.direction === "asc" ? "desc" : "asc" };
+    });
+  };
+
 
   const orderList: PendingOrder[] = useMemo(() => data?.items ?? [], [data]);
 
@@ -107,18 +139,15 @@ export default function AdminPendingOrders() {
   }, [orderList, loading]);
 
   const tabs = useMemo(() => ([
-    { id: "all" as TabId, label: "Tất cả", count: orderList.length },
-    { id: "pending_payment" as TabId, label: "Chờ thanh toán", count: orderList.filter(o => o.status === "pending_payment").length },
-    { id: "waiting_confirm" as TabId, label: "Chờ xác nhận", count: orderList.filter(o => o.status === "waiting_confirm").length },
-    { id: "paid_auto" as TabId, label: "Đã nhận CK", count: orderList.filter(o => o.status === "paid_auto").length },
-    { id: "confirmed" as TabId, label: "Đã xác nhận", count: orderList.filter(o => o.status === "confirmed").length },
-    { id: "cancelled" as TabId, label: "Đã hủy", count: orderList.filter(o => o.status === "cancelled").length },
-  ]), [orderList]);
+    { id: "all" as TabId, label: "Tất cả", count: counts?.all ?? 0 },
+    { id: "pending_payment" as TabId, label: "Chờ thanh toán", count: counts?.pending_payment ?? 0 },
+    { id: "waiting_confirm" as TabId, label: "Chờ xác nhận", count: counts?.waiting_confirm ?? 0 },
+    { id: "paid_auto" as TabId, label: "Đã nhận CK", count: counts?.paid_auto ?? 0 },
+    { id: "confirmed" as TabId, label: "Đã xác nhận", count: counts?.confirmed ?? 0 },
+    { id: "cancelled" as TabId, label: "Đã hủy", count: counts?.cancelled ?? 0 },
+  ]), [counts]);
 
-  const filtered = activeTab === "all" ? orderList : orderList.filter(o => o.status === activeTab);
-  const pendingCount = orderList.filter(
-    o => o.status === "pending_payment" || o.status === "waiting_confirm" || o.status === "paid_auto",
-  ).length;
+  const pendingCount = (counts?.pending_payment ?? 0) + (counts?.waiting_confirm ?? 0) + (counts?.paid_auto ?? 0);
 
   const handleConfirm = async () => {
     if (!confirmTarget) return;
@@ -174,7 +203,10 @@ export default function AdminPendingOrders() {
         {tabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+              setPage(1);
+              setActiveTab(tab.id);
+            }}
             className={cn(
               "px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors",
               activeTab === tab.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
@@ -185,11 +217,23 @@ export default function AdminPendingOrders() {
         ))}
       </div>
 
+      <div className="flex items-center gap-2">
+        <Input
+          value={searchInput}
+          onChange={(e) => {
+            setPage(1);
+            setSearchInput(e.target.value);
+          }}
+          placeholder="Tìm theo mã đơn, tên/SĐT khách, mã tham chiếu..."
+          className="max-w-md"
+        />
+      </div>
+
       <AsyncBoundary
         loading={loading}
         error={error}
-        isEmpty={isEmpty || filtered.length === 0}
-        data={filtered}
+        isEmpty={isEmpty || orderList.length === 0}
+        data={orderList}
         onRetry={reload}
         emptyFallback={
           <EmptyState icon={Receipt} title="Không có đơn nào" description="Chưa có đơn chờ thanh toán nào trong nhóm này." />
@@ -202,13 +246,47 @@ export default function AdminPendingOrders() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
-                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Mã đơn</th>
-                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Khách hàng</th>
-                    <th className="text-center px-3 py-2 font-medium text-muted-foreground">Thanh toán</th>
-                    <th className="text-right px-3 py-2 font-medium text-muted-foreground">Tổng</th>
-                    <th className="text-center px-3 py-2 font-medium text-muted-foreground">Thời gian</th>
+                    <SortableTh
+                      label="Mã đơn"
+                      sortKey="orderNo"
+                      sort={{ key: sort.field, dir: sort.direction }}
+                      onSort={toggleSort}
+                    />
+                    <SortableTh
+                      label="Khách hàng"
+                      sortKey="customerName"
+                      sort={{ key: sort.field, dir: sort.direction }}
+                      onSort={toggleSort}
+                    />
+                    <SortableTh
+                      label="Thanh toán"
+                      sortKey="paymentMethod"
+                      sort={{ key: sort.field, dir: sort.direction }}
+                      onSort={toggleSort}
+                      align="center"
+                    />
+                    <SortableTh
+                      label="Tổng"
+                      sortKey="totalAmount"
+                      sort={{ key: sort.field, dir: sort.direction }}
+                      onSort={toggleSort}
+                      align="right"
+                    />
+                    <SortableTh
+                      label="Thời gian"
+                      sortKey="createdAt"
+                      sort={{ key: sort.field, dir: sort.direction }}
+                      onSort={toggleSort}
+                      align="center"
+                    />
                     <th className="text-center px-3 py-2 font-medium text-muted-foreground">Còn lại</th>
-                    <th className="text-center px-3 py-2 font-medium text-muted-foreground">Trạng thái</th>
+                    <SortableTh
+                      label="Trạng thái"
+                      sortKey="status"
+                      sort={{ key: sort.field, dir: sort.direction }}
+                      onSort={toggleSort}
+                      align="center"
+                    />
                     <th className="text-right px-3 py-2 font-medium text-muted-foreground">Thao tác</th>
                   </tr>
                 </thead>
@@ -238,12 +316,12 @@ export default function AdminPendingOrders() {
                       <td className="px-3 py-2.5 text-center">{statusBadge(order.status)}</td>
                       <td className="px-3 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          {isPendingLike(order.status) && (
+                          {isAdmin && isPendingLike(order.status) && (
                             <>
-                              <button onClick={() => setConfirmTarget(order.id)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-success text-success-foreground rounded hover:opacity-90">
+                              <button data-testid={`pending-confirm-${order.id}`} onClick={() => setConfirmTarget(order.id)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-success text-success-foreground rounded hover:opacity-90">
                                 <Check className="h-3 w-3" /> Xác nhận
                               </button>
-                              <button onClick={() => setCancelTarget(order.id)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-danger text-danger-foreground rounded hover:opacity-90">
+                              <button data-testid={`pending-cancel-${order.id}`} onClick={() => setCancelTarget(order.id)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-danger text-danger-foreground rounded hover:opacity-90">
                                 <X className="h-3 w-3" /> Hủy
                               </button>
                             </>
@@ -284,7 +362,7 @@ export default function AdminPendingOrders() {
                       <span className="font-bold">{formatVND(order.pricingBreakdownSnapshot.total)}</span>
                     </div>
                   </button>
-                  {isPendingLike(order.status) && (
+                  {isAdmin && isPendingLike(order.status) && (
                     <div className="flex gap-2 mt-2 pt-2 border-t">
                       <button onClick={() => setConfirmTarget(order.id)} className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs font-medium bg-success text-success-foreground rounded">
                         <Check className="h-3 w-3" /> Xác nhận
@@ -297,19 +375,32 @@ export default function AdminPendingOrders() {
                 </div>
               ))}
             </div>
+            <TablePagination
+              page={page}
+              totalPages={Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))}
+              total={data?.total ?? 0}
+              rangeStart={(data?.total ?? 0) === 0 ? 0 : (page - 1) * pageSize + 1}
+              rangeEnd={Math.min(page * pageSize, data?.total ?? 0)}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={(value) => {
+                setPage(1);
+                setPageSize(value);
+              }}
+            />
           </>
         )}
       </AsyncBoundary>
 
-      <ConfirmDialog
+      {isAdmin && <ConfirmDialog
         open={!!confirmTarget}
         onClose={() => setConfirmTarget(null)}
         onConfirm={handleConfirm}
         title="Xác nhận thanh toán?"
         description="Sau khi xác nhận, hệ thống sẽ tạo hóa đơn chính thức và trừ tồn kho. Thao tác này không thể hoàn tác."
         confirmLabel="Xác nhận thanh toán"
-      />
-      <ConfirmDialog
+      />}
+      {isAdmin && <ConfirmDialog
         open={!!cancelTarget}
         onClose={() => setCancelTarget(null)}
         onConfirm={handleCancel}
@@ -317,16 +408,17 @@ export default function AdminPendingOrders() {
         description="Đơn hàng sẽ bị hủy. Khách hàng sẽ nhận được thông báo. Thao tác này không thể hoàn tác."
         confirmLabel="Hủy đơn"
         variant="danger"
-      />
+      />}
 
       {/* Hide the side drawer while a confirm/cancel ConfirmDialog is open so we
           don't stack two backdrop blurs (was rendering blurry text — issue #7). */}
-      {detailOrder && !confirmTarget && !cancelTarget && (
+      {detailOrder && (!isAdmin || (!confirmTarget && !cancelTarget)) && (
         <PendingOrderDetail
           order={detailOrder}
           onClose={() => setDetailOrder(null)}
           onConfirm={() => setConfirmTarget(detailOrder.id)}
           onCancel={() => setCancelTarget(detailOrder.id)}
+          canManage={isAdmin}
         />
       )}
     </div>
@@ -344,11 +436,12 @@ function Section({ title, icon: Icon, children }: { title: string; icon: React.C
   );
 }
 
-function PendingOrderDetail({ order, onClose, onConfirm, onCancel }: {
+function PendingOrderDetail({ order, onClose, onConfirm, onCancel, canManage }: {
   order: PendingOrder;
   onClose: () => void;
   onConfirm: () => void;
   onCancel: () => void;
+  canManage: boolean;
 }) {
   const isPendingLike = order.status === "pending_payment" || order.status === "waiting_confirm";
   const pb = order.pricingBreakdownSnapshot ?? {
@@ -556,7 +649,7 @@ function PendingOrderDetail({ order, onClose, onConfirm, onCancel }: {
           )}
         </div>
 
-        {isPendingLike ? (
+        {canManage && isPendingLike ? (
           <div className="p-4 border-t flex gap-2">
             <button onClick={onCancel} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium bg-danger text-danger-foreground rounded-md hover:opacity-90">
               <X className="h-4 w-4" /> Hủy đơn

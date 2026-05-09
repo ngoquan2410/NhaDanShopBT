@@ -29,7 +29,10 @@ interface AdminAuthState {
   session: AuthSession | null;
   user: { username: string; fullName?: string | null; customerId?: number | null } | null;
   isAdmin: boolean;
+  isStaff: boolean;
+  isCustomer: boolean;
   isUser: boolean;
+  primaryRoleLabel: string;
   loading: boolean;
   signIn: (username: string, password: string) => Promise<{ error?: string; totpRequired?: boolean; preAuthToken?: string }>;
   verifyTotp: (preAuthToken: string, otp: string) => Promise<{ error?: string }>;
@@ -40,6 +43,21 @@ interface AdminAuthState {
 }
 
 const Ctx = createContext<AdminAuthState | null>(null);
+
+export function hasRole(roles: string[] | null | undefined, role: string): boolean {
+  return Array.isArray(roles) && roles.includes(role);
+}
+
+export function isCustomerRole(roles: string[] | null | undefined): boolean {
+  return hasRole(roles, "ROLE_USER") || hasRole(roles, "ROLE_CUSTOMER");
+}
+
+export function roleLabelFromRoles(roles: string[] | null | undefined): string {
+  if (hasRole(roles, "ROLE_ADMIN")) return "Quản trị";
+  if (hasRole(roles, "ROLE_STAFF")) return "Nhân viên";
+  if (isCustomerRole(roles)) return "Khách hàng";
+  return "Người dùng";
+}
 
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const [session, setSessionState] = useState<AuthSession | null>(null);
@@ -191,14 +209,20 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   }, [refreshSession, session?.refreshToken]);
 
   const isAdmin = !!session?.roles?.includes("ROLE_ADMIN");
+  const isStaff = !!session?.roles?.includes("ROLE_STAFF");
+  const isCustomer = isCustomerRole(session?.roles);
   const isUser = !!session?.roles?.includes("ROLE_USER");
+  const primaryRoleLabel = roleLabelFromRoles(session?.roles);
 
   const value = useMemo<AdminAuthState>(
     () => ({
       session,
       user: session ? { username: session.username, fullName: session.fullName, customerId: session.customerId } : null,
       isAdmin,
+      isStaff,
+      isCustomer,
       isUser,
+      primaryRoleLabel,
       loading,
       signIn,
       verifyTotp,
@@ -207,7 +231,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       refreshRole,
       refreshSession,
     }),
-    [session, isAdmin, isUser, loading, signIn, verifyTotp, signUp, signOut, refreshRole, refreshSession],
+    [session, isAdmin, isStaff, isCustomer, isUser, primaryRoleLabel, loading, signIn, verifyTotp, signUp, signOut, refreshRole, refreshSession],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -34,7 +34,12 @@ export class BackendProductionAdminAdapter implements ProductionAdminService {
     const page0 = Math.max(0, (params?.page ?? 1) - 1);
     q.set("page", String(page0));
     q.set("size", String(params?.pageSize ?? 20));
-    q.set("sort", "id,desc");
+    const sort = params?.sort?.[0];
+    if (sort?.field && sort.direction) {
+      q.set("sort", `${sort.field},${sort.direction}`);
+    } else {
+      q.set("sort", "id,desc");
+    }
     const url = `${API_R}?${q}`;
     const page = await adminFetchJson<SpringPage<ProductionRecipeDto>>(url);
     return {
@@ -89,7 +94,8 @@ export class BackendProductionAdminAdapter implements ProductionAdminService {
 
   async listOrders(params?: ProductionOrderListParams): Promise<PagedResult<ProductionOrderDto>> {
     const q = new URLSearchParams();
-    if (params?.status) q.set("status", params.status);
+    const status = params?.status?.trim();
+    if (status) q.set("status", status);
     if (params?.recipeId != null) q.set("recipeId", String(params.recipeId));
     if (params?.outputVariantId != null) q.set("outputVariantId", String(params.outputVariantId));
     if (params?.query != null && params.query.trim()) q.set("query", params.query.trim());
@@ -98,7 +104,12 @@ export class BackendProductionAdminAdapter implements ProductionAdminService {
     const page0 = Math.max(0, (params?.page ?? 1) - 1);
     q.set("page", String(page0));
     q.set("size", String(params?.pageSize ?? 20));
-    q.set("sort", "createdAt,desc");
+    const sort = params?.sort?.[0];
+    if (sort?.field && sort.direction) {
+      q.set("sort", `${sort.field},${sort.direction}`);
+    } else {
+      q.set("sort", "createdAt,desc");
+    }
     const url = `${API_O}?${q}`;
     const page = await adminFetchJson<SpringPage<ProductionOrderDto>>(url);
     return {
