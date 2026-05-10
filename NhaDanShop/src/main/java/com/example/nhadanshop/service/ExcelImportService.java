@@ -7,6 +7,7 @@ import com.example.nhadanshop.dto.ProductVariantRequest;
 import com.example.nhadanshop.entity.Category;
 import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.entity.ProductImportUnit;
+import com.example.nhadanshop.entity.ProductVariant;
 import com.example.nhadanshop.util.ImportSellableParser;
 import com.example.nhadanshop.repository.CategoryRepository;
 import com.example.nhadanshop.repository.ProductImportUnitRepository;
@@ -25,6 +26,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Service import sản phẩm từ file Excel (.xlsx).
@@ -101,6 +103,67 @@ public class ExcelImportService {
             String resolvedCode
     ) {}
 
+    /** Prescan + bulk maps for product Excel parse (preview read path). */
+    private record ProductSheetCatalog(
+            Map<String, Product> productByUpperCode,
+            Map<String, ProductVariant> variantByNormalizedCode,
+            Map<String, Category> categoryByLowerName,
+            Set<String> existingProductNameInCategoryKeys
+    ) {}
+
+    private static String normalizeVariantCodeKey(String variantCode) {
+        if (variantCode == null) return null;
+        String t = variantCode.trim();
+        return t.isEmpty() ? null : t.toLowerCase(Locale.ROOT);
+    }
+
+    private ProductSheetCatalog buildProductSheetCatalog(Sheet sheet, int startRow) {
+        LinkedHashSet<String> manualCodesUpper = new LinkedHashSet<>();
+        LinkedHashSet<String> categoryLowerKeys = new LinkedHashSet<>();
+        for (int rowIdx = startRow; rowIdx <= sheet.getLastRowNum(); rowIdx++) {
+            Row row = sheet.getRow(rowIdx);
+            if (row == null || isRowEmpty(row) || isLegendRow(row)) continue;
+            String rawCode = getCellString(row, COL_CODE);
+            String categoryName = getCellString(row, COL_CATEGORY);
+            if (rawCode != null) rawCode = rawCode.trim().toUpperCase(Locale.ROOT);
+            if (categoryName != null) categoryName = categoryName.trim();
+            if (rawCode != null && !rawCode.isBlank()) manualCodesUpper.add(rawCode);
+            if (categoryName != null && !categoryName.isBlank()) {
+                categoryLowerKeys.add(categoryName.toLowerCase(Locale.ROOT));
+            }
+        }
+        Map<String, Product> productByUpper = new HashMap<>();
+        if (!manualCodesUpper.isEmpty()) {
+            for (Product p : productRepository.findByCodeIn(manualCodesUpper)) {
+                productByUpper.put(p.getCode().trim().toUpperCase(Locale.ROOT), p);
+            }
+        }
+        Map<String, ProductVariant> varByNorm = new HashMap<>();
+        if (!manualCodesUpper.isEmpty()) {
+            LinkedHashSet<String> lowers = new LinkedHashSet<>();
+            for (String c : manualCodesUpper) lowers.add(c.toLowerCase(Locale.ROOT));
+            for (ProductVariant v : variantRepository.findByVariantCodeLowerIn(lowers)) {
+                String k = normalizeVariantCodeKey(v.getVariantCode());
+                if (k != null) varByNorm.putIfAbsent(k, v);
+            }
+        }
+        Map<String, Category> catByLower = new HashMap<>();
+        if (!categoryLowerKeys.isEmpty()) {
+            for (Category c : categoryRepository.findByTrimmedNameLowerIn(categoryLowerKeys)) {
+                String k = c.getName().trim().toLowerCase(Locale.ROOT);
+                catByLower.putIfAbsent(k, c);
+            }
+        }
+        Set<String> nameKeys = new HashSet<>();
+        Set<Long> catIds = catByLower.values().stream().map(Category::getId).collect(Collectors.toSet());
+        if (!catIds.isEmpty()) {
+            for (Object[] pair : productRepository.findCategoryIdAndNameLowerKeysByCategoryIdIn(catIds)) {
+                nameKeys.add(pair[0] + "|" + pair[1]);
+            }
+        }
+        return new ProductSheetCatalog(productByUpper, varByNorm, catByLower, nameKeys);
+    }
+
     // ═════════════════════════════════════════════════════════════════════════
     // PASS 1 — Preview (validate only, KHÔNG ghi DB)
     // ═════════════════════════════════════════════════════════════════════════
@@ -113,36 +176,44 @@ public class ExcelImportService {
     @Transactional(readOnly = true)
     public ProductExcelPreviewResponse previewProducts(MultipartFile file) throws IOException {
         validateFile(file);
+        return assemblePreviewFromParsedRows(parseSheet(file));
+    }
 
-        List<ParsedRow> parsed = parseSheet(file);
+    private ProductExcelPreviewResponse assemblePreviewFromParsedRows(List<ParsedRow> parsed) {
         List<ProductPreviewRow> rows = new ArrayList<>();
-        List<String> warnings        = new ArrayList<>();
-        int errorRows = 0, skipRows  = 0;
+        List<String> warnings = new ArrayList<>();
+        int errorRows = 0, skipRows = 0;
 
         Set<String> seenCodes = new LinkedHashSet<>();
         Set<String> seenNames = new LinkedHashSet<>();
 
         for (ParsedRow pr : parsed) {
-            String  errorMsg  = pr.errorMessage();
-            String  warningMsg= pr.warningMessage();
-            boolean willSkip  = pr.willSkip();
-            boolean isValid   = (errorMsg == null);
-            String  status;
+            String errorMsg = pr.errorMessage();
+            String warningMsg = pr.warningMessage();
+            boolean willSkip = pr.willSkip();
+            boolean isValid = (errorMsg == null);
+            String status;
 
             if (errorMsg != null) {
-                status = "ERROR"; errorRows++;
+                status = "ERROR";
+                errorRows++;
             } else if (willSkip) {
-                status = "SKIP_DUPLICATE"; skipRows++;
+                status = "SKIP_DUPLICATE";
+                skipRows++;
             } else {
                 String codeKey = pr.resolvedCode() != null ? pr.resolvedCode().toUpperCase() : null;
                 String nameKey = (pr.name() + "|" + pr.categoryName()).toLowerCase();
                 if (codeKey != null && seenCodes.contains(codeKey)) {
                     errorMsg = "Mã '" + pr.resolvedCode() + "' xuất hiện nhiều lần trong file";
-                    status = "ERROR"; errorRows++; isValid = false;
+                    status = "ERROR";
+                    errorRows++;
+                    isValid = false;
                 } else if (seenNames.contains(nameKey)) {
                     errorMsg = "Tên '" + pr.name() + "' trong danh mục '" + pr.categoryName()
-                             + "' xuất hiện nhiều lần trong file";
-                    status = "ERROR"; errorRows++; isValid = false;
+                            + "' xuất hiện nhiều lần trong file";
+                    status = "ERROR";
+                    errorRows++;
+                    isValid = false;
                 } else {
                     if (codeKey != null) seenCodes.add(codeKey);
                     seenNames.add(nameKey);
@@ -180,8 +251,8 @@ public class ExcelImportService {
     public ExcelImportResult importProducts(MultipartFile file) throws IOException {
         validateFile(file);
 
-        // Re-validate trước khi ghi DB
-        ProductExcelPreviewResponse preview = previewProducts(file);
+        List<ParsedRow> parsedRows = parseSheet(file);
+        ProductExcelPreviewResponse preview = assemblePreviewFromParsedRows(parsedRows);
         if (preview.errorRows() > 0) {
             List<String> errs = preview.rows().stream()
                     .filter(r -> r.errorMessage() != null)
@@ -191,10 +262,29 @@ public class ExcelImportService {
                     preview.errorRows(), errs);
         }
 
-        // parseSheet lại để lấy minStockQty (ProductPreviewRow không có field này)
-        List<ParsedRow> parsedRows = parseSheet(file);
         Map<Integer, ParsedRow> parsedByLine = new LinkedHashMap<>();
         for (ParsedRow pr : parsedRows) parsedByLine.put(pr.rowIdx(), pr);
+
+        LinkedHashSet<String> catLowerKeys = new LinkedHashSet<>();
+        for (ParsedRow pr : parsedRows) {
+            if (pr.categoryName() != null && !pr.categoryName().isBlank()) {
+                catLowerKeys.add(pr.categoryName().trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        Map<String, Category> categoryByLower = new HashMap<>();
+        if (!catLowerKeys.isEmpty()) {
+            for (Category c : categoryRepository.findByTrimmedNameLowerIn(catLowerKeys)) {
+                categoryByLower.put(c.getName().trim().toLowerCase(Locale.ROOT), c);
+            }
+        }
+        Set<String> importedNameKeys = new HashSet<>();
+        Set<Long> seedCatIds = categoryByLower.values().stream().map(Category::getId).collect(Collectors.toSet());
+        if (!seedCatIds.isEmpty()) {
+            for (Object[] pair : productRepository.findCategoryIdAndNameLowerKeysByCategoryIdIn(seedCatIds)) {
+                importedNameKeys.add(pair[0] + "|" + pair[1]);
+            }
+        }
+        Set<String> assignedCodesInBatch = new HashSet<>();
 
         List<String> errors = new ArrayList<>();
         int successCount = 0, skipCount = 0, errorCount = 0;
@@ -211,18 +301,25 @@ public class ExcelImportService {
             try {
                 // ── 1. Resolve / tạo Category ─────────────────────────────────
                 String catName = row.categoryName().trim();
-                Category category = categoryRepository.findByNameIgnoreCase(catName)
-                        .orElseGet(() -> {
-                            Category c = new Category();
-                            c.setName(catName); c.setActive(true);
-                            c.setCreatedAt(LocalDateTime.now());
-                            c.setUpdatedAt(LocalDateTime.now());
-                            return categoryRepository.save(c);
-                        });
+                String catKey = catName.toLowerCase(Locale.ROOT);
+                Category category = categoryByLower.get(catKey);
+                if (category == null) {
+                    Optional<Category> found = categoryRepository.findByNameIgnoreCase(catName);
+                    if (found.isPresent()) {
+                        category = found.get();
+                    } else {
+                        Category c = new Category();
+                        c.setName(catName);
+                        c.setActive(true);
+                        c.setCreatedAt(LocalDateTime.now());
+                        c.setUpdatedAt(LocalDateTime.now());
+                        category = categoryRepository.save(c);
+                    }
+                    categoryByLower.put(catKey, category);
+                }
 
-                // Race condition guard — trùng tên
-                if (productRepository.existsByNameIgnoreCaseAndCategoryId(
-                        row.name().trim(), category.getId())) {
+                String nameKey = category.getId() + "|" + row.name().trim().toLowerCase(Locale.ROOT);
+                if (importedNameKeys.contains(nameKey)) {
                     log.info("Skip (trùng tên): '{}' / '{}'", row.name(), catName);
                     skipCount++; continue;
                 }
@@ -230,11 +327,11 @@ public class ExcelImportService {
                 // ── 2. Resolve mã SP ──────────────────────────────────────────
                 String code = (row.resolvedCode() != null && !row.resolvedCode().isBlank()
                                && !row.isAutoCode())
-                        ? row.resolvedCode().toUpperCase()
+                        ? row.resolvedCode().toUpperCase(Locale.ROOT)
                         : productService.generateProductCode(category);
 
-                // Race condition guard — trùng mã
-                if (productRepository.existsByCode(code)) {
+                String codeUpper = code.toUpperCase(Locale.ROOT);
+                if (productRepository.existsByCode(code) || assignedCodesInBatch.contains(codeUpper)) {
                     errors.add("Dòng " + row.lineNumber() + ": Mã '" + code + "' bị trùng lúc ghi DB → bỏ qua");
                     skipCount++; continue;
                 }
@@ -296,6 +393,8 @@ public class ExcelImportService {
                         row.isSellable()
                 );
                 variantService.createVariant(saved.getId(), varReq);
+                assignedCodesInBatch.add(codeUpper);
+                importedNameKeys.add(nameKey);
 
                 // ── 6. Tạo ProductImportUnit (Task 2 fix) ─────────────────────
                 if (importUnit != null && !importUnit.isBlank()) {
@@ -340,6 +439,7 @@ public class ExcelImportService {
             int startRow = detectStartRow(sheet);
             log.info("Product import: data từ row index {} (Excel row {})", startRow, startRow + 1);
 
+            ProductSheetCatalog ctx = buildProductSheetCatalog(sheet, startRow);
             Map<String, Integer> categorySeq = new LinkedHashMap<>();
 
             for (int rowIdx = startRow; rowIdx <= sheet.getLastRowNum(); rowIdx++) {
@@ -396,26 +496,29 @@ public class ExcelImportService {
                 } else {
                     // R8: Mã tay — unique trong DB
                     if (rawCode != null && !rawCode.isBlank()) {
-                        if (productRepository.existsByCode(rawCode)) {
+                        if (ctx.productByUpperCode().containsKey(rawCode)) {
                             errorMsg = "Mã '" + rawCode + "' đã tồn tại trong hệ thống";
                         }
                         // R11: namespace — không trùng variant_code của SP khác (Task 1)
-                        if (errorMsg == null
-                                && variantRepository.findByVariantCodeIgnoreCase(rawCode).isPresent()) {
-                            var conflictVar = variantRepository.findByVariantCodeIgnoreCase(rawCode).get();
-                            // cho phép nếu là default variant của chính SP này (nhưng SP chưa tồn tại → lỗi)
-                            errorMsg = "Mã '" + rawCode + "' đã được dùng làm mã variant của SP '"
-                                    + conflictVar.getProduct().getCode() + "'";
+                        if (errorMsg == null) {
+                            ProductVariant conflictVar = ctx.variantByNormalizedCode().get(
+                                    normalizeVariantCodeKey(rawCode));
+                            if (conflictVar != null) {
+                                errorMsg = "Mã '" + rawCode + "' đã được dùng làm mã variant của SP '"
+                                        + conflictVar.getProduct().getCode() + "'";
+                            }
                         }
                     }
 
                     if (errorMsg == null) {
                         // R9: trùng tên trong DM → SKIP
-                        Optional<Category> catOpt = categoryRepository.findByNameIgnoreCase(categoryName);
-                        if (catOpt.isPresent() &&
-                            productRepository.existsByNameIgnoreCaseAndCategoryId(
-                                    name, catOpt.get().getId())) {
-                            willSkip = true;
+                        Category catResolved = ctx.categoryByLowerName().get(
+                                categoryName.toLowerCase(Locale.ROOT));
+                        if (catResolved != null) {
+                            String nk = catResolved.getId() + "|" + name.toLowerCase(Locale.ROOT);
+                            if (ctx.existingProductNameInCategoryKeys().contains(nk)) {
+                                willSkip = true;
+                            }
                         }
                         if (!willSkip) {
                             boolean saleable = ImportSellableParser.defaultTrue(isSellable);
@@ -440,10 +543,10 @@ public class ExcelImportService {
                     }
                 }
 
-                // ── Resolve mã SP ───────────────────────────────────────��─────
+                // ── Resolve mã SP ───────────────────────────────────────────
                 boolean isAutoCode = (rawCode == null || rawCode.isBlank());
-                boolean isNewCat   = categoryRepository
-                        .findByNameIgnoreCase(categoryName != null ? categoryName : "").isEmpty();
+                boolean isNewCat = categoryName == null || categoryName.isBlank()
+                        || !ctx.categoryByLowerName().containsKey(categoryName.toLowerCase(Locale.ROOT));
                 String resolvedCode = null;
 
                 if (errorMsg == null && !willSkip) {

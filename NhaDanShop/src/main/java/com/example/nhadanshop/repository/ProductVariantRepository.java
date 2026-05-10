@@ -22,6 +22,13 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
     /** Batch load variants for many products (order not guaranteed; sort per-product in service). */
     List<ProductVariant> findByProductIdIn(Collection<Long> productIds);
 
+    @Query("""
+            SELECT DISTINCT v FROM ProductVariant v
+            JOIN FETCH v.product p
+            WHERE p.id IN :productIds
+            """)
+    List<ProductVariant> findByProductIdInWithProduct(@Param("productIds") Collection<Long> productIds);
+
     /** Active variants of one product, same ordering as the full list (default first, then code). */
     List<ProductVariant> findByProductIdAndActiveTrueOrderByIsDefaultDescVariantCodeAsc(Long productId);
 
@@ -31,6 +38,22 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
     /** Lookup variant theo mã — dùng khi scan barcode hoặc import Excel */
     Optional<ProductVariant> findByVariantCode(String variantCode);
     Optional<ProductVariant> findByVariantCodeIgnoreCase(String variantCode);
+
+    /** Bulk case-insensitive variant code match (Excel receipt prescan). */
+    @Query("""
+            SELECT v FROM ProductVariant v
+            JOIN FETCH v.product p
+            WHERE LOWER(v.variantCode) IN :lowers
+            """)
+    List<ProductVariant> findByVariantCodeLowerIn(@Param("lowers") Collection<String> loweredVariantCodes);
+
+    /** All variants for products on sheet + combo components — order matches single-product query. */
+    @Query("""
+            SELECT v FROM ProductVariant v
+            WHERE v.product.id IN :pids
+            ORDER BY v.product.id ASC, v.isDefault DESC, v.variantCode ASC
+            """)
+    List<ProductVariant> findByProductIdsOrderedForReceiptExcel(@Param("pids") Collection<Long> pids);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT v FROM ProductVariant v WHERE v.id = :id")

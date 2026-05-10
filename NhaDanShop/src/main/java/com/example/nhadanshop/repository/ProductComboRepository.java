@@ -4,8 +4,10 @@ import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.entity.ProductComboItem;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -13,6 +15,14 @@ public interface ProductComboRepository extends JpaRepository<ProductComboItem, 
 
     /** Tất cả thành phần của 1 combo product */
     List<ProductComboItem> findByComboProduct(Product comboProduct);
+
+    @Query("""
+            SELECT i FROM ProductComboItem i
+            JOIN FETCH i.comboProduct
+            JOIN FETCH i.product
+            WHERE i.comboProduct.id IN :comboProductIds
+            """)
+    List<ProductComboItem> findByComboProduct_IdIn(@Param("comboProductIds") Collection<Long> comboProductIds);
 
     /** Xóa tất cả thành phần của 1 combo */
     void deleteByComboProduct(Product comboProduct);

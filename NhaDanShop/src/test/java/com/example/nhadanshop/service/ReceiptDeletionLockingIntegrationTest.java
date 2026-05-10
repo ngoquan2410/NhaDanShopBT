@@ -44,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         ProductVariantService.class,
         ProductComboService.class,
         CustomerService.class,
+        StockedCatalogGuardService.class,
         ReceiptDeletionLockingIntegrationTest.TestConfig.class
 })
 class ReceiptDeletionLockingIntegrationTest {

@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -51,6 +52,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
         StockAdjustmentServiceSlice5bIntegrationTest.TestConfig.class
 })
 class StockAdjustmentServiceSlice5bIntegrationTest {
+
+    /** Slice chỉ cover stock adjustment FEFO/guard tăng tồn — không assert stocked-catalog archive policy. */
+    @MockBean
+    private StockedCatalogGuardService stockedCatalogGuardService;
 
     @Autowired
     private StockAdjustmentService stockAdjustmentService;

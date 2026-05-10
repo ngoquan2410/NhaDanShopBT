@@ -30,9 +30,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -318,8 +315,11 @@ public class ProductService {
 
     public String generateProductCode(Category category) {
         String prefix = buildPrefix(category.getName());
-        List<String> existingCodes = productRepository.findAllCodesByCategoryId(category.getId());
-        int maxSeq = extractMaxSequence(existingCodes, prefix);
+        int prefixLen = prefix.length();
+        int startIndex = prefixLen + 1;
+        Integer maxSuffix = productRepository.findMaxNumericSuffixForCategoryPrefix(
+                category.getId(), prefix, prefixLen, startIndex);
+        int maxSeq = maxSuffix == null ? 0 : maxSuffix;
         int nextSeq = maxSeq + 1;
         String format = nextSeq > 999 ? "%s%04d" : "%s%03d";
         String candidate = String.format(format, prefix, nextSeq);
@@ -332,7 +332,7 @@ public class ProductService {
         return candidate;
     }
 
-    static String buildPrefix(String categoryName) {
+    public static String buildPrefix(String categoryName) {
         if (categoryName == null || categoryName.isBlank()) return "SP";
         String normalized = removeVietnameseDiacritics(categoryName.trim());
         String[] words = normalized.split("\\s+");
@@ -341,20 +341,6 @@ public class ProductService {
             if (!word.isEmpty() && sb.length() < 4) sb.append(Character.toUpperCase(word.charAt(0)));
         }
         return sb.length() == 0 ? "SP" : sb.toString();
-    }
-
-    static int extractMaxSequence(List<String> codes, String prefix) {
-        Pattern pattern = Pattern.compile("^" + Pattern.quote(prefix) + "(\\d+)$", Pattern.CASE_INSENSITIVE);
-        int max = 0;
-        for (String code : codes) {
-            if (code == null) continue;
-            Matcher m = pattern.matcher(code.trim());
-            if (m.matches()) {
-                try { int seq = Integer.parseInt(m.group(1)); if (seq > max) max = seq; }
-                catch (NumberFormatException ignored) {}
-            }
-        }
-        return max;
     }
 
     private static String removeVietnameseDiacritics(String s) {

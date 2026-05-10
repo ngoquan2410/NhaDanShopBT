@@ -17,6 +17,7 @@ import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -27,8 +28,11 @@ import jakarta.persistence.criteria.Predicate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.Locale;
@@ -82,14 +86,49 @@ public class PromotionService {
         String normalizedStatus = normalizeStatus(status);
         String normalizedType = normalizeBlank(type);
         boolean safeIncludeArchived = Boolean.TRUE.equals(includeArchived);
-        return promotionRepo
-                .findAll(buildAdminListSpec(normalizedSearch, normalizedStatus, normalizedType, safeIncludeArchived), safePageable)
-                .map(this::toResponse);
+        Specification<Promotion> spec = buildAdminListSpec(
+                normalizedSearch, normalizedStatus, normalizedType, safeIncludeArchived);
+        Page<Promotion> promotionPage = promotionRepo.findAll(spec, safePageable);
+        List<Long> ids = promotionPage.getContent().stream().map(Promotion::getId).toList();
+        if (ids.isEmpty()) {
+            return new PageImpl<>(List.of(), safePageable, promotionPage.getTotalElements());
+        }
+        List<Promotion> hydrated = promotionRepo.findAllByIdInWithDetails(ids);
+        Map<Long, Promotion> byId = hydrated.stream().collect(Collectors.toMap(Promotion::getId, p -> p));
+        Map<Long, String> giftNames = loadGiftProductNames(hydrated);
+        List<PromotionResponse> ordered = ids.stream()
+                .map(id -> toResponse(byId.get(id), giftNames))
+                .toList();
+        return new PageImpl<>(ordered, safePageable, promotionPage.getTotalElements());
     }
 
     public List<PromotionResponse> listActive() {
-        return promotionRepo.findCurrentlyActive(LocalDateTime.now())
-                .stream().map(this::toResponse).collect(Collectors.toList());
+        List<Promotion> lightweight = promotionRepo.findCurrentlyActive(LocalDateTime.now());
+        if (lightweight.isEmpty()) {
+            return List.of();
+        }
+        List<Long> ids = lightweight.stream().map(Promotion::getId).toList();
+        List<Promotion> hydrated = promotionRepo.findAllByIdInWithDetails(ids);
+        Map<Long, Promotion> byId = hydrated.stream().collect(Collectors.toMap(Promotion::getId, p -> p));
+        Map<Long, String> giftNames = loadGiftProductNames(hydrated);
+        return ids.stream()
+                .map(id -> toResponse(byId.get(id), giftNames))
+                .collect(Collectors.toList());
+    }
+
+    private Map<Long, String> loadGiftProductNames(List<Promotion> promotions) {
+        Set<Long> giftIds = promotions.stream()
+                .map(Promotion::getGetProductId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (giftIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, String> out = new HashMap<>();
+        for (Product pr : productRepo.findAllById(giftIds)) {
+            out.put(pr.getId(), pr.getName());
+        }
+        return out;
     }
 
     public void delete(Long id) {
@@ -204,6 +243,10 @@ public class PromotionService {
     }
 
     private PromotionResponse toResponse(Promotion p) {
+        return toResponse(p, null);
+    }
+
+    private PromotionResponse toResponse(Promotion p, Map<Long, String> giftProductNames) {
         List<Long> catIds = p.getCategories().stream().map(c -> c.getId()).collect(Collectors.toList());
         List<String> catNames = p.getCategories().stream().map(c -> c.getName()).collect(Collectors.toList());
         List<Long> prodIds = p.getProducts().stream().map(pr -> pr.getId()).collect(Collectors.toList());
@@ -212,8 +255,12 @@ public class PromotionService {
         // Tên sản phẩm tặng (BUY_X_GET_Y)
         String getProductName = null;
         if (p.getGetProductId() != null) {
-            getProductName = productRepo.findById(p.getGetProductId())
-                    .map(Product::getName).orElse(null);
+            if (giftProductNames != null) {
+                getProductName = giftProductNames.get(p.getGetProductId());
+            } else {
+                getProductName = productRepo.findById(p.getGetProductId())
+                        .map(Product::getName).orElse(null);
+            }
         }
 
         Integer maxGiftApplications = "QUANTITY_GIFT".equals(p.getType()) ? p.getMaxBuyQty() : null;

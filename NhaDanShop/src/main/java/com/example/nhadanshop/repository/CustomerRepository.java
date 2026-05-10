@@ -61,4 +61,18 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     @Modifying
     @Query("UPDATE Customer c SET c.totalSpend = c.totalSpend + :amount, c.updatedAt = CURRENT_TIMESTAMP WHERE c.id = :id")
     void addSpend(@Param("id") Long id, @Param("amount") BigDecimal amount);
+
+    /**
+     * Max numeric suffix for auto codes {@code KH001}… (ignores rows that do not match {@code KH + digits}).
+     * Portable SQL (H2 + PostgreSQL): digit-only tail via nested REPLACE, no full table scan of codes in app.
+     */
+    @Query(value = """
+            SELECT MAX(CAST(SUBSTRING(c.code, 3) AS BIGINT))
+            FROM customers c
+            WHERE LENGTH(c.code) > 2
+              AND UPPER(SUBSTRING(c.code, 1, 2)) = 'KH'
+              AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+                    SUBSTRING(c.code, 3), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = ''
+            """, nativeQuery = true)
+    Long findMaxKhAutoNumericSuffix();
 }

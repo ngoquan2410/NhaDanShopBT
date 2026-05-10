@@ -18,6 +18,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -32,7 +33,6 @@ public class SalesQuoteService {
     private static final int QUOTE_TTL_MINUTES = 30;
 
     private final ProductRepository productRepo;
-    private final ProductVariantService variantService;
     private final ProductVariantRepository variantRepo;
     private final PromotionRepository promotionRepository;
     private final ProductBatchRepository batchRepo;
@@ -83,6 +83,8 @@ public class SalesQuoteService {
             }
         }
 
+        QuoteContext quoteCtx = buildQuoteContext(req, selectedPromo);
+
         BigDecimal merchandiseSubtotal = BigDecimal.ZERO;
         List<SalesQuoteCapturedLineDto> capturedBillableBare = new ArrayList<>();
         List<CommercialPricingEngine.BillableAllocationRow> billableRows = new ArrayList<>();
@@ -93,15 +95,13 @@ public class SalesQuoteService {
             if (line.rewardLine()) {
                 throw new IllegalArgumentException("Khong gui rewardLine tu client — tang qua chi do backend tao");
             }
-            Product product = productRepo.findById(line.productId())
-                    .orElseThrow(() -> new EntityNotFoundException("Khong tim thay san pham ID: " + line.productId()));
+            Product product = requireProduct(quoteCtx, line.productId());
             if (!product.getActive()) {
                 throw new IllegalArgumentException("San pham '" + product.getName() + "' da ngung kinh doanh");
             }
 
             if (product.isCombo()) {
-                ProductVariant variant = variantService.resolveVariant(line.variantId(), product.getId(), true);
-                variantRepo.findById(variant.getId()).orElseThrow();
+                ProductVariant variant = resolveVariantForQuote(quoteCtx, line.variantId(), product.getId(), true);
                 if (!Boolean.TRUE.equals(variant.getActive())) {
                     throw new IllegalArgumentException("Variant '" + variant.getVariantCode() + "' khong hoat dong");
                 }
@@ -111,13 +111,14 @@ public class SalesQuoteService {
                 if (line.batchId() != null) {
                     throw new IllegalArgumentException("Combo quote khong ho tro batchId");
                 }
-                List<ProductComboItem> comboItems = comboItemRepo.findByComboProduct(product);
+                List<ProductComboItem> comboItems = quoteCtx.comboItemsByComboProductId()
+                        .getOrDefault(product.getId(), List.of());
                 if (comboItems.isEmpty()) {
                     throw new IllegalStateException("Combo '" + product.getName() + "' chua co thanh phan");
                 }
                 int comboQty = line.quantity();
                 for (ProductComboItem ci : comboItems) {
-                    ProductVariant compVariant = variantService.resolveVariant(null, ci.getProduct().getId(), false);
+                    ProductVariant compVariant = resolveVariantForQuote(quoteCtx, null, ci.getProduct().getId(), false);
                     int required = ci.getQuantity() * comboQty;
                     if (compVariant.getStockQty() < required) {
                         throw new IllegalArgumentException(
@@ -148,8 +149,7 @@ public class SalesQuoteService {
                 continue;
             }
 
-            ProductVariant variant = variantService.resolveVariant(line.variantId(), product.getId(), true);
-            variantRepo.findById(variant.getId()).orElseThrow();
+            ProductVariant variant = resolveVariantForQuote(quoteCtx, line.variantId(), product.getId(), true);
             if (!Boolean.TRUE.equals(variant.getActive())) {
                 throw new IllegalArgumentException("Variant '" + variant.getVariantCode() + "' khong hoat dong");
             }
@@ -158,8 +158,10 @@ public class SalesQuoteService {
             }
 
             if (line.batchId() != null) {
-                ProductBatch batch = batchRepo.findByIdWithVariantAndProduct(line.batchId())
-                        .orElseThrow(() -> new EntityNotFoundException("Khong tim thay lo hang batchId=" + line.batchId()));
+                ProductBatch batch = quoteCtx.batchById().get(line.batchId());
+                if (batch == null) {
+                    throw new EntityNotFoundException("Khong tim thay lo hang batchId=" + line.batchId());
+                }
                 if (!batch.getVariant().getId().equals(variant.getId())) {
                     throw new IllegalArgumentException("batchId khong thuoc variant da chon — chi dung trace kho.");
                 }
@@ -194,7 +196,7 @@ public class SalesQuoteService {
 
         Promotion appliedPromo = selectedPromo;
         try {
-            capturedRewards.addAll(buildPromotionRewardLines(appliedPromo, req.lines(), merchandiseSubtotal));
+            capturedRewards.addAll(buildPromotionRewardLines(appliedPromo, req.lines(), merchandiseSubtotal, quoteCtx));
         } catch (IllegalArgumentException ex) {
             if (req.promotionId() != null) {
                 selectedPromotionInvalidReason = selectedPromotionInvalidReason != null
@@ -215,7 +217,7 @@ public class SalesQuoteService {
             }
             appliedPromo = null;
         }
-        assertVariantDemandAvailable(capturedBillableBare, capturedRewards);
+        assertVariantDemandAvailable(quoteCtx, capturedBillableBare, capturedRewards);
 
         BigDecimal manual = req.manualDiscount() != null ? req.manualDiscount() : BigDecimal.ZERO;
         BigDecimal shipFee;
@@ -273,7 +275,7 @@ public class SalesQuoteService {
         }
 
         BigDecimal rawShippingDiscountFromPromotion =
-                computePromotionShippingDiscount(appliedPromo, req.lines(), merchandiseSubtotal, shipFee);
+                computePromotionShippingDiscount(appliedPromo, req.lines(), merchandiseSubtotal, shipFee, quoteCtx);
         BigDecimal actualPromoShippingDiscount = rawShippingDiscountFromPromotion.min(shipFee).max(BigDecimal.ZERO);
         BigDecimal remainingShippingForVoucher = shipFee.subtract(actualPromoShippingDiscount).max(BigDecimal.ZERO);
         BigDecimal actualVoucherShippingDiscount = rawShippingDiscountFromVoucher.min(remainingShippingForVoucher).max(BigDecimal.ZERO);
@@ -359,8 +361,8 @@ public class SalesQuoteService {
             }
         }
 
-        List<PromotionAffectedLineDto> affectedSnapshots = mapAffectedLineSnapshots(capturedBillable);
-        List<GiftLineSnapshotDto> giftSnapshots = mapGiftSnapshots(capturedRewards, appliedPromo);
+        List<PromotionAffectedLineDto> affectedSnapshots = mapAffectedLineSnapshots(quoteCtx, capturedBillable);
+        List<GiftLineSnapshotDto> giftSnapshots = mapGiftSnapshots(quoteCtx, capturedRewards, appliedPromo);
         PromotionSnapshotDto promotionSnapshot = appliedPromo == null ? null : new PromotionSnapshotDto(
                 String.valueOf(appliedPromo.getId()),
                 appliedPromo.getName(),
@@ -404,11 +406,11 @@ public class SalesQuoteService {
 
         List<SalesQuoteLineResponse> lineResponses = new ArrayList<>();
         for (SalesQuoteCapturedLineDto c : capturedBillable) {
-            lineResponses.add(toLineResponse(c));
+            lineResponses.add(toLineResponse(quoteCtx, c));
         }
         List<SalesQuoteLineResponse> rewardResponses = new ArrayList<>();
         for (SalesQuoteCapturedLineDto c : capturedRewards) {
-            rewardResponses.add(toLineResponse(c));
+            rewardResponses.add(toLineResponse(quoteCtx, c));
         }
 
         Long fallbackPromotionId = resolveFallbackPromotionId(
@@ -493,7 +495,8 @@ public class SalesQuoteService {
             Promotion promo,
             List<SalesQuoteLineRequest> reqLines,
             BigDecimal merchandiseSubtotal,
-            BigDecimal shippingFee
+            BigDecimal shippingFee,
+            QuoteContext quoteCtx
     ) {
         if (promo == null || !"FREE_SHIPPING".equals(promo.getType())) {
             return BigDecimal.ZERO;
@@ -502,11 +505,11 @@ public class SalesQuoteService {
             return BigDecimal.ZERO;
         }
         BigDecimal minOrder = promo.getMinOrderValue() != null ? promo.getMinOrderValue() : BigDecimal.ZERO;
-        BigDecimal minOrderBasis = minOrderBasisForQuote(promo, reqLines, merchandiseSubtotal);
+        BigDecimal minOrderBasis = minOrderBasisForQuote(promo, reqLines, merchandiseSubtotal, quoteCtx);
         if (minOrderBasis.compareTo(minOrder) < 0) {
             return BigDecimal.ZERO;
         }
-        if (eligiblePromoUnits(promo, reqLines) <= 0) {
+        if (eligiblePromoUnits(promo, reqLines, quoteCtx) <= 0) {
             return BigDecimal.ZERO;
         }
         BigDecimal cap = promo.getMaxDiscount() != null && promo.getMaxDiscount().compareTo(BigDecimal.ZERO) > 0
@@ -518,7 +521,8 @@ public class SalesQuoteService {
     private List<SalesQuoteCapturedLineDto> buildPromotionRewardLines(
             Promotion promo,
             List<SalesQuoteLineRequest> reqLines,
-            BigDecimal merchandiseSubtotal
+            BigDecimal merchandiseSubtotal,
+            QuoteContext quoteCtx
     ) {
         if (promo == null) {
             return List.of();
@@ -528,27 +532,26 @@ public class SalesQuoteService {
             return List.of();
         }
         BigDecimal minOrder = promo.getMinOrderValue() != null ? promo.getMinOrderValue() : BigDecimal.ZERO;
-        BigDecimal minOrderBasis = minOrderBasisForQuote(promo, reqLines, merchandiseSubtotal);
+        BigDecimal minOrderBasis = minOrderBasisForQuote(promo, reqLines, merchandiseSubtotal, quoteCtx);
         if (minOrderBasis.compareTo(minOrder) < 0) {
             return List.of();
         }
         if ("BUY_X_GET_Y".equals(type)) {
-            return buildBuyXGetYRewards(promo, reqLines);
+            return buildBuyXGetYRewards(promo, reqLines, quoteCtx);
         }
         if ("QUANTITY_GIFT".equals(type)) {
-            return buildQuantityGiftRewards(promo, reqLines);
+            return buildQuantityGiftRewards(promo, reqLines, quoteCtx);
         }
         return List.of();
     }
 
-    private int eligiblePromoUnits(Promotion promo, List<SalesQuoteLineRequest> reqLines) {
+    private int eligiblePromoUnits(Promotion promo, List<SalesQuoteLineRequest> reqLines, QuoteContext quoteCtx) {
         int sum = 0;
         for (SalesQuoteLineRequest line : reqLines) {
             if (line.rewardLine()) {
                 continue;
             }
-            Product p = productRepo.findById(line.productId())
-                    .orElseThrow(() -> new EntityNotFoundException("Khong tim thay san pham ID: " + line.productId()));
+            Product p = requireProduct(quoteCtx, line.productId());
             if (productMatchesPromotion(promo, p)) {
                 sum += line.quantity();
             }
@@ -581,14 +584,13 @@ public class SalesQuoteService {
         return "WHOLE_ORDER".equalsIgnoreCase(promo.getMinOrderScope());
     }
 
-    private BigDecimal eligibleSubtotalForQuote(Promotion promo, List<SalesQuoteLineRequest> reqLines) {
+    private BigDecimal eligibleSubtotalForQuote(Promotion promo, List<SalesQuoteLineRequest> reqLines, QuoteContext quoteCtx) {
         BigDecimal subtotal = BigDecimal.ZERO;
         for (SalesQuoteLineRequest line : reqLines) {
             if (line.rewardLine()) continue;
-            Product p = productRepo.findById(line.productId())
-                    .orElseThrow(() -> new EntityNotFoundException("Khong tim thay san pham ID: " + line.productId()));
+            Product p = requireProduct(quoteCtx, line.productId());
             if (!productMatchesPromotion(promo, p)) continue;
-            ProductVariant variant = variantService.resolveVariant(line.variantId(), p.getId(), true);
+            ProductVariant variant = resolveVariantForQuote(quoteCtx, line.variantId(), p.getId(), true);
             BigDecimal lineDisc = line.discountPercent() != null ? line.discountPercent() : BigDecimal.ZERO;
             BigDecimal factor = BigDecimal.ONE.subtract(
                     lineDisc.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP));
@@ -598,18 +600,24 @@ public class SalesQuoteService {
         return subtotal;
     }
 
-    private BigDecimal minOrderBasisForQuote(Promotion promo, List<SalesQuoteLineRequest> reqLines, BigDecimal merchandiseSubtotal) {
+    private BigDecimal minOrderBasisForQuote(
+            Promotion promo,
+            List<SalesQuoteLineRequest> reqLines,
+            BigDecimal merchandiseSubtotal,
+            QuoteContext quoteCtx
+    ) {
         if (minOrderWholeOrder(promo)) {
             return merchandiseSubtotal != null ? merchandiseSubtotal : BigDecimal.ZERO;
         }
-        return eligibleSubtotalForQuote(promo, reqLines);
+        return eligibleSubtotalForQuote(promo, reqLines, quoteCtx);
     }
 
     private static boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
     }
 
-    private List<SalesQuoteCapturedLineDto> buildBuyXGetYRewards(Promotion promo, List<SalesQuoteLineRequest> reqLines) {
+    private List<SalesQuoteCapturedLineDto> buildBuyXGetYRewards(
+            Promotion promo, List<SalesQuoteLineRequest> reqLines, QuoteContext quoteCtx) {
         Integer buyQty = promo.getBuyQty();
         Integer yQty = promo.getGetQty();
         Long giftPid = promo.getGetProductId();
@@ -632,14 +640,14 @@ public class SalesQuoteService {
             if (times <= 0) {
                 return List.of();
             }
-            return List.of(mkRewardCapturedLine(giftPid, times * yQty));
+            return List.of(mkRewardCapturedLine(quoteCtx, giftPid, times * yQty));
         }
-        Map<Long, Integer> qtyByProduct = qtyByProductMatchingPromotion(promo, reqLines);
+        Map<Long, Integer> qtyByProduct = qtyByProductMatchingPromotion(promo, reqLines, quoteCtx);
         int times = PromotionRewardCalculator.buyXGetYTimes(promo, qtyByProduct);
         if (times <= 0) {
             return List.of();
         }
-        return List.of(mkRewardCapturedLine(giftPid, times * yQty));
+        return List.of(mkRewardCapturedLine(quoteCtx, giftPid, times * yQty));
     }
 
     private static boolean isLegacyAllScopeBuyXGetY(Promotion promo) {
@@ -656,7 +664,8 @@ public class SalesQuoteService {
         return p.getProducts() == null || p.getProducts().isEmpty();
     }
 
-    private List<SalesQuoteCapturedLineDto> buildQuantityGiftRewards(Promotion promo, List<SalesQuoteLineRequest> reqLines) {
+    private List<SalesQuoteCapturedLineDto> buildQuantityGiftRewards(
+            Promotion promo, List<SalesQuoteLineRequest> reqLines, QuoteContext quoteCtx) {
         Integer yQty = promo.getGetQty();
         Long giftPid = promo.getGetProductId();
         if (yQty == null || yQty <= 0 || giftPid == null) {
@@ -673,23 +682,23 @@ public class SalesQuoteService {
                 qtyByProduct.merge(line.productId(), line.quantity(), Integer::sum);
             }
         } else {
-            qtyByProduct = qtyByProductMatchingPromotion(promo, reqLines);
+            qtyByProduct = qtyByProductMatchingPromotion(promo, reqLines, quoteCtx);
         }
         int times = PromotionRewardCalculator.quantityGiftTimes(promo, qtyByProduct);
         if (times <= 0) {
             return List.of();
         }
-        return List.of(mkRewardCapturedLine(giftPid, times * yQty));
+        return List.of(mkRewardCapturedLine(quoteCtx, giftPid, times * yQty));
     }
 
-    private Map<Long, Integer> qtyByProductMatchingPromotion(Promotion promo, List<SalesQuoteLineRequest> reqLines) {
+    private Map<Long, Integer> qtyByProductMatchingPromotion(
+            Promotion promo, List<SalesQuoteLineRequest> reqLines, QuoteContext quoteCtx) {
         Map<Long, Integer> m = new HashMap<>();
         for (SalesQuoteLineRequest line : reqLines) {
             if (line.rewardLine()) {
                 continue;
             }
-            Product p = productRepo.findById(line.productId())
-                    .orElseThrow(() -> new EntityNotFoundException("Khong tim thay san pham ID: " + line.productId()));
+            Product p = requireProduct(quoteCtx, line.productId());
             if (productMatchesPromotion(promo, p)) {
                 m.merge(line.productId(), line.quantity(), Integer::sum);
             }
@@ -698,6 +707,7 @@ public class SalesQuoteService {
     }
 
     private void assertVariantDemandAvailable(
+            QuoteContext quoteCtx,
             List<SalesQuoteCapturedLineDto> billableLines,
             List<SalesQuoteCapturedLineDto> rewardLines) {
         Map<Long, Integer> demandByVariant = new HashMap<>();
@@ -707,11 +717,21 @@ public class SalesQuoteService {
         for (SalesQuoteCapturedLineDto line : rewardLines) {
             demandByVariant.merge(line.variantId(), line.quantity(), Integer::sum);
         }
+        if (demandByVariant.isEmpty()) {
+            return;
+        }
+        LocalDate today = LocalDate.now(businessClock);
+        List<Long> variantIds = new ArrayList<>(demandByVariant.keySet());
+        Map<Long, Integer> sellableByVariant = new HashMap<>();
+        for (Object[] row : batchRepo.sumSellableRemainingQtyByVariantIds(variantIds, today)) {
+            sellableByVariant.put((Long) row[0], ((Number) row[1]).intValue());
+        }
         for (Map.Entry<Long, Integer> entry : demandByVariant.entrySet()) {
-            ProductVariant variant = variantRepo.findById(entry.getKey()).orElseThrow();
-            int sellableQty = batchRepo.sumSellableRemainingQtyByVariantId(
-                    entry.getKey(),
-                    LocalDate.now(businessClock));
+            ProductVariant variant = quoteCtx.variantById().get(entry.getKey());
+            if (variant == null) {
+                throw new IllegalStateException("Thieu variant trong quote context: " + entry.getKey());
+            }
+            int sellableQty = sellableByVariant.getOrDefault(entry.getKey(), 0);
             if (sellableQty < entry.getValue()) {
                 throw new IllegalArgumentException(
                         "Không đủ tồn bán được cho đơn hàng và quà tặng [" + variant.getVariantCode()
@@ -720,17 +740,18 @@ public class SalesQuoteService {
         }
     }
 
-    private SalesQuoteCapturedLineDto mkRewardCapturedLine(Long giftProductId, int rewardQty) {
-        Product giftProduct = productRepo.findById(giftProductId)
-                .orElseThrow(() -> new IllegalArgumentException("Qua tang: khong tim thay san pham " + giftProductId));
+    private SalesQuoteCapturedLineDto mkRewardCapturedLine(QuoteContext quoteCtx, Long giftProductId, int rewardQty) {
+        Product giftProduct = quoteCtx.productById().get(giftProductId);
+        if (giftProduct == null) {
+            throw new IllegalArgumentException("Qua tang: khong tim thay san pham " + giftProductId);
+        }
         if (!giftProduct.getActive()) {
             throw new IllegalArgumentException("Qua tang: san pham " + giftProduct.getName() + " da ngung kinh doanh");
         }
         if (giftProduct.isCombo()) {
             throw new IllegalArgumentException("Qua tang: combo chua ho tro");
         }
-        ProductVariant giftVariant = variantService.resolveVariant(null, giftProduct.getId(), true);
-        giftVariant = variantRepo.findById(giftVariant.getId()).orElseThrow();
+        ProductVariant giftVariant = resolveVariantForQuote(quoteCtx, null, giftProduct.getId(), true);
         if (!Boolean.TRUE.equals(giftVariant.getActive()) || !Boolean.TRUE.equals(giftVariant.getIsSellable())) {
             throw new IllegalArgumentException("Qua tang: variant khong ban duoc");
         }
@@ -763,7 +784,8 @@ public class SalesQuoteService {
         );
     }
 
-    private List<GiftLineSnapshotDto> mapGiftSnapshots(List<SalesQuoteCapturedLineDto> rewards, Promotion promo) {
+    private List<GiftLineSnapshotDto> mapGiftSnapshots(
+            QuoteContext quoteCtx, List<SalesQuoteCapturedLineDto> rewards, Promotion promo) {
         if (rewards.isEmpty()) {
             return List.of();
         }
@@ -771,8 +793,11 @@ public class SalesQuoteService {
         String promoName = promo == null ? null : promo.getName();
         List<GiftLineSnapshotDto> out = new ArrayList<>();
         for (SalesQuoteCapturedLineDto r : rewards) {
-            Product p = productRepo.findById(r.productId()).orElseThrow();
-            ProductVariant v = variantRepo.findById(r.variantId()).orElseThrow();
+            Product p = requireProduct(quoteCtx, r.productId());
+            ProductVariant v = quoteCtx.variantById().get(r.variantId());
+            if (v == null) {
+                throw new IllegalStateException("Thieu variant trong quote context: " + r.variantId());
+            }
             out.add(new GiftLineSnapshotDto(
                     String.valueOf(r.productId()),
                     String.valueOf(r.variantId()),
@@ -788,7 +813,8 @@ public class SalesQuoteService {
         return out;
     }
 
-    private List<PromotionAffectedLineDto> mapAffectedLineSnapshots(List<SalesQuoteCapturedLineDto> billableLines) {
+    private List<PromotionAffectedLineDto> mapAffectedLineSnapshots(
+            QuoteContext quoteCtx, List<SalesQuoteCapturedLineDto> billableLines) {
         List<PromotionAffectedLineDto> out = new ArrayList<>();
         for (SalesQuoteCapturedLineDto line : billableLines) {
             if (line.rewardLine() || line.commercialSnapshot() == null) {
@@ -798,8 +824,11 @@ public class SalesQuoteService {
             if (allocatedPromotionDiscount == null || allocatedPromotionDiscount.compareTo(BigDecimal.ZERO) <= 0) {
                 continue;
             }
-            Product product = productRepo.findById(line.productId()).orElseThrow();
-            ProductVariant variant = variantRepo.findById(line.variantId()).orElseThrow();
+            Product product = requireProduct(quoteCtx, line.productId());
+            ProductVariant variant = quoteCtx.variantById().get(line.variantId());
+            if (variant == null) {
+                throw new IllegalStateException("Thieu variant trong quote context: " + line.variantId());
+            }
             out.add(new PromotionAffectedLineDto(
                     null,
                     String.valueOf(line.productId()),
@@ -815,9 +844,12 @@ public class SalesQuoteService {
         return out;
     }
 
-    private SalesQuoteLineResponse toLineResponse(SalesQuoteCapturedLineDto c) {
-        Product p = productRepo.findById(c.productId()).orElseThrow();
-        ProductVariant v = variantRepo.findById(c.variantId()).orElseThrow();
+    private SalesQuoteLineResponse toLineResponse(QuoteContext quoteCtx, SalesQuoteCapturedLineDto c) {
+        Product p = requireProduct(quoteCtx, c.productId());
+        ProductVariant v = quoteCtx.variantById().get(c.variantId());
+        if (v == null) {
+            throw new IllegalStateException("Thieu variant trong quote context: " + c.variantId());
+        }
         return new SalesQuoteLineResponse(
                 c.productId(),
                 c.variantId(),
@@ -833,4 +865,201 @@ public class SalesQuoteService {
                 c.commercialSnapshot()
         );
     }
+
+    private QuoteContext buildQuoteContext(SalesQuoteRequest req, Promotion selectedPromo) {
+        Set<Long> productIdsToLoad = new HashSet<>();
+        Set<Long> explicitVariantIds = new HashSet<>();
+        Set<Long> batchIds = new HashSet<>();
+        for (SalesQuoteLineRequest line : req.lines()) {
+            productIdsToLoad.add(line.productId());
+            if (line.variantId() != null) {
+                explicitVariantIds.add(line.variantId());
+            }
+            if (line.batchId() != null) {
+                batchIds.add(line.batchId());
+            }
+        }
+        if (selectedPromo != null) {
+            String promoType = selectedPromo.getType();
+            if (("BUY_X_GET_Y".equals(promoType) || "QUANTITY_GIFT".equals(promoType))
+                    && selectedPromo.getGetProductId() != null) {
+                productIdsToLoad.add(selectedPromo.getGetProductId());
+            }
+        }
+
+        Map<Long, Product> productById = new HashMap<>();
+        if (!productIdsToLoad.isEmpty()) {
+            for (Product p : productRepo.findAllById(productIdsToLoad)) {
+                productById.put(p.getId(), p);
+            }
+        }
+
+        Set<Long> comboProductIds = new HashSet<>();
+        for (SalesQuoteLineRequest line : req.lines()) {
+            Product p = productById.get(line.productId());
+            if (p != null && p.isCombo()) {
+                comboProductIds.add(p.getId());
+            }
+        }
+
+        Map<Long, List<ProductComboItem>> comboItemsByComboProductId = new HashMap<>();
+        if (!comboProductIds.isEmpty()) {
+            for (ProductComboItem ci : comboItemRepo.findByComboProduct_IdIn(comboProductIds)) {
+                Long comboId = ci.getComboProduct().getId();
+                comboItemsByComboProductId.computeIfAbsent(comboId, k -> new ArrayList<>()).add(ci);
+                Product comp = ci.getProduct();
+                if (comp != null) {
+                    productById.putIfAbsent(comp.getId(), comp);
+                }
+            }
+        }
+
+        Set<Long> needDefault = new HashSet<>();
+        for (SalesQuoteLineRequest line : req.lines()) {
+            if (line.variantId() == null) {
+                needDefault.add(line.productId());
+            }
+            Product p = productById.get(line.productId());
+            if (p != null && p.isCombo()) {
+                for (ProductComboItem ci : comboItemsByComboProductId.getOrDefault(p.getId(), List.of())) {
+                    needDefault.add(ci.getProduct().getId());
+                }
+            }
+        }
+        if (selectedPromo != null) {
+            String promoType = selectedPromo.getType();
+            if (("BUY_X_GET_Y".equals(promoType) || "QUANTITY_GIFT".equals(promoType))
+                    && selectedPromo.getGetProductId() != null) {
+                needDefault.add(selectedPromo.getGetProductId());
+            }
+        }
+
+        Map<Long, ProductVariant> variantById = new HashMap<>();
+        if (!explicitVariantIds.isEmpty()) {
+            for (ProductVariant v : variantRepo.findAllById(explicitVariantIds)) {
+                variantById.put(v.getId(), v);
+            }
+            for (Long vid : explicitVariantIds) {
+                if (!variantById.containsKey(vid)) {
+                    throw new EntityNotFoundException("Không tìm thấy variant ID: " + vid);
+                }
+            }
+        }
+
+        Map<Long, ProductVariant> defaultVariantByProductId = new HashMap<>();
+        if (!needDefault.isEmpty()) {
+            List<ProductVariant> loaded = variantRepo.findByProductIdInWithProduct(needDefault);
+            Map<Long, List<ProductVariant>> byProduct = new HashMap<>();
+            for (ProductVariant v : loaded) {
+                byProduct.computeIfAbsent(v.getProduct().getId(), k -> new ArrayList<>()).add(v);
+            }
+            for (Long pid : needDefault) {
+                List<ProductVariant> vs = byProduct.getOrDefault(pid, List.of());
+                ProductVariant def = vs.stream()
+                        .filter(x -> Boolean.TRUE.equals(x.getIsDefault()))
+                        .findFirst()
+                        .orElse(null);
+                if (def == null) {
+                    throw new EntityNotFoundException(
+                            "SP ID " + pid + " chưa có default variant. " +
+                            "Hãy tạo variant và set is_default=true.");
+                }
+                defaultVariantByProductId.put(pid, def);
+                variantById.putIfAbsent(def.getId(), def);
+            }
+        }
+
+        Map<Long, ProductBatch> batchById = new HashMap<>();
+        if (!batchIds.isEmpty()) {
+            for (ProductBatch b : batchRepo.findAllByIdWithVariantAndProductIn(batchIds)) {
+                batchById.put(b.getId(), b);
+            }
+            for (Long bid : batchIds) {
+                if (!batchById.containsKey(bid)) {
+                    throw new EntityNotFoundException("Khong tim thay lo hang batchId=" + bid);
+                }
+            }
+        }
+
+        return new QuoteContext(
+                productById,
+                variantById,
+                defaultVariantByProductId,
+                batchById,
+                comboItemsByComboProductId);
+    }
+
+    private Product requireProduct(QuoteContext ctx, long productId) {
+        Product p = ctx.productById().get(productId);
+        if (p == null) {
+            throw new EntityNotFoundException("Khong tim thay san pham ID: " + productId);
+        }
+        return p;
+    }
+
+    private ProductVariant resolveVariantForQuote(
+            QuoteContext ctx,
+            Long variantId,
+            Long productId,
+            boolean requireSellableForSales
+    ) {
+        if (variantId != null) {
+            ProductVariant v = ctx.variantById().get(variantId);
+            if (v == null) {
+                throw new EntityNotFoundException("Không tìm thấy variant ID: " + variantId);
+            }
+            if (!v.getProduct().getId().equals(productId)) {
+                throw new IllegalArgumentException(
+                        "Variant '" + v.getVariantCode() + "' không thuộc SP ID: " + productId);
+            }
+            if (requireSellableForSales) {
+                assertReadyForCustomerSale(v);
+            } else {
+                if (!Boolean.TRUE.equals(v.getActive())) {
+                    throw new IllegalStateException(
+                            "Variant '" + v.getVariantCode() + "' đã ngừng kinh doanh; không dùng cho giao dịch mới.");
+                }
+            }
+            return v;
+        }
+        ProductVariant def = ctx.defaultVariantByProductId().get(productId);
+        if (def == null) {
+            throw new EntityNotFoundException(
+                    "SP ID " + productId + " chưa có default variant. " +
+                    "Hãy tạo variant và set is_default=true.");
+        }
+        if (requireSellableForSales) {
+            assertReadyForCustomerSale(def);
+        } else {
+            if (!Boolean.TRUE.equals(def.getActive())) {
+                throw new IllegalStateException(
+                        "Default variant của SP ID " + productId + " đã ngừng kinh doanh; không dùng cho giao dịch mới.");
+            }
+        }
+        return def;
+    }
+
+    private void assertReadyForCustomerSale(ProductVariant v) {
+        Product p = v.getProduct();
+        if (!Boolean.TRUE.equals(p.getActive())) {
+            throw new IllegalStateException(
+                    "Sản phẩm '" + p.getName() + "' đã ngừng kinh doanh; không bán thêm trên kênh bán hàng.");
+        }
+        if (!Boolean.TRUE.equals(v.getActive())) {
+            throw new IllegalStateException(
+                    "Variant '" + v.getVariantCode() + "' đã ngừng kinh doanh; không bán thêm trên kênh bán hàng.");
+        }
+        if (!Boolean.TRUE.equals(v.getIsSellable())) {
+            throw new IllegalStateException(
+                    "Variant '" + v.getVariantCode() + "' không bán lẻ (isSellable=false); dùng cho kho/NG, không bán tại quầy/online.");
+        }
+    }
+
+    private record QuoteContext(
+            Map<Long, Product> productById,
+            Map<Long, ProductVariant> variantById,
+            Map<Long, ProductVariant> defaultVariantByProductId,
+            Map<Long, ProductBatch> batchById,
+            Map<Long, List<ProductComboItem>> comboItemsByComboProductId
+    ) {}
 }

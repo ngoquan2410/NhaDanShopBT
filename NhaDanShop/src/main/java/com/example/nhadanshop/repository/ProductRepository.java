@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -20,6 +21,9 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findByActiveTrue();
     Page<Product> findByCategoryIdAndActiveTrue(Long categoryId, Pageable pageable);
     Optional<Product> findByCode(String code);
+
+    List<Product> findByCodeIn(Collection<String> codes);
+
     boolean existsByCode(String code);
     boolean existsByCodeAndIdNot(String code, Long id);
 
@@ -27,10 +31,54 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     boolean existsByNameIgnoreCaseAndCategoryId(String name, Long categoryId);
 
+    /**
+     * Keys for duplicate-name-in-category checks during Excel import prescan.
+     * Returns rows: [0] = category id, [1] = LOWER(TRIM(name)).
+     */
+    @Query("""
+            SELECT p.category.id, LOWER(TRIM(BOTH FROM p.name))
+            FROM Product p
+            WHERE p.category.id IN :catIds
+            """)
+    List<Object[]> findCategoryIdAndNameLowerKeysByCategoryIdIn(@Param("catIds") Collection<Long> catIds);
+
     List<Product> findByNameContainingIgnoreCase(String name);
 
     @Query("SELECT p.code FROM Product p WHERE p.category.id = :categoryId")
     List<String> findAllCodesByCategoryId(@Param("categoryId") Long categoryId);
+
+    /**
+     * Max numeric suffix for product codes in a category matching {@code prefix + digits} (case-insensitive prefix).
+     * {@code startIndex} must be {@code prefix.length() + 1} (1-based SUBSTRING).
+     */
+    @Query(value = """
+            SELECT MAX(CAST(SUBSTRING(p.code, :startIndex) AS INTEGER))
+            FROM products p
+            WHERE p.category_id = :categoryId
+              AND LENGTH(p.code) >= :startIndex
+              AND UPPER(SUBSTRING(p.code, 1, :prefixLen)) = UPPER(:prefix)
+              AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+                    SUBSTRING(p.code, :startIndex), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = ''
+            """, nativeQuery = true)
+    Integer findMaxNumericSuffixForCategoryPrefix(
+            @Param("categoryId") Long categoryId,
+            @Param("prefix") String prefix,
+            @Param("prefixLen") int prefixLen,
+            @Param("startIndex") int startIndex);
+
+    /**
+     * Max numeric suffix for {@code COMBO###} across all combo rows (active or not), matching prior codegen scope.
+     */
+    @Query(value = """
+            SELECT MAX(CAST(SUBSTRING(p.code, 6) AS INTEGER))
+            FROM products p
+            WHERE p.product_type = 'COMBO'
+              AND LENGTH(p.code) > 5
+              AND UPPER(SUBSTRING(p.code, 1, 5)) = 'COMBO'
+              AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+                    SUBSTRING(p.code, 6), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = ''
+            """, nativeQuery = true)
+    Integer findMaxComboAutoNumericSuffix();
 
     // ── Combo queries (KiotViet model) ────────────────────────────────────
     /** Tất cả combo (productType=COMBO) */

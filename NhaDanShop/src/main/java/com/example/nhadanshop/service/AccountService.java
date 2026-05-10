@@ -14,6 +14,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -95,13 +96,7 @@ public class AccountService {
     }
 
     private String nextCustomerCode() {
-        long max = customerRepository.findAll().stream()
-                .map(Customer::getCode)
-                .filter(c -> c != null && c.matches("KH\\d+"))
-                .mapToLong(c -> {
-                    try { return Long.parseLong(c.substring(2)); } catch (Exception e) { return 0L; }
-                })
-                .max().orElse(0L);
+        long max = Optional.ofNullable(customerRepository.findMaxKhAutoNumericSuffix()).orElse(0L);
         String candidate;
         do {
             candidate = String.format("KH%03d", ++max);

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -59,24 +60,14 @@ public class SupplierService {
         return toResponse(supplierRepository.save(s));
     }
 
-    /** Sinh mã NCC tự động: NCC001, NCC002, ... tìm số lớn nhất hiện có rồi +1 */
+    /** Sinh mã NCC tự động: NCC001, … — max suffix (pattern NCC+digits) +1; retry nếu trùng. */
     private String generateNextCode() {
-        long maxNum = supplierRepository.findAll().stream()
-                .map(Supplier::getCode)
-                .filter(c -> c != null && c.matches("NCC\\d+"))
-                .mapToLong(c -> {
-                    try { return Long.parseLong(c.substring(3)); }
-                    catch (NumberFormatException e) { return 0L; }
-                })
-                .max()
-                .orElse(0L);
-
+        long maxNum = Optional.ofNullable(supplierRepository.findMaxNccAutoNumericSuffix()).orElse(0L);
         String candidate;
         do {
             maxNum++;
             candidate = String.format("NCC%03d", maxNum);
         } while (supplierRepository.existsByCode(candidate));
-
         return candidate;
     }
 

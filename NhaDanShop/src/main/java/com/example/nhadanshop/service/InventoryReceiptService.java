@@ -20,10 +20,14 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -83,43 +87,46 @@ public class InventoryReceiptService {
 
         InventoryReceipt saved = receiptRepo.save(receipt);
 
-        // ── Expand combo items → ReceiptItemRequest đơn lẻ ──────────────────
         List<ReceiptItemRequest> allItems = new ArrayList<>();
-        if (req.items() != null) allItems.addAll(req.items());
+        if (req.items() != null) {
+            allItems.addAll(req.items());
+        }
+        expandComboLinesIntoAllItems(req, allItems);
 
-        if (req.comboItems() != null) {
-            for (InventoryReceiptRequest.ComboReceiptRequest cr : req.comboItems()) {
-                Product comboProduct = productRepo.findById(cr.comboId())
-                        .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy combo ID: " + cr.comboId()));
-                if (!comboProduct.isCombo())
-                    throw new IllegalArgumentException("ID " + cr.comboId() + " không phải combo");
-
-                List<ProductComboItem> comboItems = comboRepo.findByComboProduct(comboProduct);
-                int totalComponentQty = comboItems.stream().mapToInt(ProductComboItem::getQuantity).sum();
-                BigDecimal totalComboCost = cr.unitCost().multiply(BigDecimal.valueOf(cr.quantity()));
-
-                for (ProductComboItem ci : comboItems) {
-                    BigDecimal ratio = totalComponentQty > 0
-                            ? BigDecimal.valueOf(ci.getQuantity())
-                              .divide(BigDecimal.valueOf(totalComponentQty), 10, RoundingMode.HALF_UP)
-                            : BigDecimal.ZERO;
-                    BigDecimal componentCost = totalComboCost.multiply(ratio)
-                            .divide(BigDecimal.valueOf(cr.quantity()), 2, RoundingMode.HALF_UP);
-                    // Combo component: dùng ATOMIC (pieces=1) vì qty đã là bán lẻ
-                    allItems.add(new ReceiptItemRequest(
-                            ci.getProduct().getId(),
-                            ci.getQuantity() * cr.quantity(),
-                            componentCost,
-                            safe(cr.discountPercent()),
-                            null, null, null,
-                            null, 1, null, null // importUnit=null, pieces=1, variantId=null, expiryDateOverride=null
-                    ));
-                }
-            }
+        if (allItems.isEmpty()) {
+            throw new IllegalArgumentException("Phiếu nhập phải có ít nhất 1 sản phẩm hoặc combo");
         }
 
-        if (allItems.isEmpty())
-            throw new IllegalArgumentException("Phiếu nhập phải có ít nhất 1 sản phẩm hoặc combo");
+        Set<Long> lineProductIds = allItems.stream()
+                .map(ReceiptItemRequest::productId)
+                .collect(Collectors.toCollection(HashSet::new));
+        List<Product> lineProducts = productRepo.findAllById(lineProductIds);
+        if (lineProducts.size() != lineProductIds.size()) {
+            Set<Long> have = lineProducts.stream().map(Product::getId).collect(Collectors.toSet());
+            Long missing = lineProductIds.stream().filter(id -> !have.contains(id)).findFirst().orElseThrow();
+            throw new EntityNotFoundException("Không tìm thấy SP ID: " + missing);
+        }
+        Map<Long, Product> productById = lineProducts.stream().collect(Collectors.toMap(Product::getId, p -> p));
+
+        List<ProductImportUnit> importUnitsBulk = importUnitRepo.findByProductIdIn(lineProductIds);
+        Map<Long, ProductImportUnit> defaultPiuByProductId = new HashMap<>();
+        Map<Long, Map<String, ProductImportUnit>> piuByProductNormUnit = new HashMap<>();
+        for (ProductImportUnit u : importUnitsBulk) {
+            Long pid = u.getProduct().getId();
+            if (Boolean.TRUE.equals(u.getIsDefault())) {
+                defaultPiuByProductId.putIfAbsent(pid, u);
+            }
+            String norm = u.getImportUnit() == null ? "" : u.getImportUnit().trim().toLowerCase(Locale.ROOT);
+            piuByProductNormUnit.computeIfAbsent(pid, k -> new HashMap<>()).put(norm, u);
+        }
+
+        List<ProductVariant> variantsBulk = variantRepo.findByProductIdInWithProduct(lineProductIds);
+        Map<Long, ProductVariant> defaultVariantByProductId = new HashMap<>();
+        for (ProductVariant v : variantsBulk) {
+            if (Boolean.TRUE.equals(v.getIsDefault())) {
+                defaultVariantByProductId.putIfAbsent(v.getProduct().getId(), v);
+            }
+        }
 
         // ── Pass 1: Resolve pieces + tính discountedLineTotal ──────────────
         List<BigDecimal> discountedLineTotals = new ArrayList<>();
@@ -128,41 +135,35 @@ public class InventoryReceiptService {
         BigDecimal totalDiscountedValue = BigDecimal.ZERO;
 
         for (ReceiptItemRequest itemReq : allItems) {
-            Product product = productRepo.findById(itemReq.productId())
-                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy SP ID: " + itemReq.productId()));
+            Product product = productById.get(itemReq.productId());
 
             // ── Resolve pieces: Excel/Request → product_import_units lookup → product default ──
             int pieces;
             String importUnitUsed;
 
             if (itemReq.importUnit() != null && !itemReq.importUnit().isBlank()) {
-                // Có chỉ định ĐV nhập → lookup bảng product_import_units
                 String reqUnit = itemReq.importUnit().trim();
-                var piu = importUnitRepo.findByProductIdAndImportUnitIgnoreCase(product.getId(), reqUnit);
+                Optional<ProductImportUnit> piu = findImportUnitInIndex(product.getId(), reqUnit, piuByProductNormUnit);
                 if (piu.isPresent()) {
-                    // Ưu tiên: nếu request có pieces override → dùng override; else dùng gợi ý từ DB
                     pieces = (itemReq.piecesOverride() != null && itemReq.piecesOverride() > 0)
                             ? itemReq.piecesOverride()
                             : piu.get().getPiecesPerUnit();
                 } else {
-                    // ĐV chưa đăng ký → dùng pieces từ request hoặc fallback từ default variant
-                    ProductVariant dvFb = product.getDefaultVariant();
+                    ProductVariant dvFb = defaultVariantByProductId.get(product.getId());
                     pieces = (itemReq.piecesOverride() != null && itemReq.piecesOverride() > 0)
                             ? itemReq.piecesOverride()
                             : UnitConverter.effectivePieces(reqUnit, dvFb != null ? dvFb.getPiecesPerUnit() : null);
                 }
                 importUnitUsed = reqUnit;
             } else {
-                // Không chỉ định ĐV → dùng default của SP
-                var defaultPiu = importUnitRepo.findByProductIdAndIsDefaultTrue(product.getId());
-                if (defaultPiu.isPresent()) {
+                ProductImportUnit defaultPiu = defaultPiuByProductId.get(product.getId());
+                if (defaultPiu != null) {
                     pieces = (itemReq.piecesOverride() != null && itemReq.piecesOverride() > 0)
                             ? itemReq.piecesOverride()
-                            : defaultPiu.get().getPiecesPerUnit();
-                    importUnitUsed = defaultPiu.get().getImportUnit();
+                            : defaultPiu.getPiecesPerUnit();
+                    importUnitUsed = defaultPiu.getImportUnit();
                 } else {
-                    // Fallback: đọc từ default variant
-                    ProductVariant dv = product.getDefaultVariant();
+                    ProductVariant dv = defaultVariantByProductId.get(product.getId());
                     pieces = dv != null ? UnitConverter.effectivePieces(dv.getImportUnit(), dv.getPiecesPerUnit()) : 1;
                     importUnitUsed = dv != null && dv.getImportUnit() != null ? dv.getImportUnit() : "cai";
                 }
@@ -200,8 +201,7 @@ public class InventoryReceiptService {
             int pieces = resolvedPiecesList.get(i);
             String importUnitUsed = resolvedImportUnits.get(i);
 
-            Product product = productRepo.findById(itemReq.productId())
-                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy SP ID: " + itemReq.productId()));
+            Product product = productById.get(itemReq.productId());
 
             // ── [BƯỚC 1] Dùng pieces từ snapshot (mới), không từ product ──
             int addedRetailQty = UnitConverter.toRetailQty(pieces, itemReq.quantity());
@@ -574,6 +574,72 @@ public class InventoryReceiptService {
         int suffix = 2;
         while (batchRepo.existsByBatchCode(base + "-" + suffix)) suffix++;
         return base + "-" + suffix;
+    }
+
+    /**
+     * Prescan combo lines: bulk-load combo products + combo item rows, expand in the same order as legacy loop.
+     */
+    private void expandComboLinesIntoAllItems(InventoryReceiptRequest req, List<ReceiptItemRequest> allItems) {
+        if (req.comboItems() == null || req.comboItems().isEmpty()) {
+            return;
+        }
+        Set<Long> comboIdSet = req.comboItems().stream()
+                .map(InventoryReceiptRequest.ComboReceiptRequest::comboId)
+                .collect(Collectors.toSet());
+        List<Product> comboProducts = productRepo.findAllById(comboIdSet);
+        Map<Long, Product> comboProductById = comboProducts.stream()
+                .collect(Collectors.toMap(Product::getId, p -> p));
+        for (Long cid : comboIdSet) {
+            Product cp = comboProductById.get(cid);
+            if (cp == null) {
+                throw new EntityNotFoundException("Không tìm thấy combo ID: " + cid);
+            }
+            if (!cp.isCombo()) {
+                throw new IllegalArgumentException("ID " + cid + " không phải combo");
+            }
+        }
+        List<ProductComboItem> fetchedComboRows = comboRepo.findByComboProduct_IdIn(comboIdSet);
+        Map<Long, List<ProductComboItem>> byComboId = fetchedComboRows.stream()
+                .collect(Collectors.groupingBy(ci -> ci.getComboProduct().getId()));
+        Map<Long, List<ProductComboItem>> sortedByComboId = new HashMap<>();
+        for (Map.Entry<Long, List<ProductComboItem>> e : byComboId.entrySet()) {
+            List<ProductComboItem> sorted = new ArrayList<>(e.getValue());
+            sorted.sort(Comparator.comparing(ProductComboItem::getId, Comparator.nullsFirst(Long::compareTo)));
+            sortedByComboId.put(e.getKey(), sorted);
+        }
+        for (InventoryReceiptRequest.ComboReceiptRequest cr : req.comboItems()) {
+            List<ProductComboItem> comboItems = sortedByComboId.getOrDefault(cr.comboId(), List.of());
+            int totalComponentQty = comboItems.stream().mapToInt(ProductComboItem::getQuantity).sum();
+            BigDecimal totalComboCost = cr.unitCost().multiply(BigDecimal.valueOf(cr.quantity()));
+            for (ProductComboItem ci : comboItems) {
+                BigDecimal ratio = totalComponentQty > 0
+                        ? BigDecimal.valueOf(ci.getQuantity())
+                          .divide(BigDecimal.valueOf(totalComponentQty), 10, RoundingMode.HALF_UP)
+                        : BigDecimal.ZERO;
+                BigDecimal componentCost = totalComboCost.multiply(ratio)
+                        .divide(BigDecimal.valueOf(cr.quantity()), 2, RoundingMode.HALF_UP);
+                allItems.add(new ReceiptItemRequest(
+                        ci.getProduct().getId(),
+                        ci.getQuantity() * cr.quantity(),
+                        componentCost,
+                        safe(cr.discountPercent()),
+                        null, null, null,
+                        null, 1, null, null
+                ));
+            }
+        }
+    }
+
+    private static Optional<ProductImportUnit> findImportUnitInIndex(
+            Long productId,
+            String reqUnitTrimmed,
+            Map<Long, Map<String, ProductImportUnit>> piuByProductNormUnit) {
+        Map<String, ProductImportUnit> row = piuByProductNormUnit.get(productId);
+        if (row == null) {
+            return Optional.empty();
+        }
+        String key = reqUnitTrimmed.toLowerCase(Locale.ROOT);
+        return Optional.ofNullable(row.get(key));
     }
 
     private static BigDecimal safe(BigDecimal v) { return v != null ? v : BigDecimal.ZERO; }

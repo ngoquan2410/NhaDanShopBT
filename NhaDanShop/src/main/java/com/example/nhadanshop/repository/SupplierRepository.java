@@ -26,4 +26,17 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
            " lower(coalesce(s.phone, '')) LIKE '%' || lower(:q) || '%')",
            nativeQuery = true)
     List<Supplier> searchActive(@Param("q") String query);
+
+    /**
+     * Max numeric suffix for auto codes {@code NCC001}… (only {@code NCC + digits} rows).
+     */
+    @Query(value = """
+            SELECT MAX(CAST(SUBSTRING(s.code, 4) AS BIGINT))
+            FROM suppliers s
+            WHERE LENGTH(s.code) > 3
+              AND UPPER(SUBSTRING(s.code, 1, 3)) = 'NCC'
+              AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+                    SUBSTRING(s.code, 4), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = ''
+            """, nativeQuery = true)
+    Long findMaxNccAutoNumericSuffix();
 }

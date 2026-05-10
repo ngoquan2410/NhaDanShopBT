@@ -3,6 +3,7 @@ package com.example.nhadanshop.repository;
 import com.example.nhadanshop.entity.PendingOrder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
@@ -31,6 +32,18 @@ public interface PendingOrderRepository extends JpaRepository<PendingOrder, Long
     List<PendingOrder> findByStatusAndExpiresAtBefore(PendingOrder.Status status, LocalDateTime now);
 
     Optional<PendingOrder> findByOrderNo(String orderNo);
+
+    /**
+     * Batch-hydrate pending orders for list views: items (+ lazy batch), createdBy.
+     * Does not touch {@link PendingOrder#getInvoice()} — avoids loading sales invoice lines/allocations.
+     */
+    @EntityGraph(attributePaths = {
+            "items",
+            "items.batch",
+            "createdBy"
+    })
+    @Query("SELECT DISTINCT p FROM PendingOrder p WHERE p.id IN :ids")
+    List<PendingOrder> findAllByIdInForListHydrate(@Param("ids") Collection<Long> ids);
 
     @Query("""
             SELECT p

@@ -9,6 +9,7 @@ import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -25,7 +26,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -373,7 +377,9 @@ public class PendingOrderService {
 
     @Transactional
     public Page<PendingOrderResponse> listPage(Pageable pageable) {
-        return pendingOrderRepo.findAllByOrderByCreatedAtDesc(pageable).map(this::toResponse);
+        Page<PendingOrder> page = pendingOrderRepo.findAllByOrderByCreatedAtDesc(pageable);
+        List<PendingOrderResponse> content = mapOrdersForList(page.getContent());
+        return new PageImpl<>(content, pageable, page.getTotalElements());
     }
 
     @Transactional
@@ -388,9 +394,10 @@ public class PendingOrderService {
         PendingOrder.Status statusEnum = parseStatus(status);
         String normalizedPaymentMethod = normalizeBlank(paymentMethod);
         String normalizedSearch = normalizeBlank(search);
-        return pendingOrderRepo
-                .findAll(buildAdminListSpec(statusEnum, normalizedPaymentMethod, normalizedSearch), safePageable)
-                .map(this::toResponse);
+        Page<PendingOrder> poPage = pendingOrderRepo.findAll(
+                buildAdminListSpec(statusEnum, normalizedPaymentMethod, normalizedSearch), safePageable);
+        List<PendingOrderResponse> content = mapOrdersForList(poPage.getContent());
+        return new PageImpl<>(content, safePageable, poPage.getTotalElements());
     }
 
     @Transactional
@@ -419,37 +426,40 @@ public class PendingOrderService {
 
     @Transactional
     public List<PendingOrderResponse> listAll() {
-        return pendingOrderRepo.findAllByOrderByCreatedAtDesc()
-                .stream().map(this::toResponse).toList();
+        return mapOrdersForList(pendingOrderRepo.findAllByOrderByCreatedAtDesc());
     }
 
     @Transactional
     public List<PendingOrderResponse> listRecoverableForCustomer(Long customerId) {
         if (customerId == null) return List.of();
-        return pendingOrderRepo.findByCustomerIdAndStatusInAndExpiresAtAfterOrderByCreatedAtDesc(
-                        String.valueOf(customerId),
-                        List.of(
-                                PendingOrder.Status.PENDING_PAYMENT,
-                                PendingOrder.Status.WAITING_CONFIRM,
-                                PendingOrder.Status.PAID_AUTO),
-                        LocalDateTime.now(businessClock))
-                .stream()
-                .map(this::toResponse)
-                .toList();
+        List<PendingOrder> rows = pendingOrderRepo.findByCustomerIdAndStatusInAndExpiresAtAfterOrderByCreatedAtDesc(
+                String.valueOf(customerId),
+                List.of(
+                        PendingOrder.Status.PENDING_PAYMENT,
+                        PendingOrder.Status.WAITING_CONFIRM,
+                        PendingOrder.Status.PAID_AUTO),
+                LocalDateTime.now(businessClock));
+        return mapOrdersForList(rows);
     }
 
     @Transactional
     public PendingOrderResponse getById(Long id) {
-        PendingOrder order = pendingOrderRepo.findById(id)
+        pendingOrderRepo.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy đơn hàng ID: " + id));
-        return toResponse(order);
+        PendingOrder order = pendingOrderRepo.findAllByIdInForListHydrate(List.of(id)).stream()
+                .findFirst()
+                .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy đơn hàng ID: " + id));
+        return toResponse(order, true);
     }
 
     @Transactional
     public PendingOrderResponse getByCode(String code) {
-        PendingOrder order = pendingOrderRepo.findByOrderNo(code)
+        PendingOrder ref = pendingOrderRepo.findByOrderNo(code)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy đơn hàng mã: " + code));
-        return toResponse(order);
+        PendingOrder order = pendingOrderRepo.findAllByIdInForListHydrate(List.of(ref.getId())).stream()
+                .findFirst()
+                .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy đơn hàng mã: " + code));
+        return toResponse(order, true);
     }
 
     @Transactional
@@ -565,7 +575,27 @@ public class PendingOrderService {
         }
     }
 
+    /**
+     * List/account paths: batch-hydrate lines (+ optional batch FK) once per slice; omit nested sales invoice
+     * (Phase 2B — FE does not consume {@code invoice} on list per Phase 2A sign-off).
+     */
+    private List<PendingOrderResponse> mapOrdersForList(List<PendingOrder> orderedLightRows) {
+        if (orderedLightRows.isEmpty()) {
+            return List.of();
+        }
+        List<Long> ids = orderedLightRows.stream().map(PendingOrder::getId).filter(Objects::nonNull).toList();
+        List<PendingOrder> hydrated = pendingOrderRepo.findAllByIdInForListHydrate(ids);
+        Map<Long, PendingOrder> byId = hydrated.stream().collect(Collectors.toMap(PendingOrder::getId, Function.identity()));
+        return orderedLightRows.stream()
+                .map(po -> toResponse(Objects.requireNonNull(byId.get(po.getId()), "missing pending id " + po.getId()), false))
+                .toList();
+    }
+
     private PendingOrderResponse toResponse(PendingOrder order) {
+        return toResponse(order, true);
+    }
+
+    private PendingOrderResponse toResponse(PendingOrder order, boolean includeFullInvoice) {
         ShippingAddressDto shippingAddress = readJson(order.getShippingAddressJson(), new TypeReference<>() {});
         List<GiftLineSnapshotDto> giftLines = readJsonList(order.getGiftLinesSnapshotJson(), new TypeReference<>() {});
         PromotionSnapshotDto promotionSnapshot = readJson(order.getPromotionSnapshotJson(), new TypeReference<>() {});
@@ -588,6 +618,14 @@ public class PendingOrderService {
                         i.getOriginalUnitPrice(),
                         DtoMapper.commercialSnapshotFromPendingOrderItem(i)
                 )).toList();
+
+        SalesInvoiceResponse invoiceOut = null;
+        if (includeFullInvoice) {
+            SalesInvoice inv = order.getInvoice();
+            if (inv != null) {
+                invoiceOut = DtoMapper.toResponse(inv);
+            }
+        }
 
         return new PendingOrderResponse(
                 String.valueOf(order.getId()),
@@ -612,7 +650,7 @@ public class PendingOrderService {
                 order.getCreatedBy() != null ? order.getCreatedBy().getUsername() : null,
                 order.getCancelReason(),
                 order.getTotalAmount(),
-                order.getInvoice() != null ? DtoMapper.toResponse(order.getInvoice()) : null
+                invoiceOut
         );
     }
 

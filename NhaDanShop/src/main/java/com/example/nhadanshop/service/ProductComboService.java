@@ -18,7 +18,12 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -42,13 +47,13 @@ public class ProductComboService {
     private final Clock businessClock;
 
     public List<ProductComboResponse> listActive() {
-        return productRepo.findByProductTypeAndActiveTrue(ProductType.COMBO)
-                .stream().map(this::toResponse).collect(Collectors.toList());
+        List<Product> combos = productRepo.findByProductTypeAndActiveTrue(ProductType.COMBO);
+        return buildComboResponses(combos);
     }
 
     public List<ProductComboResponse> listAll() {
-        return productRepo.findByProductTypeOrderByNameAsc(ProductType.COMBO)
-                .stream().map(this::toResponse).collect(Collectors.toList());
+        List<Product> combos = productRepo.findByProductTypeOrderByNameAsc(ProductType.COMBO);
+        return buildComboResponses(combos);
     }
 
     public ProductComboResponse getOne(Long id) {
@@ -244,9 +249,13 @@ public class ProductComboService {
     }
 
     private String generateComboCode() {
-        long count = productRepo.findByProductTypeOrderByNameAsc(ProductType.COMBO).size() + 1;
-        String code = "COMBO" + String.format("%03d", count);
-        while (productRepo.existsByCode(code)) code = "COMBO" + String.format("%03d", ++count);
+        int maxNum = Optional.ofNullable(productRepo.findMaxComboAutoNumericSuffix()).orElse(0);
+        long n = maxNum;
+        String code;
+        do {
+            n++;
+            code = "COMBO" + String.format("%03d", n);
+        } while (productRepo.existsByCode(code));
         return code;
     }
 
@@ -258,20 +267,62 @@ public class ProductComboService {
     }
 
     public ProductComboResponse toResponse(Product combo) {
-        List<ProductComboItem> items = comboItemRepo.findByComboProduct(combo);
-        ProductVariant comboVariant = combo.getDefaultVariant();
+        return buildComboResponses(List.of(combo)).getFirst();
+    }
+
+    private List<ProductComboResponse> buildComboResponses(List<Product> combos) {
+        if (combos.isEmpty()) {
+            return List.of();
+        }
+        List<Long> comboIds = combos.stream().map(Product::getId).toList();
+        List<ProductComboItem> allItems = comboItemRepo.findByComboProduct_IdIn(comboIds);
+        Map<Long, List<ProductComboItem>> itemsByComboId = allItems.stream()
+                .collect(Collectors.groupingBy(i -> i.getComboProduct().getId()));
+
+        Set<Long> productIdsForVariants = new HashSet<>(comboIds);
+        for (ProductComboItem it : allItems) {
+            productIdsForVariants.add(it.getProduct().getId());
+        }
+        Map<Long, ProductVariant> defaultVariantByProductId = loadDefaultVariantsByProductId(productIdsForVariants);
+
+        return combos.stream()
+                .map(c -> toResponse(c,
+                        itemsByComboId.getOrDefault(c.getId(), List.of()),
+                        defaultVariantByProductId))
+                .toList();
+    }
+
+    private Map<Long, ProductVariant> loadDefaultVariantsByProductId(Set<Long> productIds) {
+        if (productIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, ProductVariant> map = new HashMap<>();
+        for (ProductVariant v : variantRepo.findByProductIdInWithProduct(productIds)) {
+            if (Boolean.TRUE.equals(v.getIsDefault())) {
+                map.putIfAbsent(v.getProduct().getId(), v);
+            }
+        }
+        return map;
+    }
+
+    private ProductComboResponse toResponse(
+            Product combo,
+            List<ProductComboItem> items,
+            Map<Long, ProductVariant> defaultVariantByProductId) {
+        ProductVariant comboVariant = defaultVariantByProductId.get(combo.getId());
 
         List<ProductComboResponse.ComboItemResponse> itemResponses = items.stream()
                 .map(i -> {
-                    ProductVariant cv = i.getProduct().getDefaultVariant();
+                    Product p = i.getProduct();
+                    ProductVariant cv = defaultVariantByProductId.get(p.getId());
                     BigDecimal unitPrice = cv != null ? cv.getSellPrice() : BigDecimal.ZERO;
-                    BigDecimal unitCost  = cv != null ? cv.getCostPrice() : BigDecimal.ZERO;
-                    String sellUnit      = cv != null ? cv.getSellUnit() : "cai";
+                    BigDecimal unitCost = cv != null ? cv.getCostPrice() : BigDecimal.ZERO;
+                    String sellUnit = cv != null ? cv.getSellUnit() : "cai";
                     return new ProductComboResponse.ComboItemResponse(
                             i.getId(),
-                            i.getProduct().getId(),
-                            i.getProduct().getCode(),
-                            i.getProduct().getName(),
+                            p.getId(),
+                            p.getCode(),
+                            p.getName(),
                             sellUnit,
                             i.getQuantity(),
                             unitPrice,
@@ -288,7 +339,7 @@ public class ProductComboService {
                 .map(ProductComboResponse.ComboItemResponse::lineCost)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        int stockQty   = comboVariant != null ? comboVariant.getStockQty() : 0;
+        int stockQty = comboVariant != null ? comboVariant.getStockQty() : 0;
         BigDecimal sell = comboVariant != null ? comboVariant.getSellPrice() : BigDecimal.ZERO;
 
         return new ProductComboResponse(

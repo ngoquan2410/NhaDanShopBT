@@ -210,6 +210,14 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             """)
     Optional<ProductBatch> findByIdWithVariantAndProduct(@Param("batchId") Long batchId);
 
+    @Query("""
+            SELECT b FROM ProductBatch b
+            JOIN FETCH b.variant v
+            JOIN FETCH v.product p
+            WHERE b.id IN :batchIds
+            """)
+    List<ProductBatch> findAllByIdWithVariantAndProductIn(@Param("batchIds") Collection<Long> batchIds);
+
     /** Lô của 1 phiếu nhập + 1 variant cụ thể (dùng khi cập nhật finalCost sau phân bổ ship) */
     @Query("""
             SELECT b FROM ProductBatch b

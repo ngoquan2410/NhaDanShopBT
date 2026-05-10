@@ -423,6 +423,34 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
             @Param("customerId") Long customerId,
             @Param("phone") String phone);
 
+    /**
+     * Batch read path for customer list stats — COMPLETED invoices linked by customer FK.
+     */
+    @Query("""
+            SELECT DISTINCT i FROM SalesInvoice i
+            LEFT JOIN FETCH i.customer
+            WHERE i.status = :completed
+              AND i.customer IS NOT NULL
+              AND i.customer.id IN :customerIds
+            """)
+    List<SalesInvoice> findCompletedByCustomerIdIn(
+            @Param("completed") SalesInvoice.Status completed,
+            @Param("customerIds") Collection<Long> customerIds);
+
+    /**
+     * Batch read path for customer list stats — COMPLETED invoices matched by persisted phone snapshot.
+     */
+    @Query("""
+            SELECT DISTINCT i FROM SalesInvoice i
+            LEFT JOIN FETCH i.customer
+            WHERE i.status = :completed
+              AND i.customerPhone IS NOT NULL
+              AND i.customerPhone IN :phones
+            """)
+    List<SalesInvoice> findCompletedByCustomerPhoneIn(
+            @Param("completed") SalesInvoice.Status completed,
+            @Param("phones") Collection<String> phones);
+
     @Query("""
             SELECT sii.variant.id,
                    sii.variant.variantCode,

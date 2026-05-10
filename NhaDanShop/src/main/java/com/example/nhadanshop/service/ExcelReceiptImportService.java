@@ -93,6 +93,13 @@ public class ExcelReceiptImportService {
     private final StockMutationService stockMutationService;
     private final Clock clock;
 
+    /** Prescan context: bulk-loaded products/variants for one SP-Don sheet (preview + import pass 1). */
+    private record SpDonCatalogMaps(
+            Map<String, Product> productByUpperCode,
+            Map<String, ProductVariant> variantByNormalizedCode,
+            Map<Long, List<ProductVariant>> variantsByProductId) {
+    }
+
     // ── Column indices — NEW FORMAT (13 cột A..M) ────────────────────────────
     private static final int COL_PRODUCT_CODE    = 0;  // A
     private static final int COL_VARIANT_CODE    = 1;  // B (NEW — optional)
@@ -280,6 +287,75 @@ public class ExcelReceiptImportService {
         }
     }
 
+    private static String normalizeVariantCodeKey(String variantCode) {
+        if (variantCode == null) return null;
+        String t = variantCode.trim();
+        return t.isEmpty() ? null : t.toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * One prescan of the sheet + bounded bulk queries (distinct codes, not per row).
+     */
+    private SpDonCatalogMaps buildSpDonCatalogMaps(Sheet sheet) {
+        if (sheet == null) {
+            return new SpDonCatalogMaps(new HashMap<>(), new HashMap<>(), new HashMap<>());
+        }
+        int startRow = findDataStartRow(sheet);
+        boolean isNewFormat = detectNewFormat(sheet, startRow);
+        LinkedHashSet<String> productCodes = new LinkedHashSet<>();
+        LinkedHashSet<String> variantLowerKeys = new LinkedHashSet<>();
+        for (int rowIdx = startRow; rowIdx <= sheet.getLastRowNum(); rowIdx++) {
+            Row row = sheet.getRow(rowIdx);
+            if (row == null || isRowEmpty(row, isNewFormat) || isLegendRow(row)) continue;
+            String pc = getCellString(row, COL_PRODUCT_CODE);
+            if (pc == null || pc.isBlank()) continue;
+            productCodes.add(pc.trim().toUpperCase(Locale.ROOT));
+            if (isNewFormat) {
+                String vc = getCellString(row, COL_VARIANT_CODE);
+                String nk = normalizeVariantCodeKey(vc);
+                if (nk != null) variantLowerKeys.add(nk);
+            }
+        }
+        if (productCodes.isEmpty()) {
+            return new SpDonCatalogMaps(new HashMap<>(), new HashMap<>(), new HashMap<>());
+        }
+        List<Product> products = productRepository.findByCodeIn(productCodes);
+        Map<String, Product> productByUpper = new HashMap<>(products.size() * 2);
+        for (Product p : products) {
+            productByUpper.put(p.getCode().trim().toUpperCase(Locale.ROOT), p);
+        }
+        Set<Long> comboIds = products.stream().filter(Product::isCombo).map(Product::getId).collect(Collectors.toSet());
+        LinkedHashSet<Long> allProductIds = new LinkedHashSet<>();
+        for (Product p : products) {
+            allProductIds.add(p.getId());
+        }
+        if (!comboIds.isEmpty()) {
+            for (ProductComboItem ci : comboItemRepo.findByComboProduct_IdIn(comboIds)) {
+                Product comp = ci.getProduct();
+                if (comp != null) {
+                    allProductIds.add(comp.getId());
+                }
+            }
+        }
+        Map<Long, List<ProductVariant>> byPid = new HashMap<>();
+        if (!allProductIds.isEmpty()) {
+            for (ProductVariant v : variantRepo.findByProductIdsOrderedForReceiptExcel(allProductIds)) {
+                Long pid = v.getProduct().getId();
+                byPid.computeIfAbsent(pid, k -> new ArrayList<>()).add(v);
+            }
+        }
+        Map<String, ProductVariant> varByNorm = new HashMap<>();
+        if (!variantLowerKeys.isEmpty()) {
+            for (ProductVariant v : variantRepo.findByVariantCodeLowerIn(variantLowerKeys)) {
+                String k = normalizeVariantCodeKey(v.getVariantCode());
+                if (k != null) {
+                    varByNorm.putIfAbsent(k, v);
+                }
+            }
+        }
+        return new SpDonCatalogMaps(productByUpper, varByNorm, byPid);
+    }
+
     /** Parse sheet SP đơn (13 cột A-M, format hiện tại) */
     private void parseSingleSheet(org.apache.poi.ss.usermodel.Sheet sheet,
                                    List<ExcelPreviewResponse.PreviewRow> previewRows,
@@ -287,6 +363,7 @@ public class ExcelReceiptImportService {
         if (sheet == null) return;
         int startRow = findDataStartRow(sheet);
         boolean isNewFormat = detectNewFormat(sheet, startRow);
+        SpDonCatalogMaps ctx = buildSpDonCatalogMaps(sheet);
 
         for (int rowIdx = startRow; rowIdx <= sheet.getLastRowNum(); rowIdx++) {
             org.apache.poi.ss.usermodel.Row row = sheet.getRow(rowIdx);
@@ -328,8 +405,9 @@ public class ExcelReceiptImportService {
                 errorMsg = "Cột P (Bán hàng?/isSellable) không hợp lệ — dùng có/không, raw, nguyên liệu...";
             } else {
                 // Kiểm tra product/combo tồn tại
-                String upperCode = productCode.trim().toUpperCase();
-                var productOpt = productRepository.findByCode(upperCode);
+                String upperCode = productCode.trim().toUpperCase(Locale.ROOT);
+                Product prodRow = ctx.productByUpperCode().get(upperCode);
+                Optional<Product> productOpt = Optional.ofNullable(prodRow);
                 if (productOpt.isPresent()) {
                     if (productOpt.get().isCombo()) {
                         // Combo tạm thời không hỗ trợ nhập kho qua Excel
@@ -345,9 +423,9 @@ public class ExcelReceiptImportService {
 
                         if (trimmedVariantCode != null) {
                             // Có variant_code → tìm chính xác và kiểm tra importUnit
-                            var varOpt = variantRepo.findByVariantCodeIgnoreCase(trimmedVariantCode);
-                            if (varOpt.isPresent()) {
-                                ProductVariant ev = varOpt.get();
+                            String vkey = normalizeVariantCodeKey(trimmedVariantCode);
+                            ProductVariant ev = vkey != null ? ctx.variantByNormalizedCode().get(vkey) : null;
+                            if (ev != null) {
                                 // Variant thuộc SP khác
                                 if (!ev.getProduct().getId().equals(productOpt.get().getId())) {
                                     errorMsg = "Variant '" + trimmedVariantCode + "' thuộc SP '"
@@ -366,7 +444,7 @@ public class ExcelReceiptImportService {
                         } else if (passImportUnit != null) {
                             // Không có variant_code → smart-match theo importUnit
                             java.util.List<ProductVariant> allVariants =
-                                    variantRepo.findByProductIdOrderByIsDefaultDescVariantCodeAsc(productOpt.get().getId());
+                                    ctx.variantsByProductId().getOrDefault(productOpt.get().getId(), List.of());
                             if (!allVariants.isEmpty()) {
                                 final String fIU = passImportUnit;
                                 // Kiểm tra tất cả variant đều có importUnit
@@ -407,11 +485,12 @@ public class ExcelReceiptImportService {
             }
 
             if (errorMsg == null && productCode != null && !productCode.isBlank()) {
-                String upper = productCode.trim().toUpperCase();
-                var po = productRepository.findByCode(upper);
-                if (po.isPresent() && !po.get().isCombo()) {
+                String upper = productCode.trim().toUpperCase(Locale.ROOT);
+                Product po = ctx.productByUpperCode().get(upper);
+                if (po != null && !po.isCombo()) {
                     boolean blankB = variantCode == null || variantCode.isBlank();
-                    String vcw = buildBlankVariantCodeWarning(po.get(), blankB, sellableCell);
+                    List<ProductVariant> varsForProduct = ctx.variantsByProductId().getOrDefault(po.getId(), List.of());
+                    String vcw = buildBlankVariantCodeWarning(po, blankB, sellableCell, varsForProduct);
                     if (vcw != null) {
                         warnMsg = warnMsg != null ? warnMsg + " " + vcw : vcw;
                     }
@@ -424,16 +503,18 @@ public class ExcelReceiptImportService {
             if (errorMsg == null) {
                 boolean saleable = ImportSellableParser.defaultTrue(sellableCell.value());
                 if (saleable && productCode != null && !productCode.isBlank()) {
-                    String upperCode = productCode.trim().toUpperCase();
-                    var po = productRepository.findByCode(upperCode);
+                    String upperCode = productCode.trim().toUpperCase(Locale.ROOT);
+                    Product po = ctx.productByUpperCode().get(upperCode);
                     if (Boolean.TRUE.equals(isNew)
                             && (sellPrice == null || sellPrice.compareTo(java.math.BigDecimal.ZERO) <= 0)) {
                         errorMsg = "SP mới có Bán hàng=TRUE — giá bán (cột F) phải > 0";
-                    } else if (po.isPresent() && !po.get().isCombo()) {
+                    } else if (po != null && !po.isCombo()) {
                         String trimmedVariantCode = (variantCode != null && !variantCode.isBlank())
                                 ? variantCode.trim() : null;
+                        String vk = trimmedVariantCode != null ? normalizeVariantCodeKey(trimmedVariantCode) : null;
+                        boolean variantUnknown = vk == null || !ctx.variantByNormalizedCode().containsKey(vk);
                         if (trimmedVariantCode != null
-                                && variantRepo.findByVariantCodeIgnoreCase(trimmedVariantCode).isEmpty()
+                                && variantUnknown
                                 && (sellPrice == null || sellPrice.compareTo(java.math.BigDecimal.ZERO) <= 0)) {
                             errorMsg = "Variant mới có Bán hàng=TRUE — giá bán (cột F) phải > 0";
                         }
@@ -451,7 +532,7 @@ public class ExcelReceiptImportService {
 
             previewRows.add(new ExcelPreviewResponse.PreviewRow(
                 lineNum, "SP_DON",
-                productCode != null ? productCode.trim().toUpperCase() : "",
+                productCode != null ? productCode.trim().toUpperCase(Locale.ROOT) : "",
                 variantCode != null ? variantCode.trim() : "",
                 name != null ? name.trim() : "",
                 qty, cost, sellPrice, discPct, lineTotal,
@@ -574,6 +655,8 @@ public class ExcelReceiptImportService {
                 log.info("Receipt Excel [SP Don]: sheet='{}', data từ row index {}, format={}",
                         sheet.getSheetName(), startRow, isNewFormat ? "NEW-13col" : "OLD-12col");
 
+                SpDonCatalogMaps catMaps = buildSpDonCatalogMaps(sheet);
+
                 for (int rowIdx = startRow; rowIdx <= sheet.getLastRowNum(); rowIdx++) {
                     Row row = sheet.getRow(rowIdx);
                     if (row == null || isRowEmpty(row, isNewFormat) || isLegendRow(row)) continue;
@@ -660,9 +743,9 @@ public class ExcelReceiptImportService {
                     String passSellUnit   = (excelSellUnit   != null && !excelSellUnit.isBlank())   ? excelSellUnit.trim()   : null;
                     Integer passPieces    = (excelPieces != null && excelPieces > 0) ? excelPieces : null;
 
-                    final String upperCode = productCode.toUpperCase();
+                    final String upperCode = productCode.toUpperCase(Locale.ROOT);
 
-                    Optional<Product> productOpt = productRepository.findByCode(upperCode);
+                    Optional<Product> productOpt = Optional.ofNullable(catMaps.productByUpperCode().get(upperCode));
                     boolean isPendingNew = !productOpt.isPresent() && pendingNewProductRows.containsKey(upperCode);
 
                     if (productOpt.isEmpty() && !isPendingNew) {
@@ -762,7 +845,13 @@ public class ExcelReceiptImportService {
                                     : BigDecimal.ZERO;
                             BigDecimal componentUnitCost = totalComboCost.multiply(ratio)
                                     .divide(BigDecimal.valueOf((long) ci.getQuantity() * qty), 2, RoundingMode.HALF_UP);
-                            Optional<ProductVariant> compVarOpt = variantRepo.findByProductIdAndIsDefaultTrue(comp.getId());
+                            List<ProductVariant> compVars = catMaps.variantsByProductId().getOrDefault(comp.getId(), List.of());
+                            Optional<ProductVariant> compVarOpt = compVars.stream()
+                                    .filter(v -> Boolean.TRUE.equals(v.getIsDefault()))
+                                    .findFirst();
+                            if (compVarOpt.isEmpty()) {
+                                compVarOpt = variantRepo.findByProductIdAndIsDefaultTrue(comp.getId());
+                            }
                             validatedRows.add(new ValidatedRow(
                                     VariantAction.EXISTING_EXACT, comp, compVarOpt.orElse(null), compVarOpt.isEmpty(),
                                     null, null, null, null, null,
@@ -775,7 +864,7 @@ public class ExcelReceiptImportService {
 
                     // Variant matching (giống logic cũ)
                     if (!hasVariantCode) {
-                        List<ProductVariant> allVariants = variantRepo.findByProductIdOrderByIsDefaultDescVariantCodeAsc(product.getId());
+                        List<ProductVariant> allVariants = catMaps.variantsByProductId().getOrDefault(product.getId(), List.of());
                         if (allVariants.isEmpty()) {
                             // CASE B: SP chưa có variant nào → tạo mới — bắt buộc cột O
                             if (expiryDaysFromExcel == null) {
@@ -783,7 +872,7 @@ public class ExcelReceiptImportService {
                                         + "' chưa có variant — bắt buộc điền cột O (Số ngày HSD)."
                                         + " Nếu SP không có HSD, điền 3650 (10 năm)."); continue;
                             }
-                            maybeAddPass1VariantCodeWarning(lineNum, product, hasVariantCode, sellableCell, warnings);
+                            maybeAddPass1VariantCodeWarning(lineNum, product, hasVariantCode, sellableCell, warnings, catMaps);
                             String sellErrNoVars = validateNewVariantSellPrice(lineNum, sellPrice, sellableCell);
                             if (sellErrNoVars != null) {
                                 errors.add(sellErrNoVars); continue;
@@ -836,7 +925,7 @@ public class ExcelReceiptImportService {
                                     + "' chưa có số ngày HSD → expiryDate = +10 năm."
                                     + " Điền cột O hoặc cột N (ngày HSD) để FEFO chính xác.");
                         }
-                        maybeAddPass1VariantCodeWarning(lineNum, product, hasVariantCode, sellableCell, warnings);
+                        maybeAddPass1VariantCodeWarning(lineNum, product, hasVariantCode, sellableCell, warnings, catMaps);
                         validatedRows.add(new ValidatedRow(VariantAction.EXISTING_EXACT, product, matchedVar, isLegacy, null,
                                 null, null, null, null, qty, cost, sellPrice, discountPct, false, lineNum, lineNote,
                                 passImportUnit, passSellUnit, passPieces, expiryDateOverride, expiryDaysFromExcel,
@@ -844,7 +933,9 @@ public class ExcelReceiptImportService {
                         continue;
                     }
 
-                    Optional<ProductVariant> variantOpt = variantRepo.findByVariantCodeIgnoreCase(variantCode);
+                    String passVkey = normalizeVariantCodeKey(variantCode);
+                    ProductVariant evResolved = passVkey != null ? catMaps.variantByNormalizedCode().get(passVkey) : null;
+                    Optional<ProductVariant> variantOpt = Optional.ofNullable(evResolved);
                     if (variantOpt.isPresent()) {
                         ProductVariant ev = variantOpt.get();
                         if (!ev.getProduct().getId().equals(product.getId())) {
@@ -1527,20 +1618,22 @@ public class ExcelReceiptImportService {
      */
     private void maybeAddPass1VariantCodeWarning(
             int lineNum, Product product, boolean hasVariantCode,
-            ImportSellableParser.Result sellableCell, List<String> warnings) {
+            ImportSellableParser.Result sellableCell, List<String> warnings, SpDonCatalogMaps catMaps) {
         if (product == null) return;
-        String w = buildBlankVariantCodeWarning(product, !hasVariantCode, sellableCell);
+        List<ProductVariant> vars = catMaps.variantsByProductId().getOrDefault(product.getId(), List.of());
+        String w = buildBlankVariantCodeWarning(product, !hasVariantCode, sellableCell, vars);
         if (w != null) {
             warnings.add("⚠️ Dòng " + lineNum + ": " + w);
         }
     }
 
     private String buildBlankVariantCodeWarning(
-            Product product, boolean variantCodeBlank, ImportSellableParser.Result sellableCell) {
+            Product product, boolean variantCodeBlank, ImportSellableParser.Result sellableCell,
+            List<ProductVariant> orderedVariants) {
         if (!variantCodeBlank) {
             return null;
         }
-        List<ProductVariant> vars = variantRepo.findByProductIdOrderByIsDefaultDescVariantCodeAsc(product.getId());
+        List<ProductVariant> vars = orderedVariants != null ? orderedVariants : List.of();
         StringBuilder sb = new StringBuilder();
         if (sellableCell.explicit() && Boolean.FALSE.equals(sellableCell.value())) {
             sb.append("Cảnh báo: cột B (variantCode) trống — tồn có thể nhập vào variant mặc định. Điền B nếu là nguyên liệu/NVL. ");

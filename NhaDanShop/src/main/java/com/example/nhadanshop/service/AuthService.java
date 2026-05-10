@@ -38,6 +38,7 @@ import java.time.LocalDateTime;
 import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -419,14 +420,7 @@ public class AuthService {
     }
 
     private String nextCustomerCode() {
-        long maxNum = customerRepository.findAll().stream()
-                .map(Customer::getCode)
-                .filter(c -> c != null && c.matches("KH\\d+"))
-                .mapToLong(c -> {
-                    try { return Long.parseLong(c.substring(2)); }
-                    catch (NumberFormatException e) { return 0L; }
-                })
-                .max().orElse(0L);
+        long maxNum = Optional.ofNullable(customerRepository.findMaxKhAutoNumericSuffix()).orElse(0L);
         String candidate;
         do {
             candidate = String.format("KH%03d", ++maxNum);

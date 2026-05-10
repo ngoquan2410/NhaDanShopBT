@@ -20,6 +20,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.data.domain.Page;
 
+import org.springframework.data.domain.PageImpl;
+
 import org.springframework.data.domain.Pageable;
 
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -886,7 +888,31 @@ public class StockAdjustmentService {
 
     public Page<StockAdjustmentResponse> getAll(Pageable pageable) {
 
-        return adjRepo.findAllByOrderByAdjDateDesc(pageable).map(this::toResponse);
+        Page<Long> idPage = adjRepo.findIdsByOrderByAdjDateDescIdDesc(pageable);
+
+        if (idPage.isEmpty()) {
+
+            return new PageImpl<>(List.of(), pageable, idPage.getTotalElements());
+
+        }
+
+        List<StockAdjustment> rows = adjRepo.findAllByIdInWithDetails(idPage.getContent());
+
+        Map<Long, Integer> orderIndex = new HashMap<>();
+
+        List<Long> orderedIds = idPage.getContent();
+
+        for (int i = 0; i < orderedIds.size(); i++) {
+
+            orderIndex.put(orderedIds.get(i), i);
+
+        }
+
+        rows.sort(Comparator.comparingInt(a -> orderIndex.getOrDefault(a.getId(), Integer.MAX_VALUE)));
+
+        List<StockAdjustmentResponse> content = rows.stream().map(this::toResponse).toList();
+
+        return new PageImpl<>(content, pageable, idPage.getTotalElements());
 
     }
 

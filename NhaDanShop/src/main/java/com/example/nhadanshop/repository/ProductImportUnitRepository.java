@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,6 +22,14 @@ public interface ProductImportUnitRepository extends JpaRepository<ProductImport
 
     /** Tất cả đơn vị đã đăng ký của 1 SP, default lên trước */
     List<ProductImportUnit> findByProductIdOrderByIsDefaultDescImportUnitAsc(Long productId);
+
+    /** Bulk load registered import units for many products (stable sort for default-first per product). */
+    @Query("""
+            SELECT u FROM ProductImportUnit u
+            WHERE u.product.id IN :productIds
+            ORDER BY u.product.id, u.isDefault DESC, u.importUnit ASC
+            """)
+    List<ProductImportUnit> findByProductIdIn(@Param("productIds") Collection<Long> productIds);
 
     /** Lookup đơn vị cụ thể theo SP + tên ĐV (case-insensitive) — dùng khi import Excel */
     Optional<ProductImportUnit> findByProductIdAndImportUnitIgnoreCase(Long productId, String importUnit);

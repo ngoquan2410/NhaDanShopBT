@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,6 +18,13 @@ public interface CategoryRepository extends JpaRepository<Category, Long> {
     boolean existsByName(String name);
     boolean existsByNameAndIdNot(String name, Long id);
     Optional<Category> findByNameIgnoreCase(String name);
+
+    /** Bulk match for Excel product import prescan (trim + lower keys from sheet). */
+    @Query("""
+            SELECT c FROM Category c
+            WHERE LOWER(TRIM(BOTH FROM c.name)) IN :lowers
+            """)
+    List<Category> findByTrimmedNameLowerIn(@Param("lowers") Collection<String> loweredTrimmedNames);
 
     @Query(value = "SELECT count(*) > 0 FROM promotion_categories WHERE category_id = :categoryId", nativeQuery = true)
     boolean existsInPromotionLinks(@Param("categoryId") long categoryId);
