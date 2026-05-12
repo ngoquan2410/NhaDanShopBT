@@ -7,6 +7,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.EntityGraph.EntityGraphType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -19,7 +20,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long> {
+public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long>, JpaSpecificationExecutor<SalesInvoice> {
 
     Optional<SalesInvoice> findByInvoiceNo(String invoiceNo);
 
@@ -43,25 +44,27 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
     @Query("SELECT i FROM SalesInvoice i ORDER BY i.invoiceDate DESC")
     Page<SalesInvoice> findAllWithDetails(Pageable pageable);
 
-    @Query("""
-            SELECT i.id
-            FROM SalesInvoice i
-            ORDER BY i.invoiceDate DESC, i.id DESC
-            """)
-    Page<Long> findInvoiceIdsForList(Pageable pageable);
-
+    /**
+     * Admin invoice list: optional status, free-text (invoice no / customer name / phone),
+     * optional inclusive date bounds. All predicates AND-combined; filters before pagination.
+     */
     @Query("""
             SELECT i.id
             FROM SalesInvoice i
             WHERE (:invoiceStatus IS NULL OR i.status = :invoiceStatus)
+              AND (:from IS NULL OR i.invoiceDate >= :from)
+              AND (:to IS NULL OR i.invoiceDate <= :to)
               AND (:q IS NULL OR :q = ''
                    OR LOWER(i.invoiceNo) LIKE LOWER(CONCAT('%', :q, '%'))
-                   OR LOWER(COALESCE(i.customerName, '')) LIKE LOWER(CONCAT('%', :q, '%')))
+                   OR LOWER(COALESCE(i.customerName, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(COALESCE(i.customerPhone, '')) LIKE LOWER(CONCAT('%', :q, '%')))
             ORDER BY i.invoiceDate DESC, i.id DESC
             """)
-    Page<Long> findInvoiceIdsForListFiltered(
+    Page<Long> findInvoiceIdsForAdminList(
             @Param("invoiceStatus") SalesInvoice.Status invoiceStatus,
             @Param("q") String q,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
             Pageable pageable);
 
     @EntityGraph(type = EntityGraphType.FETCH, attributePaths = {"createdBy", "customer", "items", "items.product", "items.variant"})

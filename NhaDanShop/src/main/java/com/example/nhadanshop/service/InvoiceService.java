@@ -20,7 +20,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -923,13 +926,35 @@ public class InvoiceService {
     }
 
     public Page<SalesInvoiceResponse> listInvoices(Pageable pageable, SalesInvoice.Status status, String query) {
+        return listInvoicesAdmin(pageable, status, query, null, null);
+    }
+
+    /**
+     * Paginated admin list with optional date range + status + text search (DB predicates; not Java full-table filter).
+     */
+    public Page<SalesInvoiceResponse> listInvoicesAdmin(
+            Pageable pageable,
+            SalesInvoice.Status status,
+            String query,
+            LocalDateTime from,
+            LocalDateTime to) {
         String q = (query != null && !query.isBlank()) ? query.trim() : null;
-        Page<Long> invoiceIdPage = (status == null && q == null)
-                ? invoiceRepo.findInvoiceIdsForList(pageable)
-                : invoiceRepo.findInvoiceIdsForListFiltered(status, q, pageable);
+        Pageable safePageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sanitizeInvoiceSort(pageable.getSort()));
+        Specification<SalesInvoice> spec = Specification.allOf(
+                status == null ? null : (root, cq, cb) -> cb.equal(root.get("status"), status),
+                from == null ? null : (root, cq, cb) -> cb.greaterThanOrEqualTo(root.get("invoiceDate"), from),
+                to == null ? null : (root, cq, cb) -> cb.lessThanOrEqualTo(root.get("invoiceDate"), to),
+                q == null ? null : (root, cq, cb) -> {
+                    String like = "%" + q.toLowerCase(Locale.ROOT) + "%";
+                    return cb.or(
+                            cb.like(cb.lower(root.get("invoiceNo")), like),
+                            cb.like(cb.lower(cb.coalesce(root.get("customerName"), "")), like),
+                            cb.like(cb.lower(cb.coalesce(root.get("customerPhone"), "")), like));
+                });
+        Page<Long> invoiceIdPage = invoiceRepo.findAll(spec, safePageable).map(SalesInvoice::getId);
         List<Long> invoiceIds = invoiceIdPage.getContent();
         if (invoiceIds.isEmpty()) {
-            return Page.empty(pageable);
+            return new PageImpl<>(List.of(), safePageable, invoiceIdPage.getTotalElements());
         }
 
         Map<Long, Integer> orderIndex = new HashMap<>();
@@ -947,11 +972,35 @@ public class InvoiceService {
                 .map(DtoMapper::toResponse)
                 .toList();
 
-        return new PageImpl<>(responses, pageable, invoiceIdPage.getTotalElements());
+        return new PageImpl<>(responses, safePageable, invoiceIdPage.getTotalElements());
+    }
+
+    private Sort sanitizeInvoiceSort(Sort requested) {
+        if (requested == null || requested.isUnsorted()) {
+            return Sort.by(Sort.Order.desc("invoiceDate"), Sort.Order.desc("id"));
+        }
+        List<Sort.Order> orders = new ArrayList<>();
+        for (Sort.Order order : requested) {
+            String property = switch (order.getProperty()) {
+                case "invoiceDate", "invoiceNo", "customerName", "totalAmount", "status", "createdAt" -> order.getProperty();
+                default -> null;
+            };
+            if (property != null) {
+                orders.add(new Sort.Order(order.getDirection(), property));
+            }
+        }
+        if (orders.isEmpty()) {
+            return Sort.by(Sort.Order.desc("invoiceDate"), Sort.Order.desc("id"));
+        }
+        boolean hasId = orders.stream().anyMatch(o -> "id".equals(o.getProperty()));
+        if (!hasId) {
+            orders.add(Sort.Order.desc("id"));
+        }
+        return Sort.by(orders);
     }
 
     public Page<SalesInvoiceResponse> listInvoicesByDateRange(LocalDateTime from, LocalDateTime to, Pageable pageable) {
-        return invoiceRepo.findByInvoiceDateBetweenOrderByInvoiceDateDesc(from, to, pageable).map(DtoMapper::toResponse);
+        return listInvoicesAdmin(pageable, null, null, from, to);
     }
 
     /** Sprint 2: lịch sử HĐ theo khách hàng */

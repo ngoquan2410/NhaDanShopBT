@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { DateInput } from "@/components/shared/DateInput";
 import { BarcodePrintDialog } from "@/components/shared/BarcodePrintDialog";
 import { SearchableCombobox } from "@/components/shared/SearchableCombobox";
+import { VariantSearchPicker } from "@/components/shared/VariantSearchPicker";
 import { SupplierFormDrawer } from "@/components/shared/SupplierFormDrawer";
 import { ReceiptImportPreviewDialog } from "@/components/shared/ReceiptImportPreviewDialog";
 import { importStaging } from "@/lib/import-staging";
@@ -16,8 +17,10 @@ import { formatVND } from "@/lib/format";
 import { receiptImportRowSellableLabel, type ImportSeverity, type ReceiptImportOutcome, type ReceiptImportRow } from "@/lib/import-types";
 import type { Product, ProductVariant } from "@/lib/catalog-types";
 import { cn } from "@/lib/utils";
+import { addLocalCalendarDays, localToday, parseLocalDateInput } from "@/lib/localDate";
 import { getAdminSession } from "@/services/auth/adminApi";
 import { adminSuppliers, categories as categoryService, products as productService } from "@/services";
+import type { VariantTransactionSearchHit } from "@/services/catalog/variantTransactionSearch";
 import { useService } from "@/hooks/useService";
 import {
   createInventoryReceipt,
@@ -35,6 +38,8 @@ interface ReceiptLineDraft {
   message?: string;
   productCode: string;
   variantCode: string;
+  productId?: number;
+  variantId?: number;
   productName: string;
   variantName: string;
   category: string;
@@ -64,6 +69,18 @@ interface LineIssue { errors: string[]; warnings: string[]; }
 type StatusFilter = "all" | "error" | "warning" | "ok" | "edited";
 
 const initialLines: ReceiptLineDraft[] = [];
+
+export function resolveReceiptLineIdentity(
+  line: Pick<ReceiptLineDraft, "productId" | "variantId">,
+  fallback: () => { productId: number; variantId: number } | null,
+): { productId: number; variantId: number } | null {
+  const productId = Number(line.productId);
+  const variantId = Number(line.variantId);
+  if (Number.isFinite(productId) && Number.isFinite(variantId)) {
+    return { productId, variantId };
+  }
+  return fallback();
+}
 
 function createLineId(prefix = "line") {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -103,44 +120,6 @@ function convertImportedRow(row: ReceiptImportRow, _receiptDate: string, index: 
     isSellableInvalid: row.isSellableInvalid,
     importParserWarnings: row.importWarnings,
   };
-}
-
-type CatalogManualHit = { product: Product; variant: ProductVariant };
-
-/** Autocomplete nhập tay: khớp tên SP, mã SP, mã variant (substring, có xếp hạng đơn giản). */
-function catalogHitsForManualAdd(catalog: Product[], query: string): CatalogManualHit[] {
-  const ql = query.trim().toLowerCase();
-  if (!ql) return [];
-  const scored: { hit: CatalogManualHit; score: number }[] = [];
-  const seen = new Set<string>();
-  for (const product of catalog) {
-    if (!product.variants?.length) continue;
-    for (const variant of product.variants) {
-      const pc = product.code.toLowerCase();
-      const pn = product.name.toLowerCase();
-      const vc = variant.code.toLowerCase();
-      let score = 0;
-      if (vc === ql) score = 100;
-      else if (vc.startsWith(ql)) score = 88;
-      else if (vc.includes(ql)) score = 75;
-      else if (pc === ql) score = 72;
-      else if (pc.startsWith(ql)) score = 65;
-      else if (pn.includes(ql)) score = 58;
-      else if (pc.includes(ql)) score = 54;
-      if (score <= 0) continue;
-      const key = `${product.id}:${variant.id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      scored.push({ hit: { product, variant }, score });
-    }
-  }
-  scored.sort(
-    (a, b) =>
-      b.score - a.score ||
-      a.hit.product.code.localeCompare(b.hit.product.code) ||
-      a.hit.variant.code.localeCompare(b.hit.variant.code),
-  );
-  return scored.slice(0, 12).map((s) => s.hit);
 }
 
 function inferOutcome(line: ReceiptLineDraft): { outcome: ReceiptImportOutcome; message?: string } {
@@ -216,16 +195,16 @@ export default function AdminGoodsReceiptCreate() {
   const [params] = useSearchParams();
   const draftId = params.get("draft");
   const isImportMode = params.get("mode") === "import";
-  const { data: supplierRows, reload: reloadSuppliers } = useService(() => adminSuppliers.list(), []);
+  const { data: supplierRows, reload: reloadSuppliers } = useService(() => adminSuppliers.list({ pageSize: 200 }), []);
   const { data: categoryData, reload: reloadCategories } = useService(() => categoryService.list({ active: false }), []);
-  const suppliers = supplierRows ?? [];
+  const suppliers = supplierRows?.items ?? [];
   const categories = categoryData?.items ?? [];
   const [lines, setLines] = useState<ReceiptLineDraft[]>(initialLines);
   const [supplier, setSupplier] = useState("");
   const [shippingFee, setShippingFee] = useState(50000);
   const [vat, setVat] = useState(10);
   const [note, setNote] = useState("");
-  const [receiptDate, setReceiptDate] = useState(new Date().toISOString().slice(0, 10));
+  const [receiptDate, setReceiptDate] = useState(localToday());
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [importOpen, setImportOpen] = useState(false);
@@ -240,7 +219,6 @@ export default function AdminGoodsReceiptCreate() {
   const [supplierSeedName, setSupplierSeedName] = useState("");
   const [importedFilename, setImportedFilename] = useState<string | null>(null);
   const [validationTick, setValidationTick] = useState(0);
-  const [manualSearch, setManualSearch] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
 
@@ -248,7 +226,7 @@ export default function AdminGoodsReceiptCreate() {
     if (!isImportMode) return;
     const stage = importStaging.takeReceipt();
     if (!stage) return;
-    const nextDate = stage.meta?.receiptDate || new Date().toISOString().slice(0, 10);
+    const nextDate = stage.meta?.receiptDate || localToday();
     setReceiptDate(nextDate);
     setImportedFilename(stage.filename);
     setSupplier("");
@@ -268,6 +246,8 @@ export default function AdminGoodsReceiptCreate() {
       message: undefined,
       productCode: line.variantCode,
       variantCode: line.variantCode,
+      productId: Number.isFinite(Number(line.productId)) ? Number(line.productId) : undefined,
+      variantId: Number.isFinite(Number(line.variantId)) ? Number(line.variantId) : undefined,
       productName: line.productName,
       variantName: line.variantName,
       category: "",
@@ -329,7 +309,7 @@ export default function AdminGoodsReceiptCreate() {
   const subtotal = useMemo(() => lines.reduce((s, l) => s + l.unitCost * l.quantity * (1 - l.discountPercent / 100), 0), [lines]);
   const vatAmount = subtotal * vat / 100;
   const total = subtotal + shippingFee + vatAmount;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const futureDateError = receiptDate > today;
   const missingSupplier = !supplier;
   const canSave = lines.length > 0 && !missingSupplier && !futureDateError && stats.err === 0 && !isSaving;
@@ -361,9 +341,8 @@ export default function AdminGoodsReceiptCreate() {
 
   const computePreviewDate = (line: ReceiptLineDraft) => {
     if (line.expiryMode !== "days" || line.expiryDays <= 0) return "";
-    const base = new Date(receiptDate);
-    if (Number.isNaN(base.getTime())) return "";
-    return new Date(base.getTime() + line.expiryDays * 86400000).toISOString().slice(0, 10);
+    if (Number.isNaN(parseLocalDateInput(receiptDate).getTime())) return "";
+    return addLocalCalendarDays(receiptDate, line.expiryDays);
   };
 
   const handleRevalidate = () => {
@@ -376,21 +355,6 @@ export default function AdminGoodsReceiptCreate() {
   const removeLine = (id: string) => {
     if (isSaving) return;
     setLines((prev) => prev.filter((l) => l.id !== id));
-  };
-
-  const addManualLine = () => {
-    if (isSaving) return;
-    if (!manualSearch.trim()) return;
-    const next: ReceiptLineDraft = {
-      id: createLineId("manual"), sourceRow: 0, status: "warning", outcome: "create-product-and-variant",
-      message: "Dòng tạo tay — cần điền đủ.", productCode: manualSearch.trim().toUpperCase().replace(/\s+/g, "-"),
-      variantCode: "", productName: manualSearch.trim(), variantName: "Mặc định", category: "", newProductUnit: "",
-      importUnit: "Cái", sellUnit: "Cái", piecesPerUnit: 1, quantity: 1, unitCost: 0, sellPrice: 0,
-      discountPercent: 0, expiryDate: "", expiryDays: 0, expiryMode: "date", note: "", fromImport: false,
-      isSellable: true, isSellableExplicit: false,
-    };
-    setLines((prev) => revalidateLines([...prev, next]));
-    setManualSearch("");
   };
 
   const jumpToFirst = (target: "error" | "warning") => {
@@ -448,52 +412,40 @@ export default function AdminGoodsReceiptCreate() {
     return backendCatalog;
   }, [backendCatalog]);
 
-  const manualCatalogHits = useMemo(
-    () => catalogHitsForManualAdd(catalogProducts, manualSearch),
-    [catalogProducts, manualSearch],
-  );
-
-  const addLineFromCatalog = (p: Product, v: ProductVariant) => {
+  const addLineFromVariantSearchHit = (hit: VariantTransactionSearchHit) => {
     if (isSaving) return;
+    const hitProductId = Number(hit.productId);
+    const hitVariantId = Number(hit.variantId);
     const next: ReceiptLineDraft = {
       id: createLineId("manual"),
       sourceRow: 0,
       status: "warning",
       outcome: "update-pricing",
-      message: "Đã chọn từ catalog.",
-      productCode: p.code,
-      variantCode: v.code,
-      productName: p.name,
-      variantName: v.name,
-      category: p.categoryName ?? "",
+      message: "Đã chọn từ tìm kiếm variant.",
+      productCode: hit.productCode,
+      variantCode: hit.variantCode,
+      productId: Number.isFinite(hitProductId) ? hitProductId : undefined,
+      variantId: Number.isFinite(hitVariantId) ? hitVariantId : undefined,
+      productName: hit.productName,
+      variantName: hit.variantName,
+      category: hit.categoryName ?? "",
       newProductUnit: "",
-      importUnit: v.importUnit || "Cái",
-      sellUnit: v.sellUnit || "Cái",
-      piecesPerUnit: Math.max(1, v.piecesPerImportUnit ?? 1),
+      importUnit: hit.importUnit?.trim() ? hit.importUnit : "Cái",
+      sellUnit: hit.sellUnit?.trim() ? hit.sellUnit : "Cái",
+      piecesPerUnit: Math.max(1, hit.piecesPerUnit ?? 1),
       quantity: 1,
-      unitCost: Math.max(0, v.costPrice ?? 0),
-      sellPrice: Math.max(0, v.sellPrice ?? 0),
+      unitCost: Math.max(0, hit.costPrice ?? 0),
+      sellPrice: Math.max(0, hit.sellPrice ?? 0),
       discountPercent: 0,
       expiryDate: "",
       expiryDays: 0,
       expiryMode: "date",
       note: "",
       fromImport: false,
-      isSellable: v.isSellable ?? true,
+      isSellable: hit.isSellable ?? true,
       isSellableExplicit: false,
     };
     setLines((prev) => revalidateLines([...prev, next]));
-    setManualSearch("");
-  };
-
-  const submitManualEnter = () => {
-    if (isSaving) return;
-    if (manualCatalogHits.length > 0) {
-      const h = manualCatalogHits[0];
-      addLineFromCatalog(h.product, h.variant);
-      return;
-    }
-    addManualLine();
   };
 
   function findCatalogVariant(line: ReceiptLineDraft): { product: Product; variant: ProductVariant } | null {
@@ -520,13 +472,16 @@ export default function AdminGoodsReceiptCreate() {
   function buildReceiptItems(): InventoryReceiptCreateItem[] | null {
     const out: InventoryReceiptCreateItem[] = [];
     for (const line of lines) {
-      const hit = findCatalogVariant(line);
-      if (!hit) {
-        toast.error(`Không map ${line.productCode} → sản phẩm backend để lưu phiếu. Hãy đồng bộ catalog (đăng nhập admin).`);
+      const identity = resolveReceiptLineIdentity(line, () => {
+        const hit = findCatalogVariant(line);
+        return hit ? { productId: Number(hit.product.id), variantId: Number(hit.variant.id) } : null;
+      });
+      if (!identity) {
+        toast.error("Không xác định được sản phẩm/biến thể cho dòng nhập kho. Vui lòng chọn lại biến thể từ danh sách.");
         return null;
       }
-      const oid = Number(hit.variant.id);
-      const pid = Number(hit.product.id);
+      const pid = identity.productId;
+      const oid = identity.variantId;
       if (!Number.isFinite(oid) || !Number.isFinite(pid)) {
         toast.error("ID sản phẩm/variant không hợp lệ — cần catalog backend (id số).");
         return null;
@@ -782,63 +737,16 @@ export default function AdminGoodsReceiptCreate() {
                 </button>
               )}
             </div>
-            <div className="relative z-40 min-w-[10rem] max-w-[17rem]">
-              <input
-                value={manualSearch}
-                onChange={(e) => setManualSearch(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    submitManualEnter();
-                  }
-                  if (e.key === "Escape") setManualSearch("");
-                }}
-                placeholder="Thêm dòng tay (catalog)..."
-                aria-autocomplete="list"
-                aria-expanded={manualCatalogHits.length > 0}
-                className="h-8 w-full rounded-md border bg-card px-3 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            <div className="relative z-40 min-w-[12rem] max-w-[22rem] flex-1">
+              <VariantSearchPicker
+                context="receipt"
+                disabled={isSaving}
+                placeholder="Thêm dòng từ kho — tìm SP / variant (backend)…"
+                inputTestId="goods-receipt-variant-search"
+                listTestId="goods-receipt-variant-search-hits"
+                onSelect={(hit) => addLineFromVariantSearchHit(hit)}
               />
-              {manualCatalogHits.length > 0 && (
-                <ul
-                  role="listbox"
-                  className="absolute left-0 right-0 mt-1 max-h-52 overflow-auto rounded-md border bg-popover text-xs shadow-md"
-                >
-                  {manualCatalogHits.map((h, idx) => (
-                    <li key={`${h.product.id}-${h.variant.id}`}>
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={idx === 0}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          addLineFromCatalog(h.product, h.variant);
-                        }}
-                        className={cn(
-                          "flex w-full flex-col gap-0.5 px-2.5 py-2 text-left hover:bg-muted",
-                          idx === 0 && "bg-muted/60",
-                        )}
-                      >
-                        <span className="truncate font-medium">
-                          {h.product.name}{" "}
-                          <span className="font-mono text-muted-foreground">· {h.variant.name}</span>
-                        </span>
-                        <span className="font-mono text-[10px] text-muted-foreground">
-                          {h.product.code} · {h.variant.code}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
             </div>
-            <button
-              type="button"
-              onClick={() => submitManualEnter()}
-              disabled={!manualSearch.trim() || isSaving}
-              className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
-            >
-              <Plus className="inline h-3 w-3" />
-            </button>
             <button onClick={() => setImportOpen(true)} disabled={isSaving} className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50">
               <Upload className="h-3.5 w-3.5" /> Excel
             </button>

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Package, ShoppingCart, Heart } from "lucide-react";
 import { formatVND } from "@/lib/format";
-import { StatusBadge } from "@/components/shared/StatusBadge";
 import { toast } from "sonner";
 import { resolveProductImage } from "@/lib/product-image";
 import { cartActions } from "@/lib/cart";
@@ -10,20 +9,13 @@ import type { StorefrontProduct } from "@/services/catalog/publicCatalog";
 
 type Product = StorefrontProduct;
 
-function getStockStatus(stock: number, minStock: number) {
-  if (stock === 0) return "out-of-stock" as const;
-  if (stock <= minStock) return "low-stock" as const;
-  return "in-stock" as const;
-}
-
 export function ProductCard({ product, compact = false }: { product: Product; compact?: boolean }) {
   const dv = product.variants.find((v) => v.isDefault) || product.variants[0];
   const [imageBroken, setImageBroken] = useState(false);
-  const stockStatus = getStockStatus(dv.stock, dv.minStock);
   const hasMulti = product.variants.length > 1;
   const minPrice = Math.min(...product.variants.map((v) => v.sellPrice));
   const maxPrice = Math.max(...product.variants.map((v) => v.sellPrice));
-  const discount = stockStatus === "in-stock" && dv.sellPrice > 20000 ? Math.floor(((maxPrice - minPrice) / maxPrice) * 100) : 0;
+  const discount = dv.sellPrice > 20000 ? Math.floor(((maxPrice - minPrice) / maxPrice) * 100) : 0;
   const imageUrl = resolveProductImage(product, dv);
 
   useEffect(() => {
@@ -33,10 +25,6 @@ export function ProductCard({ product, compact = false }: { product: Product; co
   const handleAdd = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (dv.stock === 0) {
-      toast.error("Sản phẩm đã hết hàng");
-      return;
-    }
     cartActions.add({
       productId: product.id,
       variantId: dv.id,
@@ -48,7 +36,6 @@ export function ProductCard({ product, compact = false }: { product: Product; co
       categoryName: product.categoryName,
       qty: 1,
       unitPrice: dv.sellPrice,
-      stock: dv.stock,
       catalogSource: "backend",
       schemaVersion: 2,
     });
@@ -79,8 +66,7 @@ export function ProductCard({ product, compact = false }: { product: Product; co
 
         {/* Top-left badges */}
         <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
-          {stockStatus !== "in-stock" && <StatusBadge status={stockStatus} />}
-          {hasMulti && discount > 0 && stockStatus === "in-stock" && (
+          {hasMulti && discount > 0 && (
             <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-bold rounded-md bg-storefront-accent text-white shadow-sm">
               -{discount}%
             </span>
@@ -104,17 +90,15 @@ export function ProductCard({ product, compact = false }: { product: Product; co
           type="button"
           data-testid="storefront-add-cart"
           onClick={handleAdd}
-          disabled={dv.stock === 0}
-          aria-disabled={dv.stock === 0}
+          disabled={false}
+          aria-disabled={false}
           className={
             "absolute bottom-0 inset-x-0 h-9 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all duration-200 " +
-            (dv.stock === 0
-              ? "bg-muted text-muted-foreground cursor-not-allowed"
-              : "bg-foreground text-background cursor-pointer hover:bg-storefront-accent hover:brightness-110 active:scale-[0.98] active:brightness-95")
+            "bg-foreground text-background cursor-pointer hover:bg-storefront-accent hover:brightness-110 active:scale-[0.98] active:brightness-95"
           }
         >
           <ShoppingCart className="h-3.5 w-3.5" />
-          {dv.stock === 0 ? "Hết hàng" : "Thêm vào giỏ"}
+          Thêm vào giỏ
         </button>
       </div>
 
@@ -137,23 +121,7 @@ export function ProductCard({ product, compact = false }: { product: Product; co
             </span>
           )}
         </div>
-        {/* Stock line */}
-        <p
-          className={
-            "mt-2 text-[11px] font-medium " +
-            (stockStatus === "out-of-stock"
-              ? "text-destructive"
-              : stockStatus === "low-stock"
-              ? "text-warning"
-              : "text-muted-foreground")
-          }
-        >
-          {stockStatus === "out-of-stock"
-            ? "Hết hàng"
-            : stockStatus === "low-stock"
-            ? `Sắp hết · còn ${dv.stock} ${dv.sellUnit}`
-            : `Còn ${dv.stock} ${dv.sellUnit}`}
-        </p>
+        <p className="mt-2 text-[11px] font-medium text-muted-foreground">Giá hiển thị theo biến thể đang chọn</p>
       </div>
     </Link>
   );

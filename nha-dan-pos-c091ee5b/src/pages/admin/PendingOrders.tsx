@@ -7,7 +7,7 @@ import { AsyncBoundary } from "@/components/shared/AsyncBoundary";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useService } from "@/hooks/useService";
 import { pendingOrders as pendingOrdersService } from "@/services";
-import type { PendingOrder, PendingOrderStatus, PaymentMethod } from "@/services/types";
+import type { PendingOrder, PendingOrderStatus, PaymentMethod, PaymentLinkStatus } from "@/services/types";
 import { formatVND, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
@@ -50,6 +50,17 @@ function paymentBadge(method: PaymentMethod) {
     case "zalopay": return <StatusBadge status="zalopay" />;
     default: return null;
   }
+}
+
+function paymentLinkHint(order: PendingOrder): string | null {
+  const st = (order.paymentLinkStatus ?? "NONE") as PaymentLinkStatus;
+  if (st === "NONE") return null;
+  const d = Number(order.paymentDelta ?? 0);
+  const abs = Math.abs(Math.round(d));
+  if (st === "EXACT_PAID") return "Đã gắn giao dịch — khớp đúng số tiền";
+  if (st === "UNDERPAID_LINKED") return `Đã gắn giao dịch — thiếu ${formatVND(abs)} cần đối soát`;
+  if (st === "OVERPAID_LINKED") return `Đã gắn giao dịch — dư ${formatVND(abs)} cần đối soát`;
+  return null;
 }
 
 function timeRemaining(expiresAt?: string) {
@@ -313,7 +324,19 @@ export default function AdminPendingOrders() {
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-center">{statusBadge(order.status)}</td>
+                      <td className="px-3 py-2.5 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          {statusBadge(order.status)}
+                          {paymentLinkHint(order) && (
+                            <span
+                              className="text-[10px] text-warning font-medium max-w-[160px] leading-tight"
+                              data-testid={`pending-payment-link-${order.id}`}
+                            >
+                              {paymentLinkHint(order)}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-3 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-1">
                           {isAdmin && isPendingLike(order.status) && (
@@ -349,6 +372,11 @@ export default function AdminPendingOrders() {
                       <div>
                         <p className="font-mono text-xs font-medium">{order.code}</p>
                         <p className="text-xs text-muted-foreground">{order.customerName ?? "—"}</p>
+                        {paymentLinkHint(order) && (
+                          <p className="text-[10px] text-warning font-medium mt-1" data-testid={`pending-payment-link-m-${order.id}`}>
+                            {paymentLinkHint(order)}
+                          </p>
+                        )}
                       </div>
                       {statusBadge(order.status)}
                     </div>
@@ -504,6 +532,21 @@ function PendingOrderDetail({ order, onClose, onConfirm, onCancel, canManage }: 
             </div>
           </Section>
 
+          {paymentLinkHint(order) && (
+            <div
+              className="rounded-lg border border-warning/30 bg-warning-soft/40 p-3 text-xs text-warning-foreground space-y-1"
+              data-testid="pending-detail-payment-link-banner"
+            >
+              <p className="font-semibold">{paymentLinkHint(order)}</p>
+              {order.linkedPaymentEventId != null && order.linkedPaymentEventId !== "" && (
+                <p className="text-[10px] text-muted-foreground font-mono">
+                  Giao dịch #{order.linkedPaymentEventId}
+                  {order.linkedPaymentAmount != null ? ` · ${formatVND(order.linkedPaymentAmount)}` : ""}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Lines */}
           <Section title={`Sản phẩm (${lines.length})`} icon={Receipt}>
             <div className="border rounded-lg divide-y">
@@ -566,8 +609,18 @@ function PendingOrderDetail({ order, onClose, onConfirm, onCancel, canManage }: 
               <div className="border rounded-lg p-3 text-sm space-y-1 bg-accent-soft/30">
                 <div className="flex justify-between">
                   <span className="font-mono font-medium">{voucher.code}</span>
-                  <span className="font-medium">−{formatVND(voucher.discountAmount)}</span>
+                  {!voucher.freeShipping && voucher.discountAmount > 0 ? (
+                    <span className="font-medium">−{formatVND(voucher.discountAmount)}</span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Freeship / giảm phí ship</span>
+                  )}
                 </div>
+                {(voucher.shippingDiscountAmount ?? 0) > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Giảm phí ship (voucher)</span>
+                    <span className="font-medium">−{formatVND(voucher.shippingDiscountAmount ?? 0)}</span>
+                  </div>
+                )}
                 <p className="text-xs text-muted-foreground">{voucher.ruleSummary}</p>
               </div>
             </Section>

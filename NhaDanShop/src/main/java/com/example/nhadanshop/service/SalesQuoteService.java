@@ -374,11 +374,13 @@ public class SalesQuoteService {
                 giftSnapshots
         );
 
+        boolean shipOnlyVoucher = voucherRow != null && VoucherQuoteEvaluator.isShipOnlyVoucher(voucherRow, voucherRow.getCode());
         VoucherSnapshotDto voucherSnapshot = voucherRow == null ? null : new VoucherSnapshotDto(
                 voucherRow.getCode(),
                 voucherRow.getRuleSummary(),
                 breakdown.voucherDiscount(),
-                actualVoucherShippingDiscount);
+                actualVoucherShippingDiscount,
+                shipOnlyVoucher);
 
         SalesQuotePayloadDto payload = SalesQuotePayloadDto.from(
                 req.source(),

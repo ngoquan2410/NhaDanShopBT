@@ -8,6 +8,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -20,7 +21,16 @@ public class GhnQuoteLogController {
 
     @GetMapping
     public Page<GhnQuoteLog> list(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) Boolean ok,
+            @RequestParam(required = false) String reason,
             @PageableDefault(size = 50, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        return ghnQuoteLogRepository.findAllByOrderByCreatedAtDesc(pageable);
+        String q = (search != null && !search.isBlank()) ? search.trim() : null;
+        String reasonParam = (reason != null && !reason.isBlank()) ? reason.trim() : null;
+        boolean hasFilter = q != null || ok != null || (reasonParam != null && !reasonParam.isEmpty());
+        if (!hasFilter) {
+            return ghnQuoteLogRepository.findAllByOrderByCreatedAtDesc(pageable);
+        }
+        return ghnQuoteLogRepository.searchPage(ok, reasonParam, q, pageable);
     }
 }

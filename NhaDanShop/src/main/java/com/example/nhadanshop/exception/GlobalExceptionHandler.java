@@ -6,8 +6,11 @@ import jakarta.persistence.PersistenceException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -19,6 +22,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Slf4j
@@ -62,12 +66,24 @@ public class GlobalExceptionHandler {
         return pd;
     }
 
+    /**
+     * RFC 7807 body plus top-level {@code code} for clients (FE/Selenium). Without
+     * {@code spring.mvc.problemdetails.enabled=true}, {@link ProblemDetail#setProperty}
+     * is not merged into JSON; this handler shape stays stable for machine parsing.
+     */
     @ExceptionHandler(BusinessConflictException.class)
-    public ProblemDetail handleBusinessConflict(BusinessConflictException ex) {
-        ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.CONFLICT);
-        pd.setDetail(ex.getMessage());
-        pd.setProperty("code", ex.getCode());
-        return pd;
+    public ResponseEntity<Map<String, Object>> handleBusinessConflict(
+            BusinessConflictException ex, HttpServletRequest request) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("type", "about:blank");
+        body.put("title", HttpStatus.CONFLICT.getReasonPhrase());
+        body.put("status", HttpStatus.CONFLICT.value());
+        body.put("detail", ex.getMessage());
+        body.put("instance", request.getRequestURI());
+        body.put("code", ex.getCode());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .contentType(MediaType.parseMediaType("application/problem+json"))
+                .body(body);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

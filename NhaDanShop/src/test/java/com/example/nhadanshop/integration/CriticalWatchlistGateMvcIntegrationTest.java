@@ -36,6 +36,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -371,26 +372,94 @@ class CriticalWatchlistGateMvcIntegrationTest {
     }
 
     @Test
-    void invoice_after_quote_when_stock_insufficient_returns_bad_request() throws Exception {
-        String adminUser = PREFIX + "_adm_oos";
+    void quote_when_requested_qty_exceeds_sellable_stock_returns_bad_request() throws Exception {
+        String adminUser = PREFIX + "_adm_q_oos";
         saveAdmin(adminUser, "Adminpwd1!");
         String token = loginAccess(adminUser, "Adminpwd1!");
 
-        Seed s = seedSku(2, "OOS");
+        Seed s = seedSku(2, "QOOS");
 
-        JsonNode quoted = objectMapper.readTree(mkAuthenticatedPosQuote(s.productId(), s.variantId(), 99, token));
+        ObjectNode line = objectMapper.createObjectNode();
+        line.put("productId", s.productId());
+        line.put("variantId", s.variantId());
+        line.put("quantity", 99);
+        line.put("discountPercent", 0);
+        line.putNull("batchId");
+        line.put("rewardLine", false);
+
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("source", "pos");
+        root.putNull("customerId");
+        root.set("lines", objectMapper.createArrayNode().add(line));
+        root.putNull("promotionId");
+        root.putNull("voucherCode");
+        root.putNull("shippingQuoteSnapshot");
+        root.putNull("shippingAddress");
+        root.putNull("manualDiscount");
+        root.put("vatPercent", 0);
+        root.putNull("requestedRedeemPoints");
+
+        String errBody = mockMvc.perform(post("/api/sales/quote")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(root)))
+                .andExpect(status().isBadRequest())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        JsonNode err = objectMapper.readTree(errBody);
+        String detail = err.path("detail").asText("");
+        assertThat(detail).contains("Không đủ tồn bán được");
+        assertThat(detail).contains(s.variantCode());
+    }
+
+    /**
+     * Quote succeeds against opening stock; a legacy items invoice drains sellable qty before
+     * materializing the quoted lines — {@link com.example.nhadanshop.service.InvoiceService#appendCapturedQuoteLine}
+     * must reject with insufficient stock (not a generic 400).
+     */
+    @Test
+    void invoice_after_valid_quote_when_stock_depleted_returns_bad_request() throws Exception {
+        String adminUser = PREFIX + "_adm_inv_oos";
+        saveAdmin(adminUser, "Adminpwd1!");
+        String token = loginAccess(adminUser, "Adminpwd1!");
+
+        Seed s = seedSku(10, "IOOS");
+
+        JsonNode quoted = objectMapper.readTree(mkAuthenticatedPosQuote(s.productId(), s.variantId(), 2, token));
         String quoteId = quoted.get("quoteId").asText();
 
-        String createBody = """
+        String drainBody = """
                 {"customerName":"Khách lẻ","customerId":null,"note":null,"promotionId":null,\
-                "items":null,"quotePublicId":"%s","paymentMethod":"cash"}
-                """.formatted(quoteId);
+                "items":[{"productId":%d,"quantity":9,"discountPercent":0,"variantId":%d,\
+                "comboId":null,"batchId":null}],\
+                "quotePublicId":null,"paymentMethod":"cash"}
+                """.formatted(s.productId(), s.variantId());
 
         mockMvc.perform(post("/api/invoices")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(createBody))
-                .andExpect(status().isBadRequest());
+                        .content(drainBody))
+                .andExpect(status().isCreated());
+
+        stockMutationService.syncVariantStockWithBatches(s.variantId());
+        assertThat(variantRepository.findById(s.variantId()).orElseThrow().getStockQty()).isEqualTo(1);
+
+        String fromQuoteBody = """
+                {"customerName":"Khách lẻ","customerId":null,"note":null,"promotionId":null,\
+                "items":null,"quotePublicId":"%s","paymentMethod":"cash"}
+                """.formatted(quoteId);
+
+        String invErr = mockMvc.perform(post("/api/invoices")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(fromQuoteBody))
+                .andExpect(status().isBadRequest())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        JsonNode invErrNode = objectMapper.readTree(invErr);
+        String invDetail = invErrNode.path("detail").asText("");
+        assertThat(invDetail).contains("Khong du hang variant");
+        assertThat(invDetail).contains(s.variantCode());
+        assertThat(invDetail).contains("Ton:");
+        assertThat(invDetail).contains("can:");
     }
 
     @Test

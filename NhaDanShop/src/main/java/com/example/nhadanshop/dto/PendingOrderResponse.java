@@ -28,5 +28,12 @@ public record PendingOrderResponse(
         String createdBy,
         String cancelReason,
         BigDecimal totalAmount,
-        SalesInvoiceResponse invoice
+        SalesInvoiceResponse invoice,
+        /**
+         * Derived from manually/webhook-linked bank {@code PaymentEvent}: NONE, EXACT_PAID, UNDERPAID_LINKED, OVERPAID_LINKED.
+         */
+        String paymentLinkStatus,
+        BigDecimal paymentDelta,
+        Long linkedPaymentEventId,
+        BigDecimal linkedPaymentAmount
 ) {}

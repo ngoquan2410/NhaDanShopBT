@@ -30,6 +30,7 @@ import type {
   ShippingAddress,
   ShippingQuote,
   PendingOrder,
+  PricingBreakdownSnapshot,
 } from "@/services/types";
 import { useCart, useSelectedPromotionId, useSelectedPromotionMode, cartActions } from "@/lib/cart";
 import { AddressSelect, type AddressSelectValue } from "@/components/shared/AddressSelect";
@@ -60,6 +61,14 @@ type GiftSummaryLine = { key: string; label: string; qty: number };
 export function isGiftPromotionType(type: string | null | undefined): boolean {
   const normalized = String(type ?? "").trim().toLowerCase();
   return normalized === "buy_x_get_y" || normalized === "quantity_gift" || normalized === "gift";
+}
+
+/** Cross-check {@link PricingBreakdownSnapshot#total} against net components from the same quote (VND integers). */
+function recomputeQuoteTotalVnd(pb: PricingBreakdownSnapshot): number | null {
+  const item = pb.itemNetRevenue;
+  const ship = pb.shippingNetRevenue;
+  if (item == null || ship == null) return null;
+  return Math.round(item + ship + (pb.vatAmount ?? 0));
 }
 
 export function buildCheckoutGiftSummaryLines(
@@ -439,6 +448,13 @@ export default function CheckoutPage() {
   const rowShipDisc = pb ? pb.shippingDiscount : promoShippingDiscountPreview;
   const rowShipPayable = Math.max(0, rowShipFee - rowShipDisc);
   const displayTotal = pb ? pb.total : totalPreview;
+  const recomputedQuoteTotal = serverOk && pb ? recomputeQuoteTotalVnd(pb) : null;
+  const quoteTotalMismatch =
+    serverOk && pb && recomputedQuoteTotal != null && Math.abs(recomputedQuoteTotal - pb.total) > 1;
+  const voucherIsShipOnly = Boolean(serverOk && vs && vs.freeShipping);
+  const showVoucherMerchandiseRow = Boolean(
+    serverOk && vs && !voucherIsShipOnly && rowVoucherDisc > 0,
+  );
   const previewPromotionLabel =
     appliedPreviewPromo?.name ?? null;
   const quotedPromotionLabel =
@@ -474,7 +490,8 @@ export default function CheckoutPage() {
     !beQuoteLoading &&
     !beQuoteErr &&
     !manualPromotionInvalidReason &&
-    (!appliedVoucherCode || (vs != null && vs.code.toLowerCase() === appliedVoucherCode.toLowerCase()));
+    (!appliedVoucherCode || (vs != null && vs.code.toLowerCase() === appliedVoucherCode.toLowerCase()))
+    && !quoteTotalMismatch;
 
   const applyVoucher = () => {
     const code = voucherInput.trim();
@@ -912,7 +929,7 @@ export default function CheckoutPage() {
                     Khuyến mãi đã chọn không hợp lệ: {manualPromotionInvalidReason}
                   </p>
                 )}
-                {vs && rowVoucherDisc > 0 && (
+                {showVoucherMerchandiseRow && vs && (
                   <Row
                     label={`Mã giảm giá: ${vs.code}`}
                     value={<span className="text-success">−{formatVND(rowVoucherDisc)}</span>}
@@ -938,9 +955,15 @@ export default function CheckoutPage() {
                 />
                 {rowShipDisc > 0 && (
                   <Row
-                    label="Giảm phí giao hàng"
+                    label={
+                      voucherIsShipOnly && vs
+                        ? `Giảm phí giao hàng (voucher freeship ${vs.code})`
+                        : "Giảm phí giao hàng"
+                    }
                     value={<span className="text-success">−{formatVND(rowShipDisc)}</span>}
-                    dataTestId="checkout-shipping-discount"
+                    dataTestId={
+                      voucherIsShipOnly ? "checkout-voucher-shipping-discount" : "checkout-shipping-discount"
+                    }
                   />
                 )}
                 {serverOk && pb && pb.vatAmount > 0 && (
@@ -957,6 +980,17 @@ export default function CheckoutPage() {
                     <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                     <span>
                       <b>Báo giá máy chủ thất bại:</b> {beQuoteErr}. Vui lòng sửa địa chỉ / thử lại — không thể tạo đơn khi thiếu báo giá backend.
+                    </span>
+                  </div>
+                )}
+                {quoteTotalMismatch && !beQuoteLoading && (
+                  <div
+                    className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-[11px] text-danger flex items-start gap-2"
+                    data-testid="checkout-quote-total-mismatch"
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      <b>Tổng tiền báo giá không nhất quán:</b> không thể tạo đơn. Vui lòng làm mới hoặc chỉnh giỏ / địa chỉ rồi thử lại.
                     </span>
                   </div>
                 )}

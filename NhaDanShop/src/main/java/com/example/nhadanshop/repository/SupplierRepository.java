@@ -1,6 +1,8 @@
 package com.example.nhadanshop.repository;
 
 import com.example.nhadanshop.entity.Supplier;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -11,6 +13,8 @@ import java.util.Optional;
 public interface SupplierRepository extends JpaRepository<Supplier, Long> {
 
     List<Supplier> findByActiveTrueOrderByNameAsc();
+
+    Page<Supplier> findByActiveTrueOrderByNameAsc(Pageable pageable);
 
     boolean existsByCode(String code);
     boolean existsByCodeAndIdNot(String code, Long id);
@@ -26,6 +30,18 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
            " lower(coalesce(s.phone, '')) LIKE '%' || lower(:q) || '%')",
            nativeQuery = true)
     List<Supplier> searchActive(@Param("q") String query);
+
+    @Query("""
+            SELECT s FROM Supplier s
+            WHERE s.active = true
+              AND (:q IS NULL OR :q = ''
+                   OR LOWER(s.name) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(COALESCE(s.code, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(COALESCE(s.phone, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(COALESCE(s.email, '')) LIKE LOWER(CONCAT('%', :q, '%')))
+            ORDER BY s.name ASC
+            """)
+    Page<Supplier> searchActivePage(@Param("q") String q, Pageable pageable);
 
     /**
      * Max numeric suffix for auto codes {@code NCC001}… (only {@code NCC + digits} rows).

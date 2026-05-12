@@ -9,6 +9,7 @@ import { adminReports } from "@/services";
 import { formatVND, formatNumber } from "@/lib/format";
 import { BarChart3, Download, Package, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { localToday } from "@/lib/localDate";
 import { SortableTh } from "@/components/shared/SortableTh";
 import { useTableControls } from "@/hooks/useTableControls";
 import { TablePagination } from "@/components/shared/TablePagination";
@@ -21,7 +22,7 @@ export default function AdminInventoryReport() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState("all");
   const [from, setFrom] = useState("2026-04-01");
-  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [to, setTo] = useState(localToday());
   const [excelBusy, setExcelBusy] = useState(false);
   const { data, loading, error } = useService(() => adminReports.inventory(from, to), [from, to]);
   const inventoryReport = data ?? [];

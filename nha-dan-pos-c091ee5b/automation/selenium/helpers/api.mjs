@@ -2,6 +2,22 @@
  * HTTP helpers against API_BASE_URL for deterministic seed/cleanup (Bearer optional).
  */
 
+/** @param {Record<string, unknown>} body */
+function extractProblemSummary(body) {
+  if (!body || typeof body !== "object") return null;
+  /** @type {Record<string, unknown>} */
+  const o = /** @type {Record<string, unknown>} */ (body);
+  return {
+    type: o.type,
+    title: o.title,
+    status: o.status,
+    detail: o.detail,
+    instance: o.instance,
+    code: o.code,
+    fieldErrors: o.fieldErrors,
+  };
+}
+
 function joinUrl(origin, path) {
   const o = origin.replace(/\/$/, "");
   const p = path.startsWith("/") ? path : `/${path}`;
@@ -100,6 +116,7 @@ export function createApiHelper(apiBaseUrl, auth = {}) {
     },
 
     async fetchJson(pathname, opts = {}) {
+      const method = opts.method || "GET";
       const res = await this.fetch(pathname, opts);
       const text = await res.text();
       let body = {};
@@ -109,9 +126,31 @@ export function createApiHelper(apiBaseUrl, auth = {}) {
         body = { _raw: text };
       }
       if (!res.ok) {
-        const err = new Error(`${pathname} HTTP ${res.status}`);
+        const url = joinUrl(apiBaseUrl, pathname);
+        const problem = extractProblemSummary(body);
+        const detailLine =
+          (problem && typeof problem.detail === "string" && problem.detail) ||
+          (typeof body?._raw === "string" ? String(body._raw).slice(0, 800) : "") ||
+          (typeof body === "object" && body !== null ? JSON.stringify(body).slice(0, 800) : "");
+        const msg = `${pathname} HTTP ${res.status}${detailLine ? ` — ${detailLine}` : ""}`;
+        const err = new Error(msg);
         err.response = res;
         err.body = body;
+        err.diagnostics = {
+          method,
+          url,
+          pathname,
+          hasAuthorization: Boolean(tokenHolder.accessToken),
+          requestHeaders: {
+            Accept: "application/json",
+            "Content-Type": opts.json !== undefined ? "application/json" : undefined,
+            Authorization: tokenHolder.accessToken ? "Bearer <redacted>" : undefined,
+          },
+          requestBody: opts.json !== undefined ? opts.json : undefined,
+          responseStatus: res.status,
+          responseBody: body,
+          problem,
+        };
         throw err;
       }
       return body;

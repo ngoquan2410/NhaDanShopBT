@@ -47,6 +47,10 @@ export function useTableControls<T, K extends string = string>({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(initialPageSize);
 
+  useEffect(() => {
+    setPageSize(initialPageSize);
+  }, [initialPageSize]);
+
   useEffect(() => { setPage(1); }, [resetToken, pageSize]);
 
   const sortedRows = useMemo(() => {

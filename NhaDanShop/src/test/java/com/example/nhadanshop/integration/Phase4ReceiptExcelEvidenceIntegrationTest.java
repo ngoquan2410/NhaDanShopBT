@@ -14,6 +14,7 @@ import com.example.nhadanshop.repository.ProductRepository;
 import com.example.nhadanshop.repository.ProductVariantRepository;
 import com.example.nhadanshop.service.CustomerLoyaltyService;
 import com.example.nhadanshop.service.ExcelReceiptImportService;
+import com.example.nhadanshop.exception.BusinessConflictException;
 import com.example.nhadanshop.service.InventoryReceiptService;
 import com.example.nhadanshop.service.StockMutationService;
 import com.example.nhadanshop.tooling.HibernateStatementStatsHelper;
@@ -327,7 +328,7 @@ class Phase4ReceiptExcelEvidenceIntegrationTest {
         assertThat(countVoidMovementsForReceipt(rid)).isEqualTo(1);
 
         assertThatThrownBy(() -> inventoryReceiptService.voidReceipt(rid, null))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(BusinessConflictException.class)
                 .hasMessageContaining("đã bị hủy");
 
         assertThat(countVoidMovementsForReceipt(rid)).isEqualTo(1);
@@ -399,7 +400,7 @@ class Phase4ReceiptExcelEvidenceIntegrationTest {
         inventoryReceiptService.voidReceipt(resp.id(), null);
 
         assertThatThrownBy(() -> inventoryReceiptService.deleteReceipt(resp.id()))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(BusinessConflictException.class)
                 .hasMessageContaining("void");
     }
 

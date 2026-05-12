@@ -58,6 +58,7 @@ export type VoucherSnapshotFromQuote = {
   ruleSummary?: string | null;
   discountAmount: number;
   shippingDiscountAmount: number;
+  freeShipping?: boolean;
 };
 
 export type SalesQuoteApiResult = {
@@ -147,6 +148,7 @@ function mapVoucherSnapshot(v: unknown): VoucherSnapshotFromQuote | null {
     ruleSummary: o.ruleSummary != null ? String(o.ruleSummary) : undefined,
     discountAmount: Number(o.discountAmount ?? 0),
     shippingDiscountAmount: Number(o.shippingDiscountAmount ?? 0),
+    freeShipping: o.freeShipping === true,
   };
 }
 

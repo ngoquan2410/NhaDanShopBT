@@ -14,6 +14,8 @@ public record ReceiptDeleteEligibility(boolean canDelete, String deleteBlockReas
     public static final String STATUS_CONFIRMED = "confirmed";
     public static final String REASON_DOWNSTREAM_CONSUMPTION = "downstream_consumption";
     public static final String REASON_VOIDED = "voided";
+    /** Duplicate void / void when receipt already voided (HTTP 409). */
+    public static final String REASON_ALREADY_VOIDED = "already_voided";
 
     /**
      * Delete rules for a receipt, including voided (never hard-deletable) vs batch consumption.

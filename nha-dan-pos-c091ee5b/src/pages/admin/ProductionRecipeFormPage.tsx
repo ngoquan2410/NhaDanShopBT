@@ -7,8 +7,22 @@ import { products as productService } from "@/services";
 import type { Product } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 import { Loader2, ArrowLeft, Plus, Trash2, Save, AlertTriangle } from "lucide-react";
-import { SearchableSelect, type SearchableSelectOption } from "@/components/shared/SearchableSelect";
 import { QuickCreateProductModal, type QuickCreateMode } from "@/components/production/QuickCreateProductModal";
+import { VariantSearchPicker } from "@/components/shared/VariantSearchPicker";
+import type { VariantTransactionSearchHit } from "@/services/catalog/variantTransactionSearch";
+
+type RecipeRow = {
+  productId: string;
+  variantId: string;
+  qty: number;
+  unit: string;
+  pickMeta?: {
+    stock: number;
+    sellUnit: string;
+    importUnit: string;
+    piecesPerImportUnit: number;
+  };
+};
 
 /** Full-page recipe create — breadcrumb, metadata card, và bảng dòng NL giống phiếu điều chỉnh tồn kho. */
 export default function ProductionRecipeFormPage() {
@@ -23,26 +37,17 @@ export default function ProductionRecipeFormPage() {
   const [name, setName] = useState("");
   const [outPid, setOutPid] = useState<string>("");
   const [outVid, setOutVid] = useState<string>("");
+  const [outputPickMeta, setOutputPickMeta] = useState<RecipeRow["pickMeta"]>();
   const [outQty, setOutQty] = useState(10);
   const [mustSell, setMustSell] = useState(true);
   const [overheadCost, setOverheadCost] = useState("0");
-  const [rows, setRows] = useState<
-    Array<{ productId: string; variantId: string; qty: number; unit: string }>
-  >([{ productId: "", variantId: "", qty: 1, unit: "u" }]);
+  const [rows, setRows] = useState<RecipeRow[]>([{ productId: "", variantId: "", qty: 1, unit: "u" }]);
   const [saving, setSaving] = useState(false);
   const [quickCreate, setQuickCreate] = useState<{ mode: QuickCreateMode; rowIdx: number | "output" } | null>(null);
-
-  const refreshProducts = async () => {
-    const pg = await productService.list({ pageSize: 500 });
-    setProducts(pg.items);
-    return pg.items;
-  };
 
   useEffect(() => {
     void (async () => {
       try {
-        const pg = await productService.list({ pageSize: 500 });
-        setProducts(pg.items);
         if (isEditMode && editId != null) {
           const recipe = await production.getRecipe(editId);
           setCode(recipe.recipeCode ?? "");
@@ -58,14 +63,24 @@ export default function ProductionRecipeFormPage() {
               variantId: String(r.variantId),
               qty: Number(r.qtyPerOutput) || 1,
               unit: r.unit || "u",
-            }))
+            })),
           );
+          const pids = new Set<number>([Number(recipe.outputProductId)]);
+          (recipe.components ?? []).forEach((c) => pids.add(Number(c.productId)));
+          const loaded: Product[] = [];
+          for (const pid of pids) {
+            const p = await productService.get(String(pid));
+            if (p) loaded.push(p);
+          }
+          setProducts(loaded);
+        } else {
+          setProducts([]);
         }
       } catch {
         const now = Date.now();
         if (now - errToastAt.current > 6000) {
           errToastAt.current = now;
-          toast.error("Không tải danh sách sản phẩm");
+          toast.error("Không tải dữ liệu quy trình / sản phẩm");
         }
       } finally {
         setLoadingProducts(false);
@@ -78,8 +93,48 @@ export default function ProductionRecipeFormPage() {
     [products, outPid],
   );
 
-  const variantsFor = (pid: string) =>
-    products.find((p) => p.id === pid)?.variants ?? [];
+  const mergeProductIntoState = (productId: string) => {
+    void productService.get(productId).then((p) => {
+      if (!p) return;
+      setProducts((prev) => {
+        const rest = prev.filter((x) => x.id !== p.id);
+        return [...rest, p];
+      });
+    });
+  };
+
+  const applyOutputHit = (hit: VariantTransactionSearchHit) => {
+    setOutPid(hit.productId);
+    setOutVid(hit.variantId);
+    setOutputPickMeta({
+      stock: hit.stockQty,
+      sellUnit: hit.sellUnit,
+      importUnit: hit.importUnit,
+      piecesPerImportUnit: hit.piecesPerUnit,
+    });
+    mergeProductIntoState(hit.productId);
+  };
+
+  const applyComponentHit = (idx: number, hit: VariantTransactionSearchHit) => {
+    const next = [...rows];
+    next[idx] = {
+      ...next[idx],
+      productId: hit.productId,
+      variantId: hit.variantId,
+      unit:
+        next[idx].unit === "u" || !next[idx].unit
+          ? hit.sellUnit || next[idx].unit
+          : next[idx].unit,
+      pickMeta: {
+        stock: hit.stockQty,
+        sellUnit: hit.sellUnit,
+        importUnit: hit.importUnit,
+        piecesPerImportUnit: hit.piecesPerUnit,
+      },
+    };
+    setRows(next);
+    mergeProductIntoState(hit.productId);
+  };
 
   const submit = async () => {
     if (!code.trim() || !name.trim() || !outPid || !outVid) {
@@ -208,9 +263,9 @@ export default function ProductionRecipeFormPage() {
                   className="mt-1 w-full h-9 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
                 />
               </div>
-              <div>
+              <div className="sm:col-span-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <label className="text-xs font-medium text-muted-foreground">Sản phẩm thành phẩm *</label>
+                  <label className="text-xs font-medium text-muted-foreground">Thành phẩm (chọn đúng variant) *</label>
                   {!isEditMode && (
                     <button
                       type="button"
@@ -221,37 +276,27 @@ export default function ProductionRecipeFormPage() {
                     </button>
                   )}
                 </div>
-                <SearchableSelect
-                  value={outPid}
-                  onChange={(v) => {
-                    setOutPid(v);
-                    setOutVid("");
-                  }}
-                  disabled={isEditMode}
-                  placeholder="Chọn sản phẩm"
-                  className="mt-1"
-                  options={products.map((p) => ({
-                    value: String(p.id),
-                    label: `${p.code} — ${p.name}`,
-                    searchText: `${p.code} ${p.name}`,
-                  }))}
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Phân loại output *</label>
-                <SearchableSelect
-                  value={outVid}
-                  onChange={(v) => setOutVid(v)}
-                  disabled={!outputProduct || isEditMode}
-                  placeholder="Chọn phân loại"
-                  className="mt-1"
-                  options={(outputProduct?.variants ?? []).map((v) => ({
-                    value: String(v.id),
-                    label: `${v.code} — ${v.name}`,
-                    hint: !v.isSellable ? "(không bán)" : undefined,
-                    searchText: `${v.code} ${v.name}`,
-                  }))}
-                />
+                {isEditMode ? (
+                  <p className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-xs font-mono text-muted-foreground">
+                    product #{outPid} · variant #{outVid}
+                  </p>
+                ) : (
+                  <>
+                    {outVid ? (
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Đã chọn: {outputProduct?.code ?? "…"} — {outputProduct?.name ?? ""} · variant id {outVid}
+                      </p>
+                    ) : null}
+                    <VariantSearchPicker
+                      context="recipe"
+                      className="mt-1"
+                      inputTestId="recipe-output-variant-search"
+                      listTestId="recipe-output-variant-search-hits"
+                      placeholder="Tìm output theo mã/tên SP hoặc variant…"
+                      onSelect={(hit) => applyOutputHit(hit)}
+                    />
+                  </>
+                )}
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground">SL chuẩn output / recipe</label>
@@ -314,11 +359,8 @@ export default function ProductionRecipeFormPage() {
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="text-left px-3 py-2.5 font-medium text-muted-foreground w-10">#</th>
-                    <th className="text-left px-3 py-2.5 font-medium text-muted-foreground min-w-[200px]">
-                      Sản phẩm
-                    </th>
-                    <th className="text-left px-3 py-2.5 font-medium text-muted-foreground min-w-[180px]">
-                      Phân loại
+                    <th className="text-left px-3 py-2.5 font-medium text-muted-foreground min-w-[280px]">
+                      Nguyên liệu (variant)
                     </th>
                     <th className="text-center px-3 py-2.5 font-medium text-muted-foreground w-[110px]">
                       SL / output
@@ -333,61 +375,38 @@ export default function ProductionRecipeFormPage() {
                   {rows.map((row, idx) => {
                     const rowProduct = products.find((p) => String(p.id) === row.productId) ?? null;
                     const rowVariant = rowProduct?.variants.find((v) => String(v.id) === row.variantId) ?? null;
+                    const pm = row.pickMeta;
                     return (
                     <Fragment key={idx}>
                     <tr key={`${idx}-r`} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-3 py-2 text-muted-foreground text-xs tabular-nums align-top">{idx + 1}</td>
                       <td className="px-3 py-2">
-                        <div className="flex items-center gap-1">
-                          <SearchableSelect
-                            value={row.productId}
-                            onChange={(v) => {
-                              const next = [...rows];
-                              next[idx] = { ...next[idx], productId: v, variantId: "" };
-                              setRows(next);
-                            }}
-                            placeholder="Chọn nguyên liệu"
-                            size="sm"
-                            options={products.map((p) => ({
-                              value: String(p.id),
-                              label: p.code,
-                              hint: p.name,
-                              searchText: `${p.code} ${p.name}`,
-                            }))}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setQuickCreate({ mode: "material", rowIdx: idx })}
-                            className="shrink-0 inline-flex items-center gap-1 px-2 h-8 text-[11px] font-medium border rounded-md hover:bg-muted text-primary"
-                            title="Tạo nguyên liệu nhanh"
-                          >
-                            <Plus className="h-3 w-3" /> Tạo
-                          </button>
+                        <div className="space-y-1 min-w-0">
+                          {row.variantId ? (
+                            <p className="text-[11px] text-muted-foreground font-mono">
+                              {row.productId} · {row.variantId}
+                            </p>
+                          ) : null}
+                          <div className="flex items-start gap-1">
+                            <div className="flex-1 min-w-0">
+                              <VariantSearchPicker
+                                context="recipe"
+                                inputTestId={idx === 0 ? "recipe-component-variant-search" : undefined}
+                                listTestId={idx === 0 ? "recipe-component-variant-search-hits" : undefined}
+                                placeholder="Tìm nguyên liệu (variant)…"
+                                onSelect={(hit) => applyComponentHit(idx, hit)}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setQuickCreate({ mode: "material", rowIdx: idx })}
+                              className="shrink-0 inline-flex items-center gap-1 px-2 h-8 text-[11px] font-medium border rounded-md hover:bg-muted text-primary"
+                              title="Tạo nguyên liệu nhanh"
+                            >
+                              <Plus className="h-3 w-3" /> Tạo
+                            </button>
+                          </div>
                         </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <SearchableSelect
-                          value={row.variantId}
-                          onChange={(v) => {
-                            const next = [...rows];
-                            const variant = rowProduct?.variants.find((x) => String(x.id) === v);
-                            next[idx] = {
-                              ...next[idx],
-                              variantId: v,
-                              unit: (next[idx].unit === "u" || !next[idx].unit) && variant?.sellUnit ? variant.sellUnit : next[idx].unit,
-                            };
-                            setRows(next);
-                          }}
-                          disabled={!row.productId}
-                          placeholder="Chọn PL"
-                          size="sm"
-                          options={(rowProduct?.variants ?? []).map((v) => ({
-                            value: String(v.id),
-                            label: v.code,
-                            hint: !v.isSellable ? "· NS" : v.name,
-                            searchText: `${v.code} ${v.name}`,
-                          }))}
-                        />
                       </td>
                       <td className="px-3 py-2 text-center">
                         <input
@@ -427,20 +446,20 @@ export default function ProductionRecipeFormPage() {
                         </button>
                       </td>
                     </tr>
-                    {(rowVariant || !row.productId) && (
+                    {(rowVariant || pm || !row.productId) && (
                       <tr key={`${idx}-m`} className="border-b last:border-0">
                         <td />
-                        <td colSpan={5} className="px-3 pb-2 text-[11px] text-muted-foreground">
+                        <td colSpan={4} className="px-3 pb-2 text-[11px] text-muted-foreground">
                           {!row.productId ? (
                             <span>Chọn nguyên liệu để tự điền đơn vị và xem tồn khả dụng.</span>
-                          ) : rowVariant ? (
+                          ) : rowVariant || pm ? (
                             <span className="space-x-2">
-                              <span>Đơn vị tồn kho: <b>{rowVariant.sellUnit}</b></span>
-                              <span>· Đơn vị nhập: <b>{rowVariant.importUnit}</b></span>
-                              <span>· Quy đổi: 1 {rowVariant.importUnit} = {rowVariant.piecesPerImportUnit} {rowVariant.sellUnit}</span>
-                              <span>· Tồn khả dụng: <b>{rowVariant.stock}</b></span>
-                              {rowVariant.expiryDate && <span>· HSD: {rowVariant.expiryDate}</span>}
-                              {row.unit && row.unit !== rowVariant.sellUnit && (
+                              <span>Đơn vị tồn kho: <b>{rowVariant?.sellUnit ?? pm?.sellUnit}</b></span>
+                              <span>· Đơn vị nhập: <b>{rowVariant?.importUnit ?? pm?.importUnit}</b></span>
+                              <span>· Quy đổi: 1 {rowVariant?.importUnit ?? pm?.importUnit} = {rowVariant?.piecesPerImportUnit ?? pm?.piecesPerImportUnit} {rowVariant?.sellUnit ?? pm?.sellUnit}</span>
+                              <span>· Tồn khả dụng: <b>{rowVariant?.stock ?? pm?.stock}</b></span>
+                              {rowVariant?.expiryDate && <span>· HSD: {rowVariant.expiryDate}</span>}
+                              {row.unit && row.unit !== (rowVariant?.sellUnit ?? pm?.sellUnit) && (
                                 <span className="text-warning">· Đơn vị đã được chỉnh riêng cho công thức này.</span>
                               )}
                             </span>
@@ -460,6 +479,7 @@ export default function ProductionRecipeFormPage() {
               {rows.map((row, idx) => {
                 const rowProduct = products.find((p) => String(p.id) === row.productId) ?? null;
                 const rowVariant = rowProduct?.variants.find((v) => String(v.id) === row.variantId) ?? null;
+                const pm = row.pickMeta;
                 return (
                   <div key={idx} className="rounded-lg border bg-card p-3 space-y-2.5 shadow-sm">
                     <div className="flex items-center justify-between">
@@ -480,24 +500,20 @@ export default function ProductionRecipeFormPage() {
                     </div>
 
                     <div>
-                      <label className="text-[11px] font-medium text-muted-foreground">Sản phẩm</label>
-                      <div className="mt-1 flex items-center gap-1">
-                        <SearchableSelect
-                          value={row.productId}
-                          onChange={(v) => {
-                            const next = [...rows];
-                            next[idx] = { ...next[idx], productId: v, variantId: "" };
-                            setRows(next);
-                          }}
-                          placeholder="Chọn nguyên liệu"
-                          size="sm"
-                          options={products.map((p) => ({
-                            value: String(p.id),
-                            label: p.code,
-                            hint: p.name,
-                            searchText: `${p.code} ${p.name}`,
-                          }))}
-                        />
+                      <label className="text-[11px] font-medium text-muted-foreground">Nguyên liệu (variant)</label>
+                      {row.variantId ? (
+                        <p className="mt-0.5 text-[10px] font-mono text-muted-foreground">
+                          {row.productId} · {row.variantId}
+                        </p>
+                      ) : null}
+                      <div className="mt-1 flex items-start gap-1">
+                        <div className="flex-1 min-w-0">
+                          <VariantSearchPicker
+                            context="recipe"
+                            placeholder="Tìm variant…"
+                            onSelect={(hit) => applyComponentHit(idx, hit)}
+                          />
+                        </div>
                         <button
                           type="button"
                           onClick={() => setQuickCreate({ mode: "material", rowIdx: idx })}
@@ -506,37 +522,6 @@ export default function ProductionRecipeFormPage() {
                         >
                           <Plus className="h-3 w-3" /> Tạo
                         </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] font-medium text-muted-foreground">Phân loại</label>
-                      <div className="mt-1">
-                        <SearchableSelect
-                          value={row.variantId}
-                          onChange={(v) => {
-                            const next = [...rows];
-                            const variant = rowProduct?.variants.find((x) => String(x.id) === v);
-                            next[idx] = {
-                              ...next[idx],
-                              variantId: v,
-                              unit:
-                                (next[idx].unit === "u" || !next[idx].unit) && variant?.sellUnit
-                                  ? variant.sellUnit
-                                  : next[idx].unit,
-                            };
-                            setRows(next);
-                          }}
-                          disabled={!row.productId}
-                          placeholder="Chọn PL"
-                          size="sm"
-                          options={(rowProduct?.variants ?? []).map((v) => ({
-                            value: String(v.id),
-                            label: v.code,
-                            hint: !v.isSellable ? "· NS" : v.name,
-                            searchText: `${v.code} ${v.name}`,
-                          }))}
-                        />
                       </div>
                     </div>
 
@@ -572,21 +557,22 @@ export default function ProductionRecipeFormPage() {
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
                       {!row.productId ? (
                         <span>Chọn nguyên liệu để tự điền đơn vị và xem tồn khả dụng.</span>
-                      ) : rowVariant ? (
+                      ) : rowVariant || pm ? (
                         <span className="space-y-0.5 inline-block">
                           <span className="block">
-                            Đơn vị tồn kho: <b>{rowVariant.sellUnit}</b> · Đơn vị nhập:{" "}
-                            <b>{rowVariant.importUnit}</b>
+                            Đơn vị tồn kho: <b>{rowVariant?.sellUnit ?? pm?.sellUnit}</b> · Đơn vị nhập:{" "}
+                            <b>{rowVariant?.importUnit ?? pm?.importUnit}</b>
                           </span>
                           <span className="block">
-                            Quy đổi: 1 {rowVariant.importUnit} ={" "}
-                            {rowVariant.piecesPerImportUnit} {rowVariant.sellUnit}
+                            Quy đổi: 1 {rowVariant?.importUnit ?? pm?.importUnit} ={" "}
+                            {rowVariant?.piecesPerImportUnit ?? pm?.piecesPerImportUnit}{" "}
+                            {rowVariant?.sellUnit ?? pm?.sellUnit}
                           </span>
                           <span className="block">
-                            Tồn khả dụng: <b>{rowVariant.stock}</b>
-                            {rowVariant.expiryDate ? <> · HSD: {rowVariant.expiryDate}</> : null}
+                            Tồn khả dụng: <b>{rowVariant?.stock ?? pm?.stock}</b>
+                            {rowVariant?.expiryDate ? <> · HSD: {rowVariant.expiryDate}</> : null}
                           </span>
-                          {row.unit && row.unit !== rowVariant.sellUnit && (
+                          {row.unit && row.unit !== (rowVariant?.sellUnit ?? pm?.sellUnit) && (
                             <span className="block text-warning">
                               · Đơn vị đã được chỉnh riêng cho công thức này.
                             </span>
@@ -626,20 +612,46 @@ export default function ProductionRecipeFormPage() {
         mode={quickCreate?.mode ?? "material"}
         onClose={() => setQuickCreate(null)}
         onCreated={(p) => {
-          void refreshProducts().then(() => {
-            const variantId = p.variants[0]?.id ?? "";
-            const sellUnit = p.variants[0]?.sellUnit ?? "u";
-            if (!quickCreate) return;
-            if (quickCreate.rowIdx === "output") {
-              setOutPid(String(p.id));
-              setOutVid(String(variantId));
-            } else {
-              const next = [...rows];
-              const i = quickCreate.rowIdx;
-              next[i] = { ...next[i], productId: String(p.id), variantId: String(variantId), unit: sellUnit };
-              setRows(next);
-            }
+          setProducts((prev) => {
+            const rest = prev.filter((x) => x.id !== p.id);
+            return [...rest, p];
           });
+          const v0 = p.variants[0];
+          const variantId = v0?.id ?? "";
+          const sellUnit = v0?.sellUnit ?? "u";
+          if (!quickCreate) return;
+          if (quickCreate.rowIdx === "output") {
+            setOutPid(String(p.id));
+            setOutVid(String(variantId));
+            setOutputPickMeta(
+              v0
+                ? {
+                    stock: v0.stock,
+                    sellUnit: v0.sellUnit,
+                    importUnit: v0.importUnit,
+                    piecesPerImportUnit: v0.piecesPerImportUnit,
+                  }
+                : undefined,
+            );
+          } else {
+            const next = [...rows];
+            const i = quickCreate.rowIdx;
+            next[i] = {
+              ...next[i],
+              productId: String(p.id),
+              variantId: String(variantId),
+              unit: sellUnit,
+              pickMeta: v0
+                ? {
+                    stock: v0.stock,
+                    sellUnit: v0.sellUnit,
+                    importUnit: v0.importUnit,
+                    piecesPerImportUnit: v0.piecesPerImportUnit,
+                  }
+                : undefined,
+            };
+            setRows(next);
+          }
         }}
       />
     </div>

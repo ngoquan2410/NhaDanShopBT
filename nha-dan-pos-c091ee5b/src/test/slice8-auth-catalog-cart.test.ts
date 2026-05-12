@@ -16,6 +16,7 @@ describe("Slice 8 unified auth/catalog/cart contracts", () => {
     expect(isBackendCartLine({ productId: "1", variantId: "v1", qty: 1, catalogSource: "backend", schemaVersion: 2 })).toBe(false);
     expect(isBackendCartLine({ productId: "1", variantId: "2", qty: 1, catalogSource: "mock" as never, schemaVersion: 2 })).toBe(false);
     expect(isBackendCartLine({ productId: "1", variantId: "2", qty: 1, catalogSource: "backend", schemaVersion: 2 })).toBe(true);
+    expect(isBackendCartLine({ productId: "1", variantId: "2", qty: 1, catalogSource: "backend", schemaVersion: 2, stock: undefined })).toBe(true);
   });
 
   it("public catalog adapter maps backend product/variant ids as numeric strings and filters non-sellable variants", () => {
@@ -27,12 +28,41 @@ describe("Slice 8 unified auth/catalog/cart contracts", () => {
       categoryName: "Cat",
       active: true,
       variants: [
-        { id: 101, variantCode: "V101", variantName: "Sellable", sellUnit: "cái", sellPrice: 1000, stockQty: 5, isSellable: true },
-        { id: 102, variantCode: "V102", variantName: "Raw", sellUnit: "kg", sellPrice: 1000, stockQty: 5, isSellable: false },
+        { id: 101, variantCode: "V101", variantName: "Sellable", sellUnit: "cái", sellPrice: 1000, isSellable: true },
+        { id: 102, variantCode: "V102", variantName: "Raw", sellUnit: "kg", sellPrice: 1000, isSellable: false },
       ],
     });
     expect(p.id).toBe("10");
     expect(p.variants.map((v) => v.id)).toEqual(["101"]);
+  });
+
+  it("public catalog adapter normalizes public DTOs without admin inventory/commercial fields", () => {
+    const p = mapProduct({
+      id: 20,
+      code: "PUB20",
+      name: "Public Product",
+      categoryId: 4,
+      categoryName: "Public Cat",
+      variants: [
+        { id: 201, variantCode: "PUBV201", variantName: "Default", sellUnit: "cái", sellPrice: 15000, isDefault: true },
+      ],
+    });
+
+    expect(p.active).toBe(true);
+    expect(p.variants).toHaveLength(1);
+    expect(p.variants[0]).toMatchObject({
+      id: "201",
+      code: "PUBV201",
+      name: "Default",
+      sellUnit: "cái",
+      sellPrice: 15000,
+      isSellable: true,
+    });
+    const variant = p.variants[0] as unknown as Record<string, unknown>;
+    expect(variant.costPrice).toBeUndefined();
+    expect(variant.stockQty).toBeUndefined();
+    expect(variant.minStockQty).toBeUndefined();
+    expect(variant.expiryDays).toBeUndefined();
   });
 });
 

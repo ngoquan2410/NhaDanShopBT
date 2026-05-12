@@ -60,6 +60,17 @@ export class LocalPendingOrderAdapter implements PendingOrderService {
     };
   }
 
+  async listLinkable(params?: PendingOrderListParams): Promise<PagedResult<PendingOrder>> {
+    const now = Date.now();
+    const page = await this.list(params);
+    const filtered = page.items.filter(
+      (o) =>
+        ["pending_payment", "waiting_confirm", "paid_auto"].includes(o.status) &&
+        (!o.expiresAt || Date.parse(o.expiresAt) > now),
+    );
+    return { ...page, items: filtered, total: filtered.length };
+  }
+
   async counts(): Promise<Record<string, number>> {
     const all = load();
     return {

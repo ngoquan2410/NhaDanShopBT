@@ -6,12 +6,12 @@ import { SortableTh } from "@/components/shared/SortableTh";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { AsyncBoundary } from "@/components/shared/AsyncBoundary";
-import { useTableControls } from "@/hooks/useTableControls";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useService } from "@/hooks/useService";
 import { products as productService, categories as categoryService } from "@/services";
 import type { Product } from "@/lib/mock-data";
 import { formatVND } from "@/lib/format";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Search, Plus, Package, MoreHorizontal, Upload, Pencil, Trash2, Power, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
@@ -43,19 +43,28 @@ export default function AdminProducts() {
   const navigate = useNavigate();
   const initialQ = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("q") ?? "" : "";
   const [search, setSearch] = useState(initialQ);
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [filterCategory, setFilterCategory] = useState<string | null>(null);
+  const [listPage, setListPage] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState<Product | null>(null);
   const [showImport, setShowImport] = useState(false);
 
-  // Service-driven list. Filtering by category is pushed to the adapter; the
-  // free-text search stays client-side because the local adapter only matches
-  // name+code and we want to keep behaviour identical to before.
+  const searchQuery =
+    debouncedSearch.trim().length >= 2 ? debouncedSearch.trim() : undefined;
+
+  useEffect(() => {
+    setListPage(1);
+  }, [searchQuery, filterCategory]);
+
   const { data, loading, error, isEmpty, reload } = useService(
-    () => productService.list({
-      pageSize: 1000,
-      categoryId: filterCategory ?? undefined,
-    }),
-    [filterCategory],
+    () =>
+      productService.list({
+        page: listPage,
+        pageSize: 20,
+        query: searchQuery,
+        categoryId: filterCategory ?? undefined,
+      }),
+    [listPage, searchQuery, filterCategory],
   );
 
   // Categories now come from CategoryService; this screen uses only backend-backed services.
@@ -66,31 +75,49 @@ export default function AdminProducts() {
   const categories = categoriesData?.items ?? [];
 
   const products = data?.items ?? [];
-
-  const filtered = useMemo(() => products.filter(p => {
-    if (search && !p.name.toLowerCase().includes(search.toLowerCase()) && !p.code.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  }), [products, search]);
+  const serverTotal = data?.total ?? 0;
+  const serverPageSize = 20;
+  const totalPages = Math.max(1, Math.ceil(serverTotal / serverPageSize));
+  const rangeStart = serverTotal === 0 ? 0 : (listPage - 1) * serverPageSize + 1;
+  const rangeEnd = Math.min(listPage * serverPageSize, serverTotal);
 
   type SortKey = "name" | "code" | "category" | "variants" | "stock" | "status" | "price";
-  const tc = useTableControls<Product, SortKey>({
-    data: filtered,
-    pageSize: 20,
-    initialSort: { key: "name", dir: "asc" },
-    sortAccessors: {
-      name: (p) => p.name,
-      code: (p) => p.code,
-      category: (p) => p.categoryName ?? "",
-      variants: (p) => p.variants.length,
-      stock: (p) => p.variants.reduce((s, v) => s + v.stock, 0),
-      status: (p) => (p.active ? 1 : 0),
-      price: (p) => {
-        const dv = p.variants.find(v => v.isDefault) || p.variants[0];
-        return dv?.sellPrice ?? 0;
-      },
+  type SortState = { key: SortKey | null; dir: "asc" | "desc" };
+  const sortAccessors: Record<SortKey, (row: Product) => string | number> = {
+    name: (p) => p.name,
+    code: (p) => p.code,
+    category: (p) => p.categoryName ?? "",
+    variants: (p) => p.variants.length,
+    stock: (p) => p.variants.reduce((s, v) => s + v.stock, 0),
+    status: (p) => (p.active ? 1 : 0),
+    price: (p) => {
+      const dv = p.variants.find((v) => v.isDefault) || p.variants[0];
+      return dv?.sellPrice ?? 0;
     },
-    resetToken: `${search}|${filterCategory ?? ""}`,
-  });
+  };
+  const [sort, setSort] = useState<SortState>({ key: "name", dir: "asc" });
+  const pageRows = useMemo(() => {
+    if (!sort.key) return products;
+    const acc = sortAccessors[sort.key];
+    const sorted = [...products].sort((a, b) => {
+      const av = acc(a);
+      const bv = acc(b);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "number" && typeof bv === "number") return av - bv;
+      return String(av).localeCompare(String(bv), "vi", { numeric: true, sensitivity: "base" });
+    });
+    return sort.dir === "desc" ? sorted.reverse() : sorted;
+  }, [products, sort]);
+
+  const toggleSort = (key: SortKey) => {
+    setSort((prev) => {
+      if (prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return { key: null, dir: "asc" };
+    });
+  };
 
   const handleToggleActive = async (p: Product) => {
     await productService.update(p.id, { active: !p.active });
@@ -111,7 +138,7 @@ export default function AdminProducts() {
     <div className="space-y-4 admin-dense">
       <PageHeader
         title="Sản phẩm"
-        description={`${data?.total ?? products.length} sản phẩm`}
+        description={`${serverTotal} sản phẩm`}
         actions={
           <div className="flex gap-2">
             <button onClick={() => setShowImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted transition-colors">
@@ -169,8 +196,8 @@ export default function AdminProducts() {
       <AsyncBoundary
         loading={loading}
         error={error}
-        isEmpty={!loading && !error && (isEmpty || filtered.length === 0)}
-        data={tc.pageRows}
+        isEmpty={!loading && !error && (isEmpty || products.length === 0)}
+        data={pageRows}
         onRetry={reload}
         emptyFallback={<EmptyState icon={Package} title="Chưa có sản phẩm" description="Thêm sản phẩm đầu tiên hoặc thử bộ lọc khác" />}
       >
@@ -181,13 +208,13 @@ export default function AdminProducts() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
-                    <SortableTh label="Sản phẩm" sortKey="name" sort={tc.sort} onSort={tc.toggleSort} />
-                    <SortableTh label="Mã" sortKey="code" sort={tc.sort} onSort={tc.toggleSort} />
-                    <SortableTh label="Danh mục" sortKey="category" sort={tc.sort} onSort={tc.toggleSort} />
-                    <SortableTh label="Phân loại" sortKey="variants" sort={tc.sort} onSort={tc.toggleSort} align="center" />
-                    <SortableTh label="Tồn kho" sortKey="stock" sort={tc.sort} onSort={tc.toggleSort} align="center" />
-                    <SortableTh label="Trạng thái" sortKey="status" sort={tc.sort} onSort={tc.toggleSort} align="center" />
-                    <SortableTh label="Giá bán" sortKey="price" sort={tc.sort} onSort={tc.toggleSort} align="right" />
+                    <SortableTh label="Sản phẩm" sortKey="name" sort={sort} onSort={toggleSort} />
+                    <SortableTh label="Mã" sortKey="code" sort={sort} onSort={toggleSort} />
+                    <SortableTh label="Danh mục" sortKey="category" sort={sort} onSort={toggleSort} />
+                    <SortableTh label="Phân loại" sortKey="variants" sort={sort} onSort={toggleSort} align="center" />
+                    <SortableTh label="Tồn kho" sortKey="stock" sort={sort} onSort={toggleSort} align="center" />
+                    <SortableTh label="Trạng thái" sortKey="status" sort={sort} onSort={toggleSort} align="center" />
+                    <SortableTh label="Giá bán" sortKey="price" sort={sort} onSort={toggleSort} align="right" />
                     <th className="w-10" />
                   </tr>
                 </thead>
@@ -290,14 +317,13 @@ export default function AdminProducts() {
             </div>
 
             <TablePagination
-              page={tc.page}
-              totalPages={tc.totalPages}
-              pageSize={tc.pageSize}
-              onPageChange={tc.setPage}
-              onPageSizeChange={tc.setPageSize}
-              rangeStart={tc.rangeStart}
-              rangeEnd={tc.rangeEnd}
-              total={tc.total}
+              page={listPage}
+              totalPages={totalPages}
+              pageSize={serverPageSize}
+              onPageChange={setListPage}
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
+              total={serverTotal}
             />
           </>
         )}

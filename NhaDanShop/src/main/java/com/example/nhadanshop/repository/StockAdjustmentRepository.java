@@ -24,6 +24,22 @@ public interface StockAdjustmentRepository extends JpaRepository<StockAdjustment
             """)
     Page<Long> findIdsByOrderByAdjDateDescIdDesc(Pageable pageable);
 
+    @Query("""
+            SELECT a.id FROM StockAdjustment a
+            LEFT JOIN a.createdBy cb
+            WHERE (:status IS NULL OR a.status = :status)
+              AND (:q IS NULL OR :q = ''
+                   OR LOWER(a.adjNo) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(COALESCE(a.note, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(COALESCE(cb.username, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(CAST(a.reason AS string)) LIKE LOWER(CONCAT('%', :q, '%')))
+            ORDER BY a.adjDate DESC, a.id DESC
+            """)
+    Page<Long> findIdsFiltered(
+            @Param("status") StockAdjustment.Status status,
+            @Param("q") String q,
+            Pageable pageable);
+
     @EntityGraph(attributePaths = {
             "items",
             "items.variant",

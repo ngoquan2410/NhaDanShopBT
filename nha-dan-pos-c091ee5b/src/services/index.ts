@@ -72,6 +72,7 @@ export const production: ProductionAdminService = new BackendProductionAdminAdap
 export {
   adminCombos,
   adminCustomers,
+  adminRoles,
   adminReports,
   adminStockAdjustments,
   adminSuppliers,

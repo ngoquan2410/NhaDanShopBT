@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
-import { useService } from "@/hooks/useService";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { products as productService } from "@/services";
 
 interface Props {
@@ -12,15 +12,44 @@ interface Props {
 }
 
 export function ProductPicker({ value, valueName, onChange, error, placeholder = "Chọn sản phẩm..." }: Props) {
-  const { data } = useService(() => productService.list({ page: 1, pageSize: 200, active: true }), []);
-  const products = data?.items ?? [];
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 250);
+  const [items, setItems] = useState<{ id: string; name: string; code: string }[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const list = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return products.filter((p) => !q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q)).slice(0, 50);
-  }, [products, search]);
+  const queryArg = useMemo(() => {
+    const t = debouncedSearch.trim();
+    return t.length >= 2 ? t : undefined;
+  }, [debouncedSearch]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    void (async () => {
+      try {
+        const page = await productService.list({
+          page: 1,
+          pageSize: 20,
+          query: queryArg,
+          active: true,
+        });
+        if (!cancelled) {
+          setItems(
+            page.items.map((p) => ({ id: p.id, name: p.name, code: p.code })),
+          );
+        }
+      } catch {
+        if (!cancelled) setItems([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, queryArg]);
 
   return (
     <div>
@@ -43,19 +72,27 @@ export function ProductPicker({ value, valueName, onChange, error, placeholder =
               className="w-full h-8 px-2 text-xs border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-primary"
             />
             <div className="max-h-48 overflow-y-auto divide-y">
-              {list.length === 0 ? (
+              {loading ? (
+                <p className="p-3 text-xs text-muted-foreground text-center">Đang tải…</p>
+              ) : items.length === 0 ? (
                 <p className="p-3 text-xs text-muted-foreground text-center">Không có sản phẩm</p>
-              ) : list.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => { onChange(p.id, p.name); setOpen(false); setSearch(""); }}
-                  className="w-full text-left px-2 py-1.5 hover:bg-muted text-xs"
-                >
-                  <div className="font-medium truncate">{p.name}</div>
-                  <div className="text-[10px] text-muted-foreground">{p.code}</div>
-                </button>
-              ))}
+              ) : (
+                items.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      onChange(p.id, p.name);
+                      setOpen(false);
+                      setSearch("");
+                    }}
+                    className="w-full text-left px-2 py-1.5 hover:bg-muted text-xs"
+                  >
+                    <div className="font-medium truncate">{p.name}</div>
+                    <div className="text-[10px] text-muted-foreground">{p.code}</div>
+                  </button>
+                ))
+              )}
             </div>
           </div>
         </div>

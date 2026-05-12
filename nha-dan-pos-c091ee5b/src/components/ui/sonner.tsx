@@ -1,73 +1,56 @@
-import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
 import { Toaster as Sonner, toast } from "sonner";
 
 type ToasterProps = React.ComponentProps<typeof Sonner>;
 
 /**
- * Unified toast provider for both admin & storefront.
- * - Admin (path bắt đầu bằng /admin): top-center, font lớn, dễ đọc.
- * - Storefront: top-center, kích thước vừa phải, không bị header che.
- * - Có nút đóng (X), error giữ lâu hơn success.
+ * Unified GLOBAL toast provider for both admin & storefront.
+ *
+ * UI-only:
+ * - Single global Toaster, top-right, max 3 visible, not expanded.
+ * - Variant background applied to the TOAST ROOT (success/error/warning/info).
+ * - Close button stays neutral (slate hover).
+ * - Width capped (~420px desktop, viewport-safe on mobile).
+ * - Fixed safe offset so toasts don't collide with sticky header.
+ *
+ * Does NOT detect routes, does NOT monkey-patch window.history.
  */
+const variantBase =
+  "group toast relative border shadow-md rounded-xl pr-10 text-sm p-3.5";
+
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme();
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  useEffect(() => {
-    const update = () => setIsAdmin(window.location.pathname.startsWith("/admin"));
-    update();
-    window.addEventListener("popstate", update);
-    // patch pushState để cập nhật khi SPA điều hướng
-    const orig = window.history.pushState;
-    window.history.pushState = function (...args) {
-      const r = orig.apply(this, args);
-      update();
-      return r;
-    };
-    return () => {
-      window.removeEventListener("popstate", update);
-      window.history.pushState = orig;
-    };
-  }, []);
-
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
       className="toaster group"
-      position="top-center"
+      position="top-right"
+      expand={false}
+      visibleToasts={3}
       closeButton
-      richColors
-      expand
-      visibleToasts={4}
-      offset={isAdmin ? 24 : 80}
+      offset={72}
       toastOptions={{
         duration: 4000,
         style: {
-          maxWidth: "calc(100vw - 24px)",
+          maxWidth: "min(420px, calc(100vw - 24px))",
+          width: "100%",
         },
         classNames: {
-          toast: [
-            "group toast relative",
-            "group-[.toaster]:bg-background group-[.toaster]:text-foreground",
-            "group-[.toaster]:border-border group-[.toaster]:shadow-2xl",
-            "group-[.toaster]:rounded-xl",
-            "group-[.toaster]:pr-10",
-            isAdmin
-              ? "group-[.toaster]:text-[15px] group-[.toaster]:p-4 group-[.toaster]:min-w-[320px] sm:group-[.toaster]:min-w-[360px]"
-              : "group-[.toaster]:text-sm group-[.toaster]:p-3.5",
-          ].join(" "),
+          toast: `${variantBase} bg-slate-50 border-slate-200 text-slate-900`,
           title: "font-semibold",
-          description: "group-[.toast]:text-muted-foreground",
-          actionButton: "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
-          cancelButton: "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
+          description: "opacity-80",
+          actionButton:
+            "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
+          cancelButton:
+            "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
+          success: `${variantBase} bg-green-50 border-green-200 text-green-900`,
+          error: `${variantBase} bg-red-50 border-red-200 text-red-900`,
+          warning: `${variantBase} bg-yellow-50 border-yellow-200 text-yellow-900`,
+          info: `${variantBase} bg-blue-50 border-blue-200 text-blue-900`,
           closeButton: [
             "group-[.toast]:!left-auto group-[.toast]:!right-2 group-[.toast]:!top-2",
             "group-[.toast]:!translate-x-0 group-[.toast]:!translate-y-0",
-            "group-[.toast]:bg-background group-[.toast]:border-border",
-            "group-[.toast]:hover:bg-muted",
+            "group-[.toast]:!bg-white group-[.toast]:!border-slate-200",
+            "group-[.toast]:!text-slate-500",
+            "group-[.toast]:hover:!text-slate-800 group-[.toast]:hover:!bg-slate-100",
           ].join(" "),
-          error: "",
         },
       }}
       {...props}

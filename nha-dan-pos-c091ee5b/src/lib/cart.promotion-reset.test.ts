@@ -39,4 +39,26 @@ describe("cart promotion reset on topology changes", () => {
     expect(getSelectedPromotionId()).toBeNull();
     expect(getSelectedPromotionMode()).toBe("auto");
   });
+
+  it("accepts public storefront cart lines without stock truth", () => {
+    const publicLine = {
+      productId: line.productId,
+      variantId: line.variantId,
+      productCode: line.productCode,
+      variantCode: line.variantCode,
+      productName: line.productName,
+      variantName: line.variantName,
+      categoryId: line.categoryId,
+      categoryName: line.categoryName,
+      qty: line.qty,
+      unitPrice: line.unitPrice,
+      catalogSource: line.catalogSource,
+      schemaVersion: line.schemaVersion,
+    };
+    cartActions.add(publicLine);
+    const [item] = getCartSnapshot();
+    expect(item.variantId).toBe("1");
+    expect(item.stock).toBeUndefined();
+    expect(item.lineSubtotal).toBe(1000);
+  });
 });

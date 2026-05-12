@@ -1,39 +1,83 @@
 import { ProductCard } from "@/components/storefront/ProductCard";
 import { Reveal } from "@/components/storefront/Reveal";
 import { Package, Search, SlidersHorizontal, X } from "lucide-react";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { listPublicCategories, listPublicProducts, type StorefrontCategory, type StorefrontProduct } from "@/services/catalog/publicCatalog";
+import { listPublicCategories, listPublicProductsPage, type StorefrontCategory, type StorefrontProduct } from "@/services/catalog/publicCatalog";
 
 type SortKey = "newest" | "price-asc" | "price-desc" | "name";
 
 export default function StorefrontProducts() {
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const qParam = (searchParams.get("q") ?? "").trim();
+  const categoryIdFromUrl = searchParams.get("categoryId");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(
+    () => (categoryIdFromUrl?.trim() ? categoryIdFromUrl.trim() : null),
+  );
+  const [searchInput, setSearchInput] = useState(qParam);
   const [sort, setSort] = useState<SortKey>("newest");
   const [products, setProducts] = useState<StorefrontProduct[]>([]);
   const [activeCategories, setActiveCategories] = useState<StorefrontCategory[]>([]);
+  const [page, setPage] = useState(0);
+  const [pageSize] = useState(20);
+  const [totalElements, setTotalElements] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const reqIdRef = useRef(0);
+
+  useEffect(() => {
+    setSearchInput(qParam);
+    setPage(0);
+  }, [qParam]);
+
+  useEffect(() => {
+    const cid = categoryIdFromUrl?.trim() ? categoryIdFromUrl.trim() : null;
+    setSelectedCategory(cid);
+    setPage(0);
+  }, [categoryIdFromUrl]);
 
   useEffect(() => {
     let alive = true;
-    Promise.all([listPublicProducts(), listPublicCategories()])
-      .then(([p, c]) => {
+    listPublicCategories()
+      .then((c) => {
         if (!alive) return;
-        setProducts(p);
         setActiveCategories(c);
-        setError(null);
       })
-      .catch((e) => alive && setError(e instanceof Error ? e.message : "Không tải được catalog backend"))
-      .finally(() => alive && setLoading(false));
+      .catch((e) => alive && setError(e instanceof Error ? e.message : "Không tải được danh mục backend"));
     return () => { alive = false; };
   }, []);
 
-  const filtered = useMemo(() => {
-    let list = products.filter((p) => p.active);
-    if (selectedCategory) list = list.filter((p) => p.categoryId === selectedCategory);
-    if (search) list = list.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
+  useEffect(() => {
+    const reqId = ++reqIdRef.current;
+    setLoading(true);
+    setError(null);
+    listPublicProductsPage({
+      search: qParam || undefined,
+      categoryId: selectedCategory,
+      page,
+      size: pageSize,
+      sort: "name,asc",
+    })
+      .then((result) => {
+        if (reqId !== reqIdRef.current) return;
+        setProducts(result.items);
+        setTotalElements(result.totalElements);
+        setTotalPages(result.totalPages);
+      })
+      .catch((e) => {
+        if (reqId !== reqIdRef.current) return;
+        setError(e instanceof Error ? e.message : "Không tải được catalog backend");
+      })
+      .finally(() => {
+        if (reqId !== reqIdRef.current) return;
+        setLoading(false);
+      });
+  }, [qParam, selectedCategory, page, pageSize]);
+
+  const visibleProducts = useMemo(() => {
+    let list = [...products];
     list = [...list].sort((a, b) => {
       const ap = Math.min(...a.variants.map((v) => v.sellPrice));
       const bp = Math.min(...b.variants.map((v) => v.sellPrice));
@@ -43,7 +87,25 @@ export default function StorefrontProducts() {
       return 0;
     });
     return list;
-  }, [products, selectedCategory, search, sort]);
+  }, [products, sort]);
+
+  const submitSearch = (e: FormEvent) => {
+    e.preventDefault();
+    const next = new URLSearchParams(searchParams);
+    const q = searchInput.trim();
+    if (q) next.set("q", q);
+    else next.delete("q");
+    setPage(0);
+    setSearchParams(next);
+  };
+
+  const clearSearch = () => {
+    setSearchInput("");
+    const next = new URLSearchParams(searchParams);
+    next.delete("q");
+    setPage(0);
+    setSearchParams(next);
+  };
 
   return (
     <div className="bg-storefront-bg min-h-screen">
@@ -55,7 +117,7 @@ export default function StorefrontProducts() {
             Tất cả sản phẩm
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {filtered.length} sản phẩm sẵn sàng giao
+            {totalElements} sản phẩm sẵn sàng giao
           </p>
         </div>
       </div>
@@ -65,20 +127,20 @@ export default function StorefrontProducts() {
         {error && <div className="mb-4 text-sm text-danger">{error}</div>}
         {/* Toolbar */}
         <div className="flex flex-col md:flex-row md:items-center gap-3 mb-5">
-          <div className="relative flex-1 max-w-lg">
+          <form onSubmit={submitSearch} className="relative flex-1 max-w-lg">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Tìm sản phẩm theo tên..."
               className="w-full h-11 pl-10 pr-10 text-sm bg-storefront-surface rounded-full border focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
             />
-            {search && (
-              <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+            {searchInput && (
+              <button type="button" onClick={clearSearch} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                 <X className="h-4 w-4" />
               </button>
             )}
-          </div>
+          </form>
           <div className="flex items-center gap-2">
             <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
             <select
@@ -97,15 +159,31 @@ export default function StorefrontProducts() {
         {/* Category chips */}
         <div className="flex gap-2.5 overflow-x-auto pb-3 mb-5 scrollbar-thin">
           <button
-            onClick={() => setSelectedCategory(null)}
+            type="button"
+            data-testid="storefront-products-category-all"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete("categoryId");
+              next.delete("categoryName");
+              setPage(0);
+              setSearchParams(next);
+            }}
             className={cn("sf-chip", !selectedCategory && "sf-chip-active")}
           >
             Tất cả
           </button>
           {activeCategories.map((cat) => (
             <button
+              type="button"
               key={cat.id}
-              onClick={() => setSelectedCategory(cat.id)}
+              data-testid={`storefront-products-category-${cat.id}`}
+              onClick={() => {
+                const next = new URLSearchParams(searchParams);
+                next.set("categoryId", cat.id);
+                next.set("categoryName", cat.name);
+                setPage(0);
+                setSearchParams(next);
+              }}
               className={cn("sf-chip", selectedCategory === cat.id && "sf-chip-active")}
             >
               {cat.name}
@@ -114,19 +192,42 @@ export default function StorefrontProducts() {
         </div>
 
         {/* Grid */}
-        {filtered.length === 0 ? (
+        {visibleProducts.length === 0 ? (
           <div className="text-center py-20 bg-storefront-surface rounded-2xl border">
             <Package className="h-14 w-14 text-muted-foreground/30 mx-auto mb-3" strokeWidth={1.25} />
-            <p className="font-semibold">Không tìm thấy sản phẩm</p>
+            <p className="font-semibold">Không tìm thấy sản phẩm phù hợp</p>
             <p className="text-sm text-muted-foreground mt-1">Thử thay đổi bộ lọc hoặc từ khóa khác</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
-            {filtered.map((p, i) => (
+            {visibleProducts.map((p, i) => (
               <Reveal key={p.id} delay={Math.min(i, 8) * 0.04} y={16}>
                 <ProductCard product={p} />
               </Reveal>
             ))}
+          </div>
+        )}
+        {totalPages > 1 && (
+          <div className="mt-6 flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page <= 0 || loading}
+              className="px-3 py-2 rounded-full border text-sm disabled:opacity-50"
+            >
+              Trước
+            </button>
+            <span className="text-sm text-muted-foreground">
+              Trang {page + 1}/{Math.max(totalPages, 1)}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1 || loading}
+              className="px-3 py-2 rounded-full border text-sm disabled:opacity-50"
+            >
+              Sau
+            </button>
           </div>
         )}
       </div>

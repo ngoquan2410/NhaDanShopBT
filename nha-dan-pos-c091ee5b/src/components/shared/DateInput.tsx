@@ -1,5 +1,6 @@
 import { forwardRef, InputHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
+import { toLocalDateString, toLocalDateTimeString } from "@/lib/localDate";
 import { toast } from "sonner";
 
 interface DateInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "onChange"> {
@@ -19,8 +20,8 @@ interface DateInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "ty
 export const DateInput = forwardRef<HTMLInputElement, DateInputProps>(
   ({ allowFuture = false, withTime = false, value, onChange, className, ...rest }, ref) => {
     const now = new Date();
-    const todayISO = now.toISOString().slice(0, 10);
-    const nowISO = now.toISOString().slice(0, 16);
+    const todayISO = toLocalDateString(now);
+    const nowISO = toLocalDateTimeString(now);
     const max = allowFuture ? undefined : withTime ? nowISO : todayISO;
 
     return (

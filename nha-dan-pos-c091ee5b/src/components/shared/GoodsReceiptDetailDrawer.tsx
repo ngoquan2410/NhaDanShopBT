@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { X, Printer, FileInput, Calendar, Truck, Barcode } from "lucide-react";
 import { formatVND, formatDate } from "@/lib/format";
 import { BlockedActionBanner } from "@/components/shared/BlockedActionBanner";
@@ -11,12 +12,21 @@ import { triggerPrint } from "@/lib/print";
 import { goodsReceipts as goodsReceiptsService } from "@/services";
 import { fetchBatchesByReceiptId } from "@/services/batches/batchReceiptApi";
 import { toast } from "sonner";
+import {
+  conflictCodeFromAdminError,
+  isReceiptVoided,
+  RECEIPT_BLOCK_DOWNSTREAM,
+  RECEIPT_CODE_ALREADY_VOIDED,
+} from "@/lib/receiptUiState";
+import { AdminApiError } from "@/services/auth/adminApi";
 
 interface Props {
   receipt: GoodsReceipt | null;
   onClose: () => void;
   /** Refresh list row after void */
   onReceiptChanged?: () => void;
+  /** Replace drawer receipt with fresh GET (e.g. after void). */
+  onReceiptUpdated?: (r: GoodsReceipt) => void;
 }
 
 interface CostRow {
@@ -90,7 +100,7 @@ function buildCostRows(receipt: GoodsReceipt, lines: GoodsReceiptLine[]): CostRo
   });
 }
 
-export function GoodsReceiptDetailDrawer({ receipt, onClose, onReceiptChanged }: Props) {
+export function GoodsReceiptDetailDrawer({ receipt, onClose, onReceiptChanged, onReceiptUpdated }: Props) {
   const [barcodeOpen, setBarcodeOpen] = useState(false);
   const [barcodeItems, setBarcodeItems] = useState<BarcodeItem[]>([]);
   const [lines, setLines] = useState<GoodsReceiptLine[]>([]);
@@ -121,7 +131,11 @@ export function GoodsReceiptDetailDrawer({ receipt, onClose, onReceiptChanged }:
   const handlePrint58 = () =>
     triggerPrint(`phiếu nhập ${receipt.number} (POS58)`, "pos58", { targetId: "print-root-receipt-pos58" });
 
-  const isVoided = receipt.status === "voided";
+  const isVoided = isReceiptVoided(receipt);
+  const isDownstreamBlocked =
+    !isVoided &&
+    !receipt.canDelete &&
+    receipt.deleteBlockReason === RECEIPT_BLOCK_DOWNSTREAM;
 
   const openBarcode = async () => {
     try {
@@ -165,16 +179,23 @@ export function GoodsReceiptDetailDrawer({ receipt, onClose, onReceiptChanged }:
     try {
       setVoiding(true);
       await goodsReceiptsService.voidReceipt(receipt.id, {
-        reason: "e2e-admin-void",
-        voidedBy: "selenium",
+        reason: "Void từ chi tiết phiếu nhập (admin)",
       });
       toast.success("Đã hủy (void) phiếu nhập");
       onReceiptChanged?.();
+      const refreshed = await goodsReceiptsService.get(receipt.id);
+      if (refreshed) onReceiptUpdated?.(refreshed);
       setVoidOpen(false);
-      onClose();
     } catch (e) {
+      if (
+        e instanceof AdminApiError &&
+        e.status === 409 &&
+        conflictCodeFromAdminError(e) === RECEIPT_CODE_ALREADY_VOIDED
+      ) {
+        toast.error("Phiếu đã được void trước đó.");
+        return;
+      }
       toast.error(e instanceof Error ? e.message : "Không void được phiếu");
-      throw e;
     } finally {
       setVoiding(false);
     }
@@ -210,12 +231,58 @@ export function GoodsReceiptDetailDrawer({ receipt, onClose, onReceiptChanged }:
               </div>
               {receipt.note && <div className="text-xs text-muted-foreground italic">"{receipt.note}"</div>}
               {isVoided && (
-                <BlockedActionBanner message="Phiếu đã void — không xóa cứng; tồn đã điều chỉnh theo lô còn lại." />
+                <div className="space-y-2" data-testid="goods-receipt-detail-void-meta">
+                  <BlockedActionBanner message="Phiếu đã void — không xóa cứng; tồn đã điều chỉnh theo lô còn lại." />
+                  {(receipt.voidedAt || receipt.voidReason || receipt.voidedBy) && (
+                    <div className="rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground space-y-1">
+                      {receipt.voidedAt && (
+                        <p>
+                          <span className="font-medium text-foreground">Thời điểm void:</span>{" "}
+                          {formatDate(String(receipt.voidedAt).slice(0, 10))}
+                        </p>
+                      )}
+                      {receipt.voidedBy && (
+                        <p>
+                          <span className="font-medium text-foreground">Bởi:</span> {receipt.voidedBy}
+                        </p>
+                      )}
+                      {receipt.voidReason && (
+                        <p>
+                          <span className="font-medium text-foreground">Lý do:</span> {receipt.voidReason}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
-            {!receipt.canDelete && !isVoided && (
-              <BlockedActionBanner message="Không thể xóa phiếu — một phần hàng nhập đã được bán ra" />
+            {isDownstreamBlocked && (
+              <div
+                className="rounded-lg border border-yellow-200 bg-yellow-50 text-yellow-900 p-3"
+                data-testid="goods-receipt-detail-downstream-panel"
+              >
+                <p className="font-semibold text-sm">Không thể xóa phiếu nhập</p>
+                <p className="mt-1 text-xs leading-relaxed">
+                  Phiếu nhập/lô đã phát sinh bán hàng nên không thể xóa. Bạn có thể:
+                </p>
+                <ol className="mt-1 ml-4 list-decimal text-xs space-y-0.5 leading-relaxed">
+                  <li>Void phần tồn còn lại để hủy hiệu lực phiếu nhập (xem nút bên dưới).</li>
+                  <li>
+                    <Link
+                      to="/admin/stock-adjustments/create"
+                      className="underline hover:text-yellow-950"
+                    >
+                      Tạo phiếu điều chỉnh tồn
+                    </Link>{" "}
+                    để giảm/tăng đúng số lượng thực tế.
+                  </li>
+                  <li>Xem các batch đã phát sinh bán hàng ở bảng mặt hàng phía dưới.</li>
+                </ol>
+                <p className="mt-2 text-[11px] italic opacity-80">
+                  Void không phải xóa — vẫn giữ lịch sử phiếu nhập.
+                </p>
+              </div>
             )}
 
             <div>
@@ -308,7 +375,7 @@ export function GoodsReceiptDetailDrawer({ receipt, onClose, onReceiptChanged }:
             >
               <Printer className="h-4 w-4" /> In POS58
             </button>
-            {!isVoided && (
+            {!isVoided ? (
               <button
                 type="button"
                 data-testid="goods-receipt-void-open"
@@ -317,7 +384,7 @@ export function GoodsReceiptDetailDrawer({ receipt, onClose, onReceiptChanged }:
               >
                 Void phiếu
               </button>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

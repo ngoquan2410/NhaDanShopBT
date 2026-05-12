@@ -11,15 +11,30 @@ interface Props {
   placeholder?: string;
   emptyText?: string;
   maxHeight?: string;
+  /** Parent supplies options (e.g. backend search); skip local substring filter. */
+  remoteMode?: boolean;
+  /** Fired on each keystroke; parent debounces and refetches options. */
+  onSearchChange?: (q: string) => void;
 }
 
-export function MultiPicker({ options, selectedIds, onToggle, onClear, placeholder = "Tìm kiếm...", emptyText = "Không có kết quả", maxHeight = "max-h-48" }: Props) {
+export function MultiPicker({
+  options,
+  selectedIds,
+  onToggle,
+  onClear,
+  placeholder = "Tìm kiếm...",
+  emptyText = "Không có kết quả",
+  maxHeight = "max-h-48",
+  remoteMode = false,
+  onSearchChange,
+}: Props) {
   const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
+    if (remoteMode) return options;
     const q = search.trim().toLowerCase();
     if (!q) return options;
     return options.filter((o) => o.label.toLowerCase().includes(q) || (o.sub ?? "").toLowerCase().includes(q));
-  }, [options, search]);
+  }, [remoteMode, options, search]);
 
   return (
     <div className="space-y-2">
@@ -28,7 +43,11 @@ export function MultiPicker({ options, selectedIds, onToggle, onClear, placehold
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSearch(v);
+              onSearchChange?.(v);
+            }}
             placeholder={placeholder}
             className="w-full h-8 pl-7 pr-2 text-xs border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-primary"
           />

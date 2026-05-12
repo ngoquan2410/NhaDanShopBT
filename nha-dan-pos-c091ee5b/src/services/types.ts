@@ -289,6 +289,8 @@ export interface VoucherSnapshot {
   discountAmount: Money;
   /** Giảm phí ship (cho voucher freeship). Mặc định 0. */
   shippingDiscountAmount?: Money;
+  /** Backend: voucher chỉ giảm phí ship (gồm mã FREESHIP* legacy). */
+  freeShipping?: boolean;
 }
 
 export interface PromotionAffectedLine {
@@ -419,6 +421,12 @@ export interface PendingOrderLine {
   originalUnitPrice?: Money;
 }
 
+export type PaymentLinkStatus =
+  | "NONE"
+  | "EXACT_PAID"
+  | "UNDERPAID_LINKED"
+  | "OVERPAID_LINKED";
+
 export interface PendingOrder {
   id: ID;
   code: string;
@@ -441,6 +449,11 @@ export interface PendingOrder {
   /** Present only on the immediate `confirm()` response when backend returns an invoice. */
   confirmedInvoiceId?: string;
   confirmedInvoiceNo?: string;
+  /** Đối soát CK đã gắn (manual/webhook link), không đổi status enum. */
+  paymentLinkStatus?: PaymentLinkStatus;
+  paymentDelta?: Money;
+  linkedPaymentEventId?: ID;
+  linkedPaymentAmount?: Money;
 }
 
 export interface CreatePendingOrderInput {
@@ -517,6 +530,8 @@ export interface InventoryProjectionBatch {
   lotCode?: string;
   /** Same as lotCode when the API returns `batchCode` (Java: batchCode on ProductBatch). */
   batchCode?: string;
+  /** ProductBatch.status (e.g. active, blocked) when API provides it. */
+  status?: string;
   qty: number;
   costPrice?: Money;
   expiryDate?: ISODateString;
@@ -664,6 +679,9 @@ export interface GoodsReceipt {
   deleteBlockReason?: string;
   /** True when every batch on the receipt still has remainingQty == importQty (not consumed downstream). */
   canDelete: boolean;
+  voidedAt?: ISODateString;
+  voidedBy?: string;
+  voidReason?: string;
 }
 
 /* ========================= STOCK ADJUSTMENT (CANONICAL) ========================= */

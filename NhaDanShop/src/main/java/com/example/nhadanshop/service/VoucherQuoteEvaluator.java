@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.Locale;
 
 /**
  * Resolves {@link Voucher} rows into raw invoice-level discount amounts for {@link CommercialPricingEngine}.
@@ -15,6 +16,20 @@ public final class VoucherQuoteEvaluator {
     public record RawVoucherDiscounts(BigDecimal voucherDiscount, BigDecimal shippingDiscount) {}
 
     private VoucherQuoteEvaluator() {}
+
+    /**
+     * Free-shipping semantics: {@code free_shipping} flag, or legacy misconfigured rows whose code starts with
+     * {@code FREESHIP} (fixed/cap was wrongly applied to merchandise — must only reduce shipping, capped by fee).
+     */
+    public static boolean isShipOnlyVoucher(Voucher v, String codeUsed) {
+        if (Boolean.TRUE.equals(v.getFreeShipping())) {
+            return true;
+        }
+        if (codeUsed == null || codeUsed.isBlank()) {
+            return false;
+        }
+        return codeUsed.trim().toUpperCase(Locale.ROOT).startsWith("FREESHIP");
+    }
 
     public static void assertEligibleOrThrow(Voucher v, String codeUsed, Clock clock) {
         if (!Boolean.TRUE.equals(v.getActive())) {
@@ -46,25 +61,29 @@ public final class VoucherQuoteEvaluator {
                     "Don chua dat gia tri toi thieu voucher " + codeUsed + " (can >= " + minSub.toPlainString() + ")");
         }
 
-        boolean freeShip = Boolean.TRUE.equals(v.getFreeShipping());
+        boolean shipOnly = isShipOnlyVoucher(v, codeUsed);
         BigDecimal pct = nz(v.getPercent());
         BigDecimal fixed = nz(v.getFixedAmount());
         BigDecimal cap = nz(v.getCap());
 
-        if (freeShip && (pct.compareTo(BigDecimal.ZERO) > 0 || fixed.compareTo(BigDecimal.ZERO) > 0)) {
-            throw new IllegalArgumentException("Voucher " + codeUsed + " — free_shipping khong ket hop voi giam tien hang");
-        }
         if (pct.compareTo(BigDecimal.ZERO) > 0 && fixed.compareTo(BigDecimal.ZERO) > 0) {
             throw new IllegalArgumentException("Voucher " + codeUsed + " — chon percent hoac fixed_amount, khong ca hai");
         }
 
         BigDecimal sf = nz(shippingFee).max(BigDecimal.ZERO);
 
-        if (freeShip) {
+        if (shipOnly) {
             if (sf.compareTo(BigDecimal.ZERO) <= 0) {
                 throw new IllegalArgumentException("Voucher free ship " + codeUsed + " — khong co phi van chuyen de giam");
             }
-            BigDecimal shipDisc = cap.compareTo(BigDecimal.ZERO) > 0 ? cap.min(sf) : sf;
+            BigDecimal shipDisc;
+            if (cap.compareTo(BigDecimal.ZERO) > 0) {
+                shipDisc = cap.min(sf);
+            } else if (fixed.compareTo(BigDecimal.ZERO) > 0) {
+                shipDisc = fixed.min(sf);
+            } else {
+                shipDisc = sf;
+            }
             if (shipDisc.compareTo(BigDecimal.ZERO) <= 0) {
                 throw new IllegalArgumentException("Voucher " + codeUsed + " — khong ap dung duoc (giam phi = 0)");
             }

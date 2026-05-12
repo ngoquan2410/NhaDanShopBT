@@ -8,7 +8,9 @@ import { SortableTh } from "@/components/shared/SortableTh";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { useTableControls } from "@/hooks/useTableControls";
 import { useService } from "@/hooks/useService";
-import { adminCombos, products as productService } from "@/services";
+import { adminCombos } from "@/services";
+import { VariantSearchPicker } from "@/components/shared/VariantSearchPicker";
+import type { VariantTransactionSearchHit } from "@/services/catalog/variantTransactionSearch";
 import type { Combo, ComboItem } from "@/lib/mock-data";
 import { formatVND } from "@/lib/format";
 import { Plus, Layers, Package, Pencil, AlertTriangle, Info, Trash2, X, Check, Power } from "lucide-react";
@@ -23,6 +25,16 @@ interface ComboForm {
 
 const emptyForm: ComboForm = { code: "", name: "", price: 0, active: true, components: [] };
 
+export function normalizeComboComponentFromVariantHit(hit: VariantTransactionSearchHit): Pick<ComboItem, "productId" | "variantId" | "productName" | "variantName" | "stock"> {
+  return {
+    productId: hit.productId,
+    variantId: "",
+    productName: hit.productName,
+    variantName: "",
+    stock: hit.stockQty,
+  };
+}
+
 function computeDerivedStock(components: ComboItem[]) {
   if (components.length === 0) return 0;
   return Math.min(...components.map((c) => Math.floor(c.stock / Math.max(1, c.quantity))));
@@ -33,9 +45,7 @@ export default function AdminCombos() {
   const [form, setForm] = useState<ComboForm | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Combo | null>(null);
   const { data: combosData, loading, error, reload } = useService(() => adminCombos.list(), []);
-  const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 100 }), []);
   const combos = combosData ?? [];
-  const products = productData?.items ?? [];
 
   const filtered = useMemo(() => combos.filter(c =>
     !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.code.toLowerCase().includes(search.toLowerCase())
@@ -66,6 +76,7 @@ export default function AdminCombos() {
     if (form.price <= 0) { toast.error("Giá combo phải lớn hơn 0"); return; }
     if (form.components.length === 0) { toast.error("Combo cần ít nhất 1 sản phẩm thành phần"); return; }
     if (form.components.some(c => c.quantity <= 0)) { toast.error("Số lượng thành phần phải lớn hơn 0"); return; }
+    if (form.components.some(c => !c.productId)) { toast.error("Mỗi thành phần cần chọn sản phẩm"); return; }
 
     try {
       await adminCombos.save({ id: form.id, code: form.code.trim(), name: form.name.trim(), price: form.price, active: form.active, components: form.components });
@@ -93,26 +104,26 @@ export default function AdminCombos() {
   // ===== Form helpers =====
   const addComponent = () => {
     if (!form) return;
-    const firstProduct = products[0];
-    const firstVariant = firstProduct?.variants[0];
-    if (!firstProduct || !firstVariant) { toast.error("Chưa có sản phẩm để thêm"); return; }
     setForm({
       ...form,
       components: [...form.components, {
-        productId: firstProduct.id, variantId: firstVariant.id,
-        productName: firstProduct.name, variantName: firstVariant.name,
-        quantity: 1, stock: firstVariant.stock,
+        productId: "",
+        variantId: "",
+        productName: "",
+        variantName: "",
+        quantity: 1,
+        stock: 0,
       }],
     });
   };
 
-  const updateComponent = (idx: number, productId: string, variantId: string) => {
+  const updateComponentFromHit = (idx: number, hit: VariantTransactionSearchHit) => {
     if (!form) return;
-    const product = products.find(p => p.id === productId);
-    const variant = product?.variants.find(v => v.id === variantId);
-    if (!product || !variant) return;
     const next = [...form.components];
-    next[idx] = { ...next[idx], productId, variantId, productName: product.name, variantName: variant.name, stock: variant.stock };
+    next[idx] = {
+      ...next[idx],
+      ...normalizeComboComponentFromVariantHit(hit),
+    };
     setForm({ ...form, components: next });
   };
 
@@ -200,32 +211,37 @@ export default function AdminCombos() {
             ) : (
               <div className="space-y-2">
                 {form.components.map((c, i) => {
-                  const product = products.find(p => p.id === c.productId);
                   const lowRatio = c.quantity > 0 ? Math.floor(c.stock / c.quantity) : 0;
                   return (
-                    <div key={i} className="grid grid-cols-12 gap-2 items-center bg-muted/30 p-2 rounded-md">
-                      <select
-                        value={c.productId}
-                        onChange={e => {
-                          const p = products.find(x => x.id === e.target.value);
-                          updateComponent(i, e.target.value, p?.variants[0]?.id ?? "");
-                        }}
-                        className="col-span-4 h-8 px-2 text-sm border rounded-md bg-background"
-                      >
-                        {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                      </select>
-                      <select
-                        value={c.variantId}
-                        onChange={e => updateComponent(i, c.productId, e.target.value)}
-                        className="col-span-3 h-8 px-2 text-sm border rounded-md bg-background"
-                      >
-                        {product?.variants.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                      </select>
-                      <div className="col-span-2 flex items-center gap-1">
+                    <div key={i} className="grid grid-cols-12 gap-2 items-start bg-muted/30 p-2 rounded-md">
+                      <div className="col-span-7 space-y-1 min-w-0">
+                        {c.productId ? (
+                          <p className="text-[11px] text-foreground">
+                            <span className="font-medium">{c.productName}</span>
+                            <span className="text-muted-foreground"> · dùng biến thể mặc định</span>
+                            <span className="font-mono text-[10px] block text-muted-foreground">
+                              {c.productId}
+                            </span>
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-muted-foreground">Chưa chọn thành phần</p>
+                        )}
+                        <VariantSearchPicker
+                          context="combo"
+                          inputTestId={i === 0 ? "combo-component-variant-search" : undefined}
+                          listTestId={i === 0 ? "combo-component-variant-search-hits" : undefined}
+                          placeholder="Tìm sản phẩm (có thể tìm theo variant)…"
+                          onSelect={(hit) => updateComponentFromHit(i, hit)}
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Combo hiện lưu thành phần theo sản phẩm. Tồn/cost combo dùng biến thể mặc định của sản phẩm.
+                        </p>
+                      </div>
+                      <div className="col-span-2 flex items-center gap-1 pt-1">
                         <span className="text-xs text-muted-foreground">SL:</span>
                         <input type="number" min={1} value={c.quantity} onChange={e => updateQty(i, Number(e.target.value))} className="w-full h-8 px-2 text-sm border rounded-md bg-background" />
                       </div>
-                      <div className="col-span-2 text-xs text-muted-foreground">
+                      <div className="col-span-2 text-xs text-muted-foreground pt-2">
                         Tồn: {c.stock} → đủ <span className="font-medium text-foreground">{lowRatio}</span> combo
                       </div>
                       <button onClick={() => removeComponent(i)} title="Xóa" className="col-span-1 justify-self-end p-1.5 text-muted-foreground hover:text-danger rounded hover:bg-muted">

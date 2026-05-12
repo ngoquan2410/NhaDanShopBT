@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -46,4 +47,10 @@ public interface PaymentEventRepository extends JpaRepository<PaymentEvent, Long
             ORDER BY e.createdAt DESC
             """)
     List<PaymentEvent> findByOrderCode(@Param("orderCode") String orderCode, Pageable pageable);
+
+    Optional<PaymentEvent> findFirstByLinkedPendingOrder_IdOrderByLinkedAtDesc(Long linkedPendingOrderId);
+
+    List<PaymentEvent> findByLinkedPendingOrder_IdInAndStatus(
+            Collection<Long> orderIds,
+            PaymentEvent.Status status);
 }

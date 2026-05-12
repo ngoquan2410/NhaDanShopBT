@@ -107,8 +107,9 @@ class StockAdjustmentServiceSlice5bIntegrationTest {
         createBatch(
                 v, "B-5B-fut", LocalDate.now().plusDays(40), 10, 10, new BigDecimal("11000"), ProductBatch.STATUS_ACTIVE);
         stockMutationService.syncVariantStockWithBatches(v.getId());
+        // Unsourced FEFO is allowed for STOCKTAKE/OTHER; EXPIRED now requires explicit sourceBatchId when adjustable lots exist.
         StockAdjustmentRequest req = new StockAdjustmentRequest(
-                "EXPIRED", "drain", List.of(
+                "STOCKTAKE", "drain", List.of(
                 new StockAdjustmentRequest.ItemRequest(v.getId(), 12, null, "unsourced"))); // 16 -> 12, -4
         var created = stockAdjustmentService.create(req);
         stockAdjustmentService.confirm(created.id());

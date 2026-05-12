@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Calendar as CalendarIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { localToday, toLocalDateString } from "@/lib/localDate";
 
 export type PeriodPreset = "all" | "today" | "week" | "month" | "custom";
 
@@ -19,21 +20,20 @@ interface Props {
 }
 
 function todayISO(): string {
-  const d = new Date();
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  return localToday();
 }
 
 function startOfWeekISO(): string {
   const d = new Date();
   const day = (d.getDay() + 6) % 7; // Monday = 0
   d.setDate(d.getDate() - day);
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  return toLocalDateString(d);
 }
 
 function startOfMonthISO(): string {
   const d = new Date();
   d.setDate(1);
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  return toLocalDateString(d);
 }
 
 /**

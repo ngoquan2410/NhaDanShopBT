@@ -14,7 +14,8 @@ import {
   Truck,
   Gift,
 } from "lucide-react";
-import { useCart, useSelectedPromotionId, useSelectedPromotionMode, cartActions, type CartItem } from "@/lib/cart";
+import { toast } from "sonner";
+import { useCart, useSelectedPromotionId, useSelectedPromotionMode, cartActions, hasKnownCartStock, type CartItem } from "@/lib/cart";
 import { promotions } from "@/services";
 import type { CartContext, EvaluatedPromotion } from "@/services/types";
 import { PROMOTION_TYPE_LABEL, parseProgressFromReason } from "@/components/promotions/PromotionLabels";
@@ -119,7 +120,7 @@ export default function CartPage() {
   const promoIsGift = isGiftPromotionType(appliedPromo?.type);
   const promoShipFree = appliedPromo?.type === "free_shipping";
   const total = Math.max(0, subtotal - promoDiscount);
-  const hasStockIssue = items.some((i) => i.qty > i.stock);
+  const hasStockIssue = items.some((i) => hasKnownCartStock(i) && i.qty > i.stock);
   const hasInvalidBackendLine = items.some((i) => i.catalogSource !== "backend" || i.schemaVersion !== 2 || !/^\d+$/.test(String(i.productId)) || !/^\d+$/.test(String(i.variantId)));
   const ineligiblePromos = useMemo(
     () => allPromos.filter((p) => !p.eligible && p.reasonIfIneligible && !pendingAddressFreeShippingPromos.some((x) => x.promotionId === p.promotionId)),
@@ -430,8 +431,9 @@ export default function CartPage() {
 }
 
 function CartRow({ item, onRemove }: { item: CartItem; onRemove: (id: string, name: string) => void }) {
-  const overStock = item.qty > item.stock;
-  const lowStock = item.stock <= 5;
+  const knownStock = hasKnownCartStock(item);
+  const overStock = knownStock && item.qty > item.stock;
+  const lowStock = knownStock && item.stock <= 5;
   return (
     <div
       className={`bg-storefront-surface rounded-2xl border p-4 flex gap-3.5 sf-shadow ${
@@ -473,7 +475,7 @@ function CartRow({ item, onRemove }: { item: CartItem; onRemove: (id: string, na
           <QuantityStepper
             value={item.qty}
             onChange={(v) => cartActions.setQty(item.id, v)}
-            max={item.stock}
+            max={knownStock ? item.stock : 20}
             size="sm"
           />
           <p className="font-bold text-base text-foreground">{formatVND(item.lineSubtotal)}</p>

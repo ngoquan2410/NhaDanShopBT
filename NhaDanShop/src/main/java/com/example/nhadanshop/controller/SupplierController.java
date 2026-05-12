@@ -5,10 +5,11 @@ import com.example.nhadanshop.dto.SupplierResponse;
 import com.example.nhadanshop.service.SupplierService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/suppliers")
@@ -18,10 +19,10 @@ public class SupplierController {
     private final SupplierService supplierService;
 
     @GetMapping
-    public List<SupplierResponse> getAll(@RequestParam(required = false) String q) {
-        return q != null && !q.isBlank()
-                ? supplierService.search(q)
-                : supplierService.getAll();
+    public Page<SupplierResponse> getAll(
+            @RequestParam(required = false) String q,
+            @PageableDefault(size = 20, sort = "name") Pageable pageable) {
+        return supplierService.listPage(pageable, q);
     }
 
     @GetMapping("/{id}")

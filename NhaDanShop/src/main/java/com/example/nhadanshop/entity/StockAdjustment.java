@@ -14,7 +14,7 @@ import java.util.List;
 @Setter
 public class StockAdjustment {
 
-    public enum Reason { EXPIRED, DAMAGED, LOST, STOCKTAKE, OTHER }
+    public enum Reason { EXPIRED, DAMAGED, LOST, STOCKTAKE, PERIODIC_STOCKTAKE, WRONG_RECEIPT, OTHER }
     public enum Status { DRAFT, CONFIRMED }
 
     @Id

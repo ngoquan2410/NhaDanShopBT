@@ -42,10 +42,6 @@ public class SalesInvoiceController {
         if (customerId != null) {
             return invoiceService.listInvoicesByCustomer(customerId, pageable);
         }
-        if (from != null && to != null) {
-            return invoiceService.listInvoicesByDateRange(
-                    from.atStartOfDay(), to.atTime(LocalTime.MAX), pageable);
-        }
         com.example.nhadanshop.entity.SalesInvoice.Status invoiceStatus = null;
         if (status != null && !status.isBlank()) {
             String s = status.trim().toLowerCase();
@@ -55,7 +51,13 @@ public class SalesInvoiceController {
                 invoiceStatus = com.example.nhadanshop.entity.SalesInvoice.Status.CANCELLED;
             }
         }
-        return invoiceService.listInvoices(pageable, invoiceStatus, q);
+        java.time.LocalDateTime fromDt = null;
+        java.time.LocalDateTime toDt = null;
+        if (from != null && to != null) {
+            fromDt = from.atStartOfDay();
+            toDt = to.atTime(LocalTime.MAX);
+        }
+        return invoiceService.listInvoicesAdmin(pageable, invoiceStatus, q, fromDt, toDt);
     }
 
     @GetMapping("/{id}")

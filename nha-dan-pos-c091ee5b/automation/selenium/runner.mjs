@@ -169,6 +169,16 @@ export async function runAutomationSuite(config) {
           outcome = "skipped";
           skipReason = ret.reason || "unspecified";
           console.log(`  ⊗ skipped — ${skipReason}`);
+        } else if (ret && typeof ret === "object" && ret.outcome === "fail") {
+          outcome = "fail";
+          skipReason = ret.reason || "spec reported outcome fail";
+          const meta = await saveFailureArtifacts(driver, {
+            artifactDir: config.artifactDir,
+            slug,
+          }).catch(() => ({ url: "", base: "" }));
+          console.error(`  ✗ ${skipReason}`);
+          if (meta.url) console.error(`    URL: ${meta.url}`);
+          if (meta.base) console.error(`    Artifacts: ${meta.base}.*`);
         }
       } catch (e) {
         await api.runCleanups().catch(() => {});
@@ -214,6 +224,50 @@ export async function runAutomationSuite(config) {
           : {}),
         ...(skipReason ? { reason: skipReason } : {}),
       });
+
+      /** B2.1: always persist full case matrix to a sidecar file when the spec returns caseResults. */
+      try {
+        if (ret && typeof ret === "object" && Array.isArray(ret.caseResults)) {
+          if (slug === "slice-b2-b21-product-parent") {
+            const sidecar = path.join(config.artifactDir, "slice-b2-b21-case-results.json");
+            fs.writeFileSync(
+              sidecar,
+              `${JSON.stringify({ generatedAt: new Date().toISOString(), outcome, reason: skipReason, caseResults: ret.caseResults }, null, 2)}\n`,
+              "utf8",
+            );
+            console.log(`  B2.1 case matrix: ${sidecar}`);
+          }
+          if (slug === "slice-b2-b22-variant-transaction-search") {
+            const sidecar = path.join(config.artifactDir, "slice-b2-b22-case-results.json");
+            fs.writeFileSync(
+              sidecar,
+              `${JSON.stringify({ generatedAt: new Date().toISOString(), outcome, reason: skipReason, caseResults: ret.caseResults }, null, 2)}\n`,
+              "utf8",
+            );
+            console.log(`  B2.2 case matrix: ${sidecar}`);
+          }
+          if (slug === "slice-b2-b23-entity-list-search") {
+            const sidecar = path.join(config.artifactDir, "slice-b2-b23-case-results.json");
+            fs.writeFileSync(
+              sidecar,
+              `${JSON.stringify({ generatedAt: new Date().toISOString(), outcome, reason: skipReason, caseResults: ret.caseResults }, null, 2)}\n`,
+              "utf8",
+            );
+            console.log(`  B2.3 case matrix: ${sidecar}`);
+          }
+          if (slug === "hotfix-storefront-payment" && Array.isArray(ret.caseResults)) {
+            const sidecar = path.join(config.artifactDir, "hotfix-storefront-payment-case-results.json");
+            fs.writeFileSync(
+              sidecar,
+              `${JSON.stringify({ generatedAt: new Date().toISOString(), outcome, reason: skipReason, caseResults: ret.caseResults }, null, 2)}\n`,
+              "utf8",
+            );
+            console.log(`  Hotfix case matrix: ${sidecar}`);
+          }
+        }
+      } catch (w) {
+        console.warn("  Could not write B2 case-results sidecar:", w?.message || w);
+      }
 
       if (outcome === "pass") {
         passed++;

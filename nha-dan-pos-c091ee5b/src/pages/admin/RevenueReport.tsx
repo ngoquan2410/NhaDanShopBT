@@ -8,6 +8,7 @@ import { adminReports, products as productService } from "@/services";
 import { formatVND, formatNumber } from "@/lib/format";
 import { TrendingUp, Download, ShoppingCart, BarChart3, Search, Check, X } from "lucide-react";
 import { toast } from "sonner";
+import { localToday } from "@/lib/localDate";
 import { cn } from "@/lib/utils";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartContainer } from "@/components/ui/chart";
@@ -20,7 +21,7 @@ const groupLabel: Record<Group, string> = { daily: "Ngày", weekly: "Tuần", mo
 export default function AdminRevenueReport() {
   const [groupBy, setGroupBy] = useState<Group>("daily");
   const [from, setFrom] = useState("2026-04-01");
-  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [to, setTo] = useState(localToday());
   const [excelBusy, setExcelBusy] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -39,18 +40,48 @@ export default function AdminRevenueReport() {
   const selectedKey = selected.length ? [...selected].sort().join(",") : "";
 
   const { data: reportData, loading, error } = useService(async () => {
-    const [rows, productRows, categoryRows, productPage] = await Promise.all([
+    const [rows, productRows, categoryRows] = await Promise.all([
       adminReports.revenue(from, to, groupBy, productIdsArg),
       adminReports.revenueByProduct(from, to, groupBy, productIdsArg),
       adminReports.revenueByCategory(from, to, groupBy),
-      productService.list({ page: 1, pageSize: 100 }),
     ]);
-    return { rows, productRows, categoryRows, products: productPage.items };
+    return { rows, productRows, categoryRows };
   }, [from, to, groupBy, selectedKey]);
 
-  const products = reportData?.products ?? [];
   const backendProductRows = reportData?.productRows ?? [];
   const backendCategoryRows = reportData?.categoryRows ?? [];
+
+  // Debounced backend product search for the picker. Admin/staff JWT: /api/products?search
+  // matches product name/code and any variant code/name (incl. inactive/non-sellable variant rows).
+  // Storefront anonymous search uses stricter variant match. Selection remains productId.
+  const [pickerProducts, setPickerProducts] = useState<{ id: string; name: string; code?: string }[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  useEffect(() => {
+    if (!pickerOpen) return;
+    let cancelled = false;
+    setPickerLoading(true);
+    const handle = setTimeout(async () => {
+      try {
+        const page = await productService.list({
+          page: 1,
+          pageSize: 20,
+          query: pickerSearch.trim() || undefined,
+        });
+        if (cancelled) return;
+        setPickerProducts(
+          page.items.map((p) => ({ id: p.id, name: p.name, code: p.code })),
+        );
+      } catch (e) {
+        if (!cancelled) {
+          setPickerProducts([]);
+          toast.error(e instanceof Error ? e.message : "Không tải danh sách sản phẩm");
+        }
+      } finally {
+        if (!cancelled) setPickerLoading(false);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [pickerOpen, pickerSearch]);
 
   const filteredProductSlices = useMemo(
     () =>
@@ -96,17 +127,6 @@ export default function AdminRevenueReport() {
   const totalInvoices = rows.reduce((s, r) => s + r.invoiceCount, 0);
   const totalItems = rows.reduce((s, r) => s + r.itemsSold, 0);
 
-  const pickerProducts = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; code?: string }>();
-    for (const p of products) map.set(p.id, { id: p.id, name: p.name, code: p.code });
-    for (const r of backendProductRows) {
-      const id = String(r.productId ?? r.id ?? "");
-      if (!id || map.has(id)) continue;
-      map.set(id, { id, name: String(r.productName ?? r.name ?? id), code: String(r.productCode ?? r.code ?? "") });
-    }
-    const q = pickerSearch.trim().toLowerCase();
-    return [...map.values()].filter((p) => !q || p.name.toLowerCase().includes(q) || String(p.code ?? "").toLowerCase().includes(q));
-  }, [backendProductRows, pickerSearch, products]);
   const toggle = (id: string) => setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const handleExportExcel = async () => {
@@ -174,7 +194,7 @@ export default function AdminRevenueReport() {
               {isFiltered ? `${selected.length} sản phẩm` : "Lọc theo sản phẩm"}
             </button>
             {pickerOpen && (
-              <div className="absolute right-0 top-full mt-1 w-72 bg-popover border rounded-md shadow-lg z-30 animate-fade-in">
+              <div className="absolute right-0 top-full mt-1 w-80 bg-popover border rounded-lg shadow-lg z-30 animate-fade-in">
                 <div className="p-2 border-b">
                   <div className="relative">
                     <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -182,14 +202,16 @@ export default function AdminRevenueReport() {
                       autoFocus
                       value={pickerSearch}
                       onChange={(e) => setPickerSearch(e.target.value)}
-                      placeholder="Tìm sản phẩm..."
+                      placeholder="Tìm sản phẩm / mã sản phẩm / mã variant"
                       className="w-full h-8 pl-8 pr-2 text-xs border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                     />
                   </div>
                 </div>
-                <div className="max-h-64 overflow-y-auto scrollbar-thin">
-                  {pickerProducts.length === 0 ? (
-                    <p className="p-4 text-center text-xs text-muted-foreground">Không tìm thấy</p>
+                <div className="max-h-72 overflow-y-auto scrollbar-thin">
+                  {pickerLoading ? (
+                    <p className="p-4 text-center text-xs text-muted-foreground">Đang tìm kiếm...</p>
+                  ) : pickerProducts.length === 0 ? (
+                    <p className="p-4 text-center text-xs text-muted-foreground">Không tìm thấy sản phẩm phù hợp</p>
                   ) : (
                     pickerProducts.map((p) => {
                       const checked = selected.includes(p.id);
@@ -232,7 +254,10 @@ export default function AdminRevenueReport() {
       {isFiltered && (
         <div className="flex flex-wrap gap-1.5">
           {selected.map((id) => {
-            const p = pickerProducts.find((x) => x.id === id) ?? products.find((x) => x.id === id);
+            const fromPicker = pickerProducts.find((x) => x.id === id);
+            const fromBackend = backendProductRows.find((r) => String(r.productId ?? r.id) === id);
+            const p = fromPicker
+              ?? (fromBackend ? { id, name: String(fromBackend.productName ?? fromBackend.name ?? id), code: String(fromBackend.productCode ?? "") } : null);
             if (!p) return null;
             return (
               <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] bg-primary-soft text-primary rounded-full">

@@ -13,7 +13,17 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:automation": "node automation/selenium/run-selenium.mjs",
-    "e2e:promo": "cross-env RUN_AUTOMATION=1 AUTOMATION_SCOPE=promotion-checkout AUTOMATION_NO_SKIP=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://localhost:8080 node automation/selenium/run-selenium.mjs --run"
+    "e2e:promo": "cross-env RUN_AUTOMATION=1 AUTOMATION_SCOPE=promotion-checkout AUTOMATION_NO_SKIP=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://localhost:8080 node automation/selenium/run-selenium.mjs --run",
+    "e2e:slice-b": "cross-env RUN_AUTOMATION=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://127.0.0.1:8080 node automation/selenium/run-selenium.mjs --run --tags=slice-b",
+    "e2e:slice-b2-b21": "cross-env RUN_AUTOMATION=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://127.0.0.1:8080 node automation/selenium/run-selenium.mjs --run --tags=slice-b2-b21",
+    "e2e:slice-b2-b22": "cross-env RUN_AUTOMATION=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://127.0.0.1:8080 node automation/selenium/run-selenium.mjs --run --tags=slice-b2-b22",
+    "e2e:slice-b2-b23": "cross-env RUN_AUTOMATION=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://127.0.0.1:8080 node automation/selenium/run-selenium.mjs --run --tags=slice-b2-b23",
+    "e2e:slice-c": "cross-env RUN_AUTOMATION=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://127.0.0.1:8080 node automation/selenium/run-selenium.mjs --run --tags=slice-c",
+    "e2e:slice-d": "cross-env RUN_AUTOMATION=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://127.0.0.1:8080 node automation/selenium/run-selenium.mjs --run --tags=slice-d",
+    "e2e:slice-e": "cross-env RUN_AUTOMATION=1 AUTOMATION_NO_SKIP=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://127.0.0.1:8080 node automation/selenium/run-selenium.mjs --run --tags=slice-e",
+    "e2e:slice-e2": "cross-env RUN_AUTOMATION=1 AUTOMATION_NO_SKIP=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://127.0.0.1:8080 node automation/selenium/run-selenium.mjs --run --tags=slice-e2",
+    "e2e:slice-g": "cross-env RUN_AUTOMATION=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://127.0.0.1:8080 node automation/selenium/run-selenium.mjs --run --tags=slice-g",
+    "e2e:slice-f": "cross-env RUN_AUTOMATION=1 BASE_URL=http://127.0.0.1:5173 API_BASE_URL=http://127.0.0.1:8080 node automation/selenium/run-selenium.mjs --run --tags=slice-f"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

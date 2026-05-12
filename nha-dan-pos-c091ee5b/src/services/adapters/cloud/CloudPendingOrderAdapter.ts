@@ -40,6 +40,10 @@ type BackendPendingOrder = {
   shippingQuoteSnapshot?: unknown | null;
   pricingBreakdownSnapshot: unknown;
   note?: string | null;
+  paymentLinkStatus?: string | null;
+  paymentDelta?: number | string | null;
+  linkedPaymentEventId?: string | number | null;
+  linkedPaymentAmount?: number | string | null;
 };
 
 type BackendPendingOrderConfirmResponse = {
@@ -133,6 +137,19 @@ function backendToOrder(
     note: raw.note ?? undefined,
     confirmedInvoiceId: confirmMeta?.confirmedInvoiceId,
     confirmedInvoiceNo: confirmMeta?.confirmedInvoiceNo,
+    paymentLinkStatus: (raw.paymentLinkStatus as PendingOrder["paymentLinkStatus"]) ?? "NONE",
+    paymentDelta:
+      raw.paymentDelta != null && raw.paymentDelta !== ""
+        ? Number(raw.paymentDelta)
+        : undefined,
+    linkedPaymentEventId:
+      raw.linkedPaymentEventId != null && raw.linkedPaymentEventId !== ""
+        ? String(raw.linkedPaymentEventId)
+        : undefined,
+    linkedPaymentAmount:
+      raw.linkedPaymentAmount != null && raw.linkedPaymentAmount !== ""
+        ? Number(raw.linkedPaymentAmount)
+        : undefined,
   };
 }
 
@@ -210,7 +227,7 @@ export class CloudPendingOrderAdapter implements PendingOrderService {
       number?: number;
       size?: number;
     }>(`${API_BASE}?${query.toString()}`);
-    const items = (Array.isArray(data.content) ? data.content : []).map(backendToOrder);
+    const items = (Array.isArray(data.content) ? data.content : []).map((raw) => backendToOrder(raw));
 
     return {
       items,
@@ -220,8 +237,36 @@ export class CloudPendingOrderAdapter implements PendingOrderService {
     };
   }
 
+  async listLinkable(params?: PendingOrderListParams): Promise<PagedResult<PendingOrder>> {
+    if (isTestEnv) return this.local.listLinkable(params);
+    const page = Math.max(1, params?.page ?? 1);
+    const pageSize = Math.min(100, Math.max(1, params?.pageSize ?? 20));
+    const sortRule = params?.sort?.[0];
+    const sortField = sortRule?.field?.trim() ? sortRule.field : "createdAt";
+    const sortDir = sortRule?.direction === "asc" ? "asc" : "desc";
+    const search = params?.query?.trim();
+    const query = new URLSearchParams();
+    query.set("page", String(page - 1));
+    query.set("size", String(pageSize));
+    query.set("sort", `${sortField},${sortDir}`);
+    if (search) query.set("search", search);
+    const data = await adminFetchJson<{
+      content?: BackendPendingOrder[];
+      totalElements?: number;
+      number?: number;
+      size?: number;
+    }>(`${API_BASE}/linkable?${query.toString()}`);
+    const items = (Array.isArray(data.content) ? data.content : []).map((raw) => backendToOrder(raw));
+    return {
+      items,
+      total: Number(data.totalElements ?? items.length),
+      page: Number(data.number ?? page - 1) + 1,
+      pageSize: Number(data.size ?? pageSize),
+    };
+  }
+
   async counts(params?: { paymentMethod?: string; search?: string }): Promise<Record<string, number>> {
-    if (isTestEnv) return this.local.counts(params);
+    if (isTestEnv) return this.local.counts();
     const query = new URLSearchParams();
     const paymentMethod = params?.paymentMethod?.trim();
     if (paymentMethod) query.set("paymentMethod", paymentMethod);

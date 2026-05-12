@@ -74,12 +74,24 @@ function mapSupplier(raw: Record<string, unknown>): Supplier {
 
 function mapUser(raw: Record<string, unknown>): UserAccount {
   const roles = Array.isArray(raw.roles) ? raw.roles.map(String) : [];
-  const role = roles.includes("ROLE_ADMIN") || roles.includes("admin") ? "admin" : "staff";
+  const backendRoleName = roles[0] ?? "ROLE_STAFF";
+  const role = backendRoleName === "ROLE_ADMIN" || roles.includes("admin") ? "admin" : "staff";
+  const roleDisplayLabel = backendRoleName === "ROLE_ADMIN"
+    ? "Admin"
+    : backendRoleName === "ROLE_STAFF"
+      ? "Nhân viên"
+      : backendRoleName === "ROLE_USER" || backendRoleName === "ROLE_CUSTOMER"
+        ? "Khách hàng"
+        : backendRoleName;
+  const assignableRole = backendRoleName === "ROLE_ADMIN" || backendRoleName === "ROLE_STAFF";
   return {
     id: asString(raw.id),
     username: asString(raw.username),
     fullName: asString(raw.fullName, asString(raw.username)),
     role,
+    backendRoleName,
+    roleDisplayLabel,
+    assignableRole,
     active: raw.isActive !== false && raw.active !== false,
     totpEnabled: Boolean(raw.totpEnabled),
     createdAt: asString(raw.createdAt, new Date(0).toISOString()),
@@ -87,13 +99,20 @@ function mapUser(raw: Record<string, unknown>): UserAccount {
   };
 }
 
+export type AdminRoleOption = {
+  id: string;
+  name: string;
+  label: string;
+  description?: string;
+};
+
 function mapCombo(raw: Record<string, unknown>): Combo {
   const itemsRaw = Array.isArray(raw.items) ? (raw.items as Record<string, unknown>[]) : [];
   const components: ComboItem[] = itemsRaw.map((item) => ({
     productId: asString(item.productId),
-    variantId: asString(item.productId),
+    variantId: "",
     productName: asString(item.productName),
-    variantName: asString(item.productCode, asString(item.sellUnit)),
+    variantName: "Biến thể mặc định",
     quantity: asNumber(item.quantity, 1),
     stock: asNumber(raw.stockQty),
   }));
@@ -142,10 +161,23 @@ function mapStockAdjustmentLine(raw: Record<string, unknown>): StockAdjustmentLi
 }
 
 export const adminCustomers = {
-  async list(query?: string): Promise<Customer[]> {
-    const q = query ? `?q=${encodeURIComponent(query)}` : "";
-    const rows = await adminFetchJson<Record<string, unknown>[]>(`/api/customers${q}`);
-    return rows.map(mapCustomer);
+  async list(params?: {
+    q?: string;
+    group?: string | null;
+    page?: number;
+    pageSize?: number;
+  }): Promise<{ items: Customer[]; total: number; page: number; pageSize: number }> {
+    const qs = new URLSearchParams();
+    qs.set("page", String(Math.max(0, (params?.page ?? 1) - 1)));
+    qs.set("size", String(Math.min(100, Math.max(1, params?.pageSize ?? 20))));
+    if (params?.q?.trim()) qs.set("q", params.q.trim());
+    if (params?.group) qs.set("group", params.group);
+    const raw = await adminFetchJson<Page<Record<string, unknown>>>(`/api/customers?${qs.toString()}`);
+    const items = toPageItems(raw).map(mapCustomer);
+    const total = typeof raw?.totalElements === "number" ? raw.totalElements : items.length;
+    const pageSize = typeof raw?.size === "number" ? raw.size : Number(qs.get("size"));
+    const page = typeof raw?.number === "number" ? raw.number + 1 : (params?.page ?? 1);
+    return { items, total, page, pageSize };
   },
   async save(input: Partial<Customer> & Pick<Customer, "name" | "phone">): Promise<Customer> {
     const body = {
@@ -168,10 +200,22 @@ export const adminCustomers = {
 };
 
 export const adminSuppliers = {
-  async list(query?: string): Promise<Supplier[]> {
-    const q = query ? `?q=${encodeURIComponent(query)}` : "";
-    const rows = await adminFetchJson<Record<string, unknown>[]>(`/api/suppliers${q}`);
-    return rows.map(mapSupplier);
+  async list(params?: { q?: string; page?: number; pageSize?: number }): Promise<{
+    items: Supplier[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
+    const qs = new URLSearchParams();
+    qs.set("page", String(Math.max(0, (params?.page ?? 1) - 1)));
+    qs.set("size", String(Math.min(100, Math.max(1, params?.pageSize ?? 20))));
+    if (params?.q?.trim()) qs.set("q", params.q.trim());
+    const raw = await adminFetchJson<Page<Record<string, unknown>>>(`/api/suppliers?${qs.toString()}`);
+    const items = toPageItems(raw).map(mapSupplier);
+    const total = typeof raw?.totalElements === "number" ? raw.totalElements : items.length;
+    const pageSize = typeof raw?.size === "number" ? raw.size : Number(qs.get("size"));
+    const page = typeof raw?.number === "number" ? raw.number + 1 : (params?.page ?? 1);
+    return { items, total, page, pageSize };
   },
   async save(input: Partial<Supplier> & Pick<Supplier, "name">): Promise<Supplier> {
     const body = {
@@ -196,12 +240,31 @@ export const adminSuppliers = {
 };
 
 export const adminUsers = {
-  async list(): Promise<UserAccount[]> {
-    const raw = await adminFetchJson<Page<Record<string, unknown>>>("/api/admin/users?page=0&size=100");
-    return toPageItems(raw).map(mapUser);
+  async list(params?: {
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<{ items: UserAccount[]; total: number; page: number; pageSize: number }> {
+    const qs = new URLSearchParams();
+    qs.set("page", String(Math.max(0, (params?.page ?? 1) - 1)));
+    qs.set("size", String(Math.min(100, Math.max(1, params?.pageSize ?? 20))));
+    if (params?.search?.trim()) qs.set("search", params.search.trim());
+    const raw = await adminFetchJson<Page<Record<string, unknown>>>(`/api/admin/users?${qs.toString()}`);
+    const items = toPageItems(raw).map(mapUser);
+    const total = typeof raw?.totalElements === "number" ? raw.totalElements : items.length;
+    const pageSize = typeof raw?.size === "number" ? raw.size : Number(qs.get("size"));
+    const page = typeof raw?.number === "number" ? raw.number + 1 : (params?.page ?? 1);
+    return { items, total, page, pageSize };
   },
-  async save(input: Partial<UserAccount> & Pick<UserAccount, "fullName" | "role"> & { password?: string }): Promise<UserAccount> {
-    const roles = [input.role === "admin" ? "ROLE_ADMIN" : "ROLE_USER"];
+  async save(
+    input: Partial<UserAccount> & Pick<UserAccount, "fullName"> & { password?: string; roleName?: string },
+  ): Promise<UserAccount> {
+    const resolvedRoleName = input.roleName
+      ?? (input.role === "admin" ? "ROLE_ADMIN" : input.role === "staff" ? "ROLE_STAFF" : undefined);
+    if (!resolvedRoleName) {
+      throw new Error("Thiếu vai trò hợp lệ để lưu người dùng");
+    }
+    const roles = [resolvedRoleName];
     const body = input.id
       ? { fullName: input.fullName, isActive: input.active ?? true, roles, password: input.password || undefined }
       : { username: input.username, password: input.password || "changeme123", fullName: input.fullName, roles };
@@ -213,6 +276,18 @@ export const adminUsers = {
   },
   async remove(id: string): Promise<void> {
     await adminFetchJson(`/api/admin/users/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+};
+
+export const adminRoles = {
+  async list(): Promise<AdminRoleOption[]> {
+    const rows = await adminFetchJson<Record<string, unknown>[]>("/api/admin/roles");
+    return rows.map((row) => ({
+      id: asString(row.id),
+      name: asString(row.name),
+      label: asString(row.label, asString(row.name)),
+      description: row.description == null ? undefined : asString(row.description),
+    }));
   },
 };
 
@@ -248,11 +323,23 @@ export const adminCombos = {
 };
 
 export const adminStockAdjustments = {
-  async list(): Promise<{ items: StockAdjustment[]; total: number }> {
-    const raw = await adminFetchJson<Page<Record<string, unknown>>>("/api/stock-adjustments?page=0&size=500");
+  async list(params?: {
+    search?: string;
+    status?: string | null;
+    page?: number;
+    pageSize?: number;
+  }): Promise<{ items: StockAdjustment[]; total: number; page: number; pageSize: number }> {
+    const qs = new URLSearchParams();
+    qs.set("page", String(Math.max(0, (params?.page ?? 1) - 1)));
+    qs.set("size", String(Math.min(100, Math.max(1, params?.pageSize ?? 20))));
+    if (params?.search?.trim()) qs.set("search", params.search.trim());
+    if (params?.status) qs.set("status", params.status);
+    const raw = await adminFetchJson<Page<Record<string, unknown>>>(`/api/stock-adjustments?${qs.toString()}`);
     const items = toPageItems(raw).map(mapStockAdjustment);
     const total = typeof raw?.totalElements === "number" ? raw.totalElements : items.length;
-    return { items, total };
+    const pageSize = typeof raw?.size === "number" ? raw.size : Number(qs.get("size"));
+    const page = typeof raw?.number === "number" ? raw.number + 1 : (params?.page ?? 1);
+    return { items, total, page, pageSize };
   },
   async getOne(id: string): Promise<StockAdjustment> {
     const raw = await adminFetchJson<Record<string, unknown>>(`/api/stock-adjustments/${encodeURIComponent(id)}`);

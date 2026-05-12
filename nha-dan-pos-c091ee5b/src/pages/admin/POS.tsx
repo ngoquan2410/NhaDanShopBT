@@ -27,6 +27,10 @@ import type { CartContext, EvaluatedPromotion, ShippingConfig, ShippingZoneRule 
 import { fetchPosScan, type PosScanDto } from "@/services/pos/posScanApi";
 import { adminFetchJson, getAdminSession } from "@/services/auth/adminApi";
 import { postSalesQuoteAsPos } from "@/services/sales/salesQuoteApi";
+import {
+  searchVariantsForTransaction,
+  type VariantTransactionSearchHit,
+} from "@/services/catalog/variantTransactionSearch";
 
 type BackendSalesInvoiceResponse = {
   id: number;
@@ -40,9 +44,12 @@ type ScanMode = "hid" | "camera" | "manual";
 
 export default function AdminPOS() {
   const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 200 }), []);
-  const { data: customerData, reload: reloadCustomers } = useService(() => adminCustomers.list(), []);
+  const { data: customerData, reload: reloadCustomers } = useService(
+    () => adminCustomers.list({ pageSize: 100 }),
+    [],
+  );
   const storeProducts = productData?.items ?? [];
-  const customers = customerData ?? [];
+  const customers = customerData?.items ?? [];
   const [lines, setLines] = useState<POSCartLine[]>([]);
   const [scanMode, setScanMode] = useState<ScanMode>("hid");
   const [barcodeInput, setBarcodeInput] = useState("");
@@ -67,6 +74,12 @@ export default function AdminPOS() {
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const customerCountRef = useState({ n: customers.length })[0];
   const barcodeRef = useRef<HTMLInputElement>(null);
+  const [posVariantHits, setPosVariantHits] = useState<VariantTransactionSearchHit[]>([]);
+  const [posVariantLoading, setPosVariantLoading] = useState(false);
+  const [posVariantSearchErr, setPosVariantSearchErr] = useState<string | null>(null);
+  const posSearchDebounceRef = useRef<number>(0);
+  const posSearchAbortRef = useRef<AbortController | null>(null);
+  const posSearchSeqRef = useRef(0);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [posVoucherCode, setPosVoucherCode] = useState("");
   const [backendPromotions, setBackendPromotions] = useState<Promotion[]>([]);
@@ -99,10 +112,67 @@ export default function AdminPOS() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customers.length]);
 
-  const productCategory = useMemo(
-    () => Object.fromEntries(storeProducts.map((p) => [p.id, p.categoryId])),
-    [storeProducts],
-  );
+  const productCategory = useMemo(() => {
+    const m = Object.fromEntries(storeProducts.map((p) => [p.id, p.categoryId]));
+    for (const h of posVariantHits) {
+      if (h.categoryId) m[h.productId] = h.categoryId;
+    }
+    return m;
+  }, [storeProducts, posVariantHits]);
+
+  useEffect(() => {
+    const q = search.trim();
+    window.clearTimeout(posSearchDebounceRef.current);
+    if (q.length < 2) {
+      posSearchAbortRef.current?.abort();
+      setPosVariantHits([]);
+      setPosVariantLoading(false);
+      setPosVariantSearchErr(null);
+      return;
+    }
+    posSearchDebounceRef.current = window.setTimeout(() => {
+      posSearchAbortRef.current?.abort();
+      const ac = new AbortController();
+      posSearchAbortRef.current = ac;
+      const seq = ++posSearchSeqRef.current;
+      setPosVariantLoading(true);
+      setPosVariantSearchErr(null);
+      void searchVariantsForTransaction({ search: q, context: "pos", page: 0, size: 40, signal: ac.signal })
+        .then((res) => {
+          if (seq !== posSearchSeqRef.current) return;
+          setPosVariantHits(res.items);
+        })
+        .catch((e: unknown) => {
+          if (e instanceof Error && e.name === "AbortError") return;
+          if (seq !== posSearchSeqRef.current) return;
+          setPosVariantHits([]);
+          setPosVariantSearchErr(e instanceof Error ? e.message : "Lỗi tìm kiếm");
+        })
+        .finally(() => {
+          if (seq === posSearchSeqRef.current) setPosVariantLoading(false);
+        });
+    }, 250);
+    return () => window.clearTimeout(posSearchDebounceRef.current);
+  }, [search]);
+
+  const addProductByVariantSearchHit = (hit: VariantTransactionSearchHit) => {
+    const variant = {
+      id: hit.variantId,
+      code: hit.variantCode,
+      name: hit.variantName,
+      sellPrice: hit.sellPrice,
+      stock: hit.stockQty,
+      minStock: hit.minStockQty,
+      sellUnit: hit.sellUnit,
+      importUnit: hit.importUnit,
+      piecesPerImportUnit: hit.piecesPerUnit,
+      costPrice: hit.costPrice,
+      expiryDays: hit.expiryDays ?? 0,
+      isDefault: false,
+      isSellable: hit.isSellable,
+    };
+    addProductByVariant(hit.productId, hit.productName, variant as (typeof storeProducts)[number]["variants"][number]);
+  };
 
   useEffect(() => {
     let cancel = false;
@@ -952,31 +1022,83 @@ export default function AdminPOS() {
 
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm tên sản phẩm..."
-                className="w-full h-8 pl-9 pr-3 text-sm bg-muted rounded-md focus:outline-none focus:ring-1 focus:ring-ring" />
+              <input
+                data-testid="pos-product-search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Tìm SP / variant (≥2 ký tự — backend)…"
+                className="w-full h-8 pl-9 pr-3 text-sm bg-muted rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
+              />
             </div>
+            {posVariantSearchErr ? (
+              <p className="text-[10px] text-danger">{posVariantSearchErr}</p>
+            ) : null}
           </div>
 
           <div className="flex-1 overflow-y-auto scrollbar-thin p-2">
-            <div className="grid grid-cols-2 gap-1.5">
-              {filteredProducts.map((product) => {
-                const dv = product.variants.find((v) => v.isDefault) || product.variants[0];
-                const isOutOfStock = dv.stock === 0;
-                return (
-                  <button key={product.id} disabled={isOutOfStock} onClick={() => addProductByVariant(product.id, product.name, dv)}
-                    className={cn("text-left p-2 rounded-md border text-xs transition-all",
-                      isOutOfStock ? "opacity-50 cursor-not-allowed bg-muted" : "hover:border-primary hover:shadow-sm bg-background active:scale-[0.98]")}>
-                    <p className="font-medium truncate">{product.name}</p>
-                    <p className="text-muted-foreground truncate">{dv.name}</p>
-                    <div className="flex items-center justify-between mt-1">
-                      <span className="font-bold text-primary">{formatVND(dv.sellPrice)}</span>
-                      {isOutOfStock ? <StatusBadge status="out-of-stock" size="sm" /> :
-                        dv.stock <= dv.minStock ? <StatusBadge status="low-stock" label={`${dv.stock}`} size="sm" /> : null}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            {search.trim().length >= 2 ? (
+              <div>
+                {posVariantLoading ? (
+                  <p className="text-[10px] text-muted-foreground px-1 py-2">Đang tìm variant (backend)…</p>
+                ) : null}
+                <div className="grid grid-cols-2 gap-1.5" data-testid="pos-variant-search-hits">
+                  {posVariantHits.map((hit) => {
+                    const isOutOfStock = hit.stockQty === 0;
+                    return (
+                      <button
+                        key={hit.variantId}
+                        type="button"
+                        data-testid={`pos-variant-hit-${hit.variantCode}`}
+                        data-variant-id={hit.variantId}
+                        disabled={isOutOfStock}
+                        onClick={() => addProductByVariantSearchHit(hit)}
+                        className={cn(
+                          "text-left p-2 rounded-md border text-xs transition-all",
+                          isOutOfStock
+                            ? "opacity-50 cursor-not-allowed bg-muted"
+                            : "hover:border-primary hover:shadow-sm bg-background active:scale-[0.98]",
+                        )}
+                      >
+                        <p className="font-medium truncate">{hit.productName}</p>
+                        <p className="text-muted-foreground truncate font-mono text-[10px]">{hit.variantCode}</p>
+                        <p className="text-muted-foreground truncate">{hit.variantName}</p>
+                        <div className="flex items-center justify-between mt-1">
+                          <span className="font-bold text-primary">{formatVND(hit.sellPrice)}</span>
+                          {isOutOfStock ? (
+                            <StatusBadge status="out-of-stock" size="sm" />
+                          ) : hit.stockQty <= hit.minStockQty ? (
+                            <StatusBadge status="low-stock" label={`${hit.stockQty}`} size="sm" />
+                          ) : null}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {!posVariantLoading && posVariantHits.length === 0 && !posVariantSearchErr ? (
+                  <p className="text-[11px] text-muted-foreground px-1 py-2">Không có variant khớp tìm kiếm.</p>
+                ) : null}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-1.5">
+                {filteredProducts.map((product) => {
+                  const dv = product.variants.find((v) => v.isDefault) || product.variants[0];
+                  const isOutOfStock = dv.stock === 0;
+                  return (
+                    <button key={product.id} disabled={isOutOfStock} onClick={() => addProductByVariant(product.id, product.name, dv)}
+                      className={cn("text-left p-2 rounded-md border text-xs transition-all",
+                        isOutOfStock ? "opacity-50 cursor-not-allowed bg-muted" : "hover:border-primary hover:shadow-sm bg-background active:scale-[0.98]")}>
+                      <p className="font-medium truncate">{product.name}</p>
+                      <p className="text-muted-foreground truncate">{dv.name}</p>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="font-bold text-primary">{formatVND(dv.sellPrice)}</span>
+                        {isOutOfStock ? <StatusBadge status="out-of-stock" size="sm" /> :
+                          dv.stock <= dv.minStock ? <StatusBadge status="low-stock" label={`${dv.stock}`} size="sm" /> : null}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 

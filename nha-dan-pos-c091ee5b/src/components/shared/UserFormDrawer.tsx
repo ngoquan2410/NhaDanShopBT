@@ -4,12 +4,21 @@ import type { UserAccount } from "@/lib/mock-data";
 import { toast } from "sonner";
 import { validateRequired } from "@/lib/validation";
 import { cn } from "@/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { adminRoles } from "@/services";
+import type { AdminRoleOption } from "@/services/adminBackend";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   user?: UserAccount | null;
-  onSave: (input: Partial<UserAccount> & Pick<UserAccount, "fullName" | "role"> & { password?: string }) => Promise<void>;
+  onSave: (input: Partial<UserAccount> & Pick<UserAccount, "fullName"> & { password?: string; roleName: string }) => Promise<void>;
 }
 
 const inputCls = "w-full h-9 px-3 text-sm border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60";
@@ -22,17 +31,54 @@ function validateUsername(v: string): string | null {
   return null;
 }
 
-export function UserFormDrawer({ open, onClose, user }: Props) {
+export function UserFormDrawer({ open, onClose, user, onSave }: Props) {
   const [form, setForm] = useState({
-    username: "", fullName: "", role: "staff" as UserAccount["role"], active: true, totpEnabled: false, password: "",
+    username: "", fullName: "", roleName: "ROLE_STAFF", active: true, totpEnabled: false, password: "",
   });
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [roleOptions, setRoleOptions] = useState<AdminRoleOption[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [rolesError, setRolesError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (user) setForm({ username: user.username, fullName: user.fullName, role: user.role, active: user.active, totpEnabled: user.totpEnabled, password: "" });
-    else setForm({ username: "", fullName: "", role: "staff", active: true, totpEnabled: false, password: "" });
+    if (user) {
+      setForm({
+        username: user.username,
+        fullName: user.fullName,
+        roleName: user.backendRoleName ?? (user.role === "admin" ? "ROLE_ADMIN" : "ROLE_STAFF"),
+        active: user.active,
+        totpEnabled: user.totpEnabled,
+        password: "",
+      });
+    } else {
+      setForm({ username: "", fullName: "", roleName: "ROLE_STAFF", active: true, totpEnabled: false, password: "" });
+    }
     setTouched({});
   }, [user, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setRolesLoading(true);
+    setRolesError(null);
+    adminRoles.list()
+      .then((rows) => {
+        if (cancelled) return;
+        setRoleOptions(rows);
+        if (!user && rows.some((r) => r.name === "ROLE_STAFF")) {
+          setForm((prev) => ({ ...prev, roleName: "ROLE_STAFF" }));
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setRolesError(err instanceof Error ? err.message : "Không tải được danh sách vai trò");
+        setRoleOptions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setRolesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [open, user]);
 
   const errors = useMemo(() => ({
     fullName: validateRequired(form.fullName, "Họ tên"),
@@ -45,6 +91,9 @@ export function UserFormDrawer({ open, onClose, user }: Props) {
   const submit = async () => {
     setTouched({ fullName: true, username: true });
     if (!isValid) { toast.error("Vui lòng kiểm tra lại thông tin"); return; }
+    if (rolesLoading) { toast.error("Danh sách vai trò đang tải"); return; }
+    if (rolesError) { toast.error("Không thể lưu vì chưa tải được vai trò"); return; }
+    if (!form.roleName) { toast.error("Vui lòng chọn vai trò"); return; }
     try {
       await onSave({ ...form, id: user?.id });
       toast.success(user ? "Đã cập nhật người dùng" : "Đã thêm người dùng");
@@ -83,10 +132,21 @@ export function UserFormDrawer({ open, onClose, user }: Props) {
           <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="••••••" className={inputCls} />
         </Field>}
         <Field label="Vai trò">
-          <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value as UserAccount["role"] })} className={inputCls}>
-            <option value="staff">Nhân viên</option>
-            <option value="admin">Admin</option>
-          </select>
+          <Select
+            value={form.roleName}
+            onValueChange={(v) => setForm({ ...form, roleName: v })}
+            disabled={rolesLoading || !!rolesError}
+          >
+            <SelectTrigger className="w-full h-9 text-sm">
+              <SelectValue placeholder={rolesLoading ? "Đang tải vai trò..." : "Chọn vai trò"} />
+            </SelectTrigger>
+            <SelectContent>
+              {roleOptions.map((role) => (
+                <SelectItem key={role.id || role.name} value={role.name}>{role.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {rolesError && <p className="text-[11px] text-danger mt-1">Không tải được vai trò: {rolesError}</p>}
         </Field>
         <div className="space-y-2">
           <label className="flex items-center gap-2 text-sm">

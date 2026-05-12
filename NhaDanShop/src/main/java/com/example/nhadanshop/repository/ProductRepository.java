@@ -134,29 +134,62 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             """)
     boolean isProductStructurallyUsedCore(@Param("productId") Long productId);
 
+    /**
+     * Paginated product search. Matches product name/code and, via EXISTS, variant
+     * code/name. When {@code restrictVariantMatchToActiveSellable} is true (anonymous /
+     * customer storefront), only {@code active} and sellable variants participate in
+     * the EXISTS branch. When false (ROLE_ADMIN or ROLE_STAFF — set by controller),
+     * any variant row may match, so admin pickers can find products by inactive or
+     * non-sellable SKU text without widening product active/includeInactive rules.
+     */
     @Query(
             value = """
                     SELECT p FROM Product p
                     WHERE (:includeInactive = true OR p.active = true)
                       AND (:categoryId IS NULL OR p.category.id = :categoryId)
                       AND (:productType IS NULL OR p.productType = :productType)
+                      AND (:restrictVariantMatchToActiveSellable = false
+                           OR EXISTS (SELECT 1 FROM ProductVariant vv
+                                      WHERE vv.product.id = p.id
+                                        AND vv.active = true
+                                        AND (vv.isSellable IS NULL OR vv.isSellable = true)))
                       AND (COALESCE(:search, '') = ''
                            OR LOWER(p.name) LIKE LOWER(CONCAT('%', :search, '%'))
-                           OR LOWER(p.code) LIKE LOWER(CONCAT('%', :search, '%')))
+                           OR LOWER(p.code) LIKE LOWER(CONCAT('%', :search, '%'))
+                           OR EXISTS (SELECT 1 FROM ProductVariant v
+                                      WHERE v.product.id = p.id
+                                        AND (:restrictVariantMatchToActiveSellable = false
+                                             OR (v.active = true
+                                                 AND (v.isSellable IS NULL OR v.isSellable = true)))
+                                        AND (LOWER(v.variantCode) LIKE LOWER(CONCAT('%', :search, '%'))
+                                             OR LOWER(v.variantName) LIKE LOWER(CONCAT('%', :search, '%')))))
                     """,
             countQuery = """
                     SELECT count(p) FROM Product p
                     WHERE (:includeInactive = true OR p.active = true)
                       AND (:categoryId IS NULL OR p.category.id = :categoryId)
                       AND (:productType IS NULL OR p.productType = :productType)
+                      AND (:restrictVariantMatchToActiveSellable = false
+                           OR EXISTS (SELECT 1 FROM ProductVariant vv
+                                      WHERE vv.product.id = p.id
+                                        AND vv.active = true
+                                        AND (vv.isSellable IS NULL OR vv.isSellable = true)))
                       AND (COALESCE(:search, '') = ''
                            OR LOWER(p.name) LIKE LOWER(CONCAT('%', :search, '%'))
-                           OR LOWER(p.code) LIKE LOWER(CONCAT('%', :search, '%')))
+                           OR LOWER(p.code) LIKE LOWER(CONCAT('%', :search, '%'))
+                           OR EXISTS (SELECT 1 FROM ProductVariant v
+                                      WHERE v.product.id = p.id
+                                        AND (:restrictVariantMatchToActiveSellable = false
+                                             OR (v.active = true
+                                                 AND (v.isSellable IS NULL OR v.isSellable = true)))
+                                        AND (LOWER(v.variantCode) LIKE LOWER(CONCAT('%', :search, '%'))
+                                             OR LOWER(v.variantName) LIKE LOWER(CONCAT('%', :search, '%')))))
                     """)
     Page<Product> searchProducts(
             @Param("search") String search,
             @Param("categoryId") Long categoryId,
             @Param("includeInactive") boolean includeInactive,
             @Param("productType") ProductType productType,
+            @Param("restrictVariantMatchToActiveSellable") boolean restrictVariantMatchToActiveSellable,
             Pageable pageable);
 }

@@ -18,7 +18,7 @@ import { PromotionFormShell } from "@/components/promotions/PromotionFormShell";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { Plus, Tags, Calendar, Pencil, Trash2, Power } from "lucide-react";
 import { toast } from "sonner";
-import { categories as categoryService, products as productService, promotionsCrud } from "@/services";
+import { categories as categoryService, promotionsCrud } from "@/services";
 
 const TYPE_ICON_BG: Record<PromotionType, string> = {
   percent: "bg-primary-soft text-primary",
@@ -41,12 +41,9 @@ export default function AdminPromotions() {
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const { data: categoryData } = useService(() => categoryService.list({ active: false }), []);
-  const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 200 }), []);
   const categories = categoryData?.items ?? [];
-  const products = productData?.items ?? [];
 
   const categoryNames = useMemo(() => Object.fromEntries(categories.map((c) => [c.id, c.name])), [categories]);
-  const productNames = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p.name])), [products]);
 
   useEffect(() => {
     let cancel = false;
@@ -182,7 +179,7 @@ export default function AdminPromotions() {
         <div className="space-y-2">
           {promoList.map((p) => {
             const summary = formatPromotionSummary(p);
-            const scopeText = formatScope(p, { categoryNames, productNames });
+            const scopeText = formatScope(p, { categoryNames });
             return (
               <div key={p.id} className="bg-card rounded-lg border p-4 hover:shadow-sm transition-shadow">
                 <div className="flex items-start justify-between gap-3">

@@ -17,9 +17,10 @@ import type { Invoice, InvoiceLine, InvoiceBreakdown } from "@/lib/mock-data";
 import type { PagedResult, ID } from "@/services/types";
 import { invoiceActions } from "@/lib/store";
 import { getStoreState } from "@/lib/store";
+import { localToday, toLocalDateString } from "@/lib/localDate";
 
 function isoDayRolling(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localToday();
 }
 
 function buildBreakdown(input: CreateInvoiceInput): InvoiceBreakdown {
@@ -70,7 +71,7 @@ function buildLines(input: CreateInvoiceInput): InvoiceLine[] {
 }
 
 function generateNumber(): string {
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const date = toLocalDateString().replace(/-/g, "");
   const rand = Math.floor(Math.random() * 900 + 100);
   return `HD-${date}-${rand}`;
 }

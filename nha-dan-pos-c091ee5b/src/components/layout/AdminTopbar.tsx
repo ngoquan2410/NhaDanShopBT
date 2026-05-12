@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { addDays } from "date-fns";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useService } from "@/hooks/useService";
 import { adminCustomers, inventory, invoices, pendingOrders, products } from "@/services";
 import { cn } from "@/lib/utils";
@@ -45,10 +46,9 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const { data: topbarData, reload: reloadTopbar } = useService(async () => {
-    const [productPage, invoicePage, customerRows, inventoryRows, pending] = await Promise.all([
-      products.list({ page: 1, pageSize: 50 }),
+    const [invoicePage, customerRows, inventoryRows, pending] = await Promise.all([
       invoices.list({ page: 1, pageSize: 20 }),
-      adminCustomers.list(),
+      adminCustomers.list({ pageSize: 50 }),
       inventory.listInventoryProjections(),
       pendingOrders.list({ page: 1, pageSize: 400 }),
     ]);
@@ -76,9 +76,8 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
     expirySoonLots.sort((a, b) => a.expiryDate.localeCompare(b.expiryDate));
 
     return {
-      products: productPage.items,
       invoices: invoicePage.items,
-      customers: customerRows,
+      customers: customerRows.items,
       pendingOrdersCount: pending.items.filter(
         (o) => o.status === "pending_payment" || o.status === "waiting_confirm" || o.status === "paid_auto",
       ).length,
@@ -99,7 +98,32 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
     window.addEventListener(ADMIN_BADGES_REFRESH_EVENT, onBadges);
     return () => window.removeEventListener(ADMIN_BADGES_REFRESH_EVENT, onBadges);
   }, [reloadTopbar]);
-  const topbar = topbarData ?? { products: [], invoices: [], customers: [], pendingOrdersCount: 0, lowStockVariants: [], nearExpiryLots: [] };
+  const topbar = topbarData ?? { invoices: [], customers: [], pendingOrdersCount: 0, lowStockVariants: [], nearExpiryLots: [] };
+
+  const debouncedSearchQ = useDebouncedValue(searchQ, 250);
+  const [productSearchHits, setProductSearchHits] = useState<
+    { id: string; name: string; code: string; categoryName?: string | null; variants: { code: string; name: string }[] }[]
+  >([]);
+
+  useEffect(() => {
+    const t = debouncedSearchQ.trim();
+    if (t.length < 2) {
+      setProductSearchHits([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const page = await products.list({ page: 1, pageSize: 8, query: t });
+        if (!cancelled) setProductSearchHits(page.items);
+      } catch {
+        if (!cancelled) setProductSearchHits([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSearchQ]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -167,20 +191,13 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
   const hits: SearchHit[] = useMemo(() => {
     const q = searchQ.trim().toLowerCase();
     if (!q) return [];
-    const productHits: SearchHit[] = topbar.products
-      .filter(p =>
-        p.name.toLowerCase().includes(q) ||
-        p.code.toLowerCase().includes(q) ||
-        p.variants.some(v => v.code.toLowerCase().includes(q) || v.name.toLowerCase().includes(q))
-      )
-      .slice(0, 5)
-      .map(p => ({
-        kind: "product",
-        id: p.id,
-        title: p.name,
-        sub: `${p.code} · ${p.categoryName} · ${p.variants.length} phân loại`,
-        href: `/admin/products/${p.id}`,
-      }));
+    const productHits: SearchHit[] = productSearchHits.slice(0, 5).map((p) => ({
+      kind: "product",
+      id: p.id,
+      title: p.name,
+      sub: `${p.code} · ${p.categoryName ?? "—"} · ${p.variants.length} phân loại`,
+      href: `/admin/products/${p.id}`,
+    }));
     const invoiceHits: SearchHit[] = topbar.invoices
       .filter(i => i.number.toLowerCase().includes(q) || i.customerName.toLowerCase().includes(q))
       .slice(0, 5)
@@ -202,7 +219,7 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
         href: `/admin/customers?q=${encodeURIComponent(c.name)}`,
       }));
     return [...productHits, ...invoiceHits, ...customerHits];
-  }, [searchQ, topbar]);
+  }, [searchQ, topbar, productSearchHits]);
 
   useEffect(() => { setActiveIdx(0); }, [searchQ]);
 

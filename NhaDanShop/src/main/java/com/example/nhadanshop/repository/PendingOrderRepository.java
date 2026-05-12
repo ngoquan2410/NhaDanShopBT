@@ -1,11 +1,13 @@
 package com.example.nhadanshop.repository;
 
 import com.example.nhadanshop.entity.PendingOrder;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -33,6 +35,10 @@ public interface PendingOrderRepository extends JpaRepository<PendingOrder, Long
 
     Optional<PendingOrder> findByOrderNo(String orderNo);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM PendingOrder p WHERE p.id = :id")
+    Optional<PendingOrder> findByIdForUpdate(@Param("id") Long id);
+
     /**
      * Batch-hydrate pending orders for list views: items (+ lazy batch), createdBy.
      * Does not touch {@link PendingOrder#getInvoice()} — avoids loading sales invoice lines/allocations.
@@ -52,6 +58,24 @@ public interface PendingOrderRepository extends JpaRepository<PendingOrder, Long
                OR UPPER(COALESCE(p.paymentReference, '')) = UPPER(:code)
             """)
     Optional<PendingOrder> findByOrderCodeOrPaymentReference(@Param("code") String code);
+
+    @Query("""
+            SELECT p
+            FROM PendingOrder p
+            WHERE p.status IN :statuses
+              AND p.invoice IS NULL
+              AND p.expiresAt > :now
+              AND (:search IS NULL OR :search = ''
+                   OR UPPER(p.orderNo) LIKE UPPER(CONCAT('%', :search, '%'))
+                   OR UPPER(COALESCE(p.paymentReference, '')) LIKE UPPER(CONCAT('%', :search, '%'))
+                   OR UPPER(COALESCE(p.customerName, '')) LIKE UPPER(CONCAT('%', :search, '%'))
+                   OR UPPER(COALESCE(p.customerPhone, '')) LIKE UPPER(CONCAT('%', :search, '%')))
+            """)
+    Page<PendingOrder> findLinkableCandidates(
+            @Param("statuses") Collection<PendingOrder.Status> statuses,
+            @Param("now") LocalDateTime now,
+            @Param("search") String search,
+            Pageable pageable);
 
     /**
      * Tổng qty đang bị giữ bởi PENDING orders, group by productId.

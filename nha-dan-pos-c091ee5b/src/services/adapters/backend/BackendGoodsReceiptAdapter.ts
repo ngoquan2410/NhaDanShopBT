@@ -54,6 +54,9 @@ type BeReceipt = {
   status: string | null;
   canDelete: boolean;
   deleteBlockReason: string | null;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
+  voidReason?: string | null;
 };
 
 type SpringPage = {
@@ -104,6 +107,9 @@ function mapReceipt(b: BeReceipt): GoodsReceipt {
   const ship = Number(b.shippingFee ?? 0);
   const vat = Number(b.totalVat ?? 0);
   const sub = Math.max(0, grand - ship - vat);
+  const voidedAtRaw = b.voidedAt;
+  const voidedAt =
+    voidedAtRaw && String(voidedAtRaw).length > 0 ? String(voidedAtRaw).slice(0, 19) : undefined;
   return {
     id: String(b.id),
     number: b.receiptNo,
@@ -120,6 +126,9 @@ function mapReceipt(b: BeReceipt): GoodsReceipt {
     createdBy: b.createdBy ?? undefined,
     canDelete: b.canDelete,
     deleteBlockReason: b.deleteBlockReason ?? undefined,
+    voidedAt,
+    voidedBy: b.voidedBy != null && String(b.voidedBy).length > 0 ? String(b.voidedBy) : undefined,
+    voidReason: b.voidReason != null && String(b.voidReason).length > 0 ? String(b.voidReason) : undefined,
   };
 }
 
@@ -136,6 +145,8 @@ export class BackendGoodsReceiptAdapter implements GoodsReceiptService {
     const to = params?.dateTo ?? params?.dateRange?.to;
     if (from) u.set("from", from.length > 10 ? from.slice(0, 10) : from);
     if (to) u.set("to", to.length > 10 ? to.slice(0, 10) : to);
+    const text = params?.query?.trim();
+    if (text) u.set("search", text);
     const q = u.toString();
     return q ? `${API}?${q}` : API;
   }

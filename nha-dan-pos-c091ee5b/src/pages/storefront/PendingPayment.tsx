@@ -16,10 +16,14 @@ import { accountApi } from "@/services/account/accountApi";
 
 const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   cash: "Tiền mặt",
+  cod: "Thanh toán khi nhận hàng",
+  cash_on_delivery: "Thanh toán khi nhận hàng",
   bank_transfer: "Chuyển khoản ngân hàng",
   momo: "Ví MoMo",
   zalopay: "ZaloPay",
 };
+
+type SwitchableOnlinePaymentMethod = Extract<PaymentMethod, "bank_transfer" | "momo" | "zalopay">;
 
 const QR_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -51,6 +55,7 @@ export default function PendingPaymentPage() {
   const [walletImgFailed, setWalletImgFailed] = useState(false);
   const [changingMethod, setChangingMethod] = useState(false);
   const autoRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const orderStatusRef = useRef<PendingOrder["status"] | null>(null);
 
   // Centralized QR (re)generator. Used by initial load, manual retry, and
   // the timed auto-refresh. Sets loading/error states so the UI can disable
@@ -74,7 +79,16 @@ export default function PendingPaymentPage() {
       const result = await vietQr.generate({
         amount: o.pricingBreakdownSnapshot.total,
         transferContent: o.paymentReference,
-        cacheKey: `${o.id}-${o.code}-${o.pricingBreakdownSnapshot.total}-${nextAttempt}-${Date.now()}`,
+        cacheKey: [
+          o.id,
+          o.code,
+          o.paymentMethod,
+          o.pricingBreakdownSnapshot.total,
+          settings.vietQrBankCode,
+          settings.accountNumber,
+          settings.qrTemplate ?? "compact2",
+          nextAttempt,
+        ].join("-"),
       });
       setQr(result);
       setQrLastGeneratedAt(Date.now());
@@ -98,10 +112,8 @@ export default function PendingPaymentPage() {
     }
   };
 
-  // Reload the order whenever:
-  //  - the route id changes
-  //  - the user returns to this tab
-  //  - backend polling detects a payment-event-driven status change
+  // Poll only order/settings state. QR generation is handled by a separate
+  // effect so polling/focus does not create a new payment reference or QR URL.
   useEffect(() => {
     if (!id) return;
     let alive = true;
@@ -110,8 +122,9 @@ export default function PendingPaymentPage() {
       const fromService = await pendingOrdersService.get(id);
       const settings = await storeSettings.getPaymentSettings();
       if (!alive) return;
-      const prevStatus = order?.status;
+      const prevStatus = orderStatusRef.current;
       setOrder(fromService);
+      orderStatusRef.current = fromService?.status ?? null;
       setBank(settings);
       setLoading(false);
 
@@ -123,16 +136,6 @@ export default function PendingPaymentPage() {
         }
       }
 
-      if (
-        fromService &&
-        fromService.paymentMethod === "bank_transfer" &&
-        fromService.status === "pending_payment" &&
-        settings?.qrEnabled &&
-        !qr &&
-        !qrLoading
-      ) {
-        await regenerateQr(fromService, settings, qrAttempt);
-      }
     };
 
     void fetchAll();
@@ -152,7 +155,22 @@ export default function PendingPaymentPage() {
       window.clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, qrAttempt]);
+  }, [id]);
+
+  useEffect(() => {
+    if (
+      !order ||
+      order.paymentMethod !== "bank_transfer" ||
+      order.status !== "pending_payment" ||
+      !bank?.qrEnabled ||
+      qr ||
+      qrLoading
+    ) {
+      return;
+    }
+    void regenerateQr(order, bank, qrAttempt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order?.id, order?.paymentMethod, order?.status, order?.paymentReference, order?.pricingBreakdownSnapshot.total, bank?.qrEnabled, bank?.vietQrBankCode, bank?.accountNumber, bank?.qrTemplate, qr, qrAttempt, qrLoading]);
 
   // Auto-refresh VietQR every 15 minutes while still in pending_payment so banking
   // apps that cache an "expired" payload always have a fresh code to scan.
@@ -170,10 +188,9 @@ export default function PendingPaymentPage() {
       return;
     }
     autoRefreshTimer.current = setInterval(() => {
+      setQr(null);
       setQrAttempt((n) => {
-        const next = n + 1;
-        void regenerateQr(order, bank, next);
-        return next;
+        return n + 1;
       });
     }, QR_REFRESH_INTERVAL_MS);
     return () => {
@@ -438,9 +455,7 @@ export default function PendingPaymentPage() {
                         onClick={() => {
                           setQr(null);
                           setQrAttempt((n) => {
-                            const next = n + 1;
-                            void regenerateQr(order, bank, next);
-                            return next;
+                            return n + 1;
                           });
                         }}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-primary/40 bg-primary/5 text-primary text-xs font-medium hover:bg-primary/10 transition disabled:opacity-50"
@@ -467,9 +482,7 @@ export default function PendingPaymentPage() {
                         onClick={() => {
                           setQr(null);
                           setQrAttempt((n) => {
-                            const next = n + 1;
-                            void regenerateQr(order, bank, next);
-                            return next;
+                            return n + 1;
                           });
                         }}
                         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-danger/50 text-danger text-[11px] hover:bg-danger/5 disabled:opacity-50"
@@ -736,9 +749,9 @@ function MethodSwitcher({
 }: {
   currentMethod: PaymentMethod;
   busy: boolean;
-  onChange: (next: PaymentMethod) => void;
+  onChange: (next: SwitchableOnlinePaymentMethod) => void;
 }) {
-  const options: PaymentMethod[] = ["bank_transfer", "momo", "zalopay"];
+  const options: SwitchableOnlinePaymentMethod[] = ["bank_transfer", "momo", "zalopay"];
   return (
     <div className="mt-4 pt-3 border-t">
       <p className="text-[11px] font-medium text-muted-foreground mb-2">

@@ -3,6 +3,7 @@
 // needs to swap the data source (storage), not redesign the UI or rules.
 
 import { formatVND } from "./format";
+import { addLocalCalendarDays, localToday, toLocalDateString } from "./localDate";
 
 // ===== Shared =====
 export type PromotionScope =
@@ -96,8 +97,8 @@ export const PROMOTION_TYPE_LABELS: Record<PromotionType, string> = {
 
 // ===== Defaults =====
 export function makeEmptyPromotion(type: PromotionType): Promotion {
-  const today = new Date().toISOString().slice(0, 10);
-  const next = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  const today = localToday();
+  const next = addLocalCalendarDays(today, 7);
   const base = {
     id: "",
     name: "",
@@ -128,8 +129,8 @@ export function migratePromotion(raw: any): Promotion {
     name: raw.name ?? "",
     description: raw.description ?? "",
     active: raw.active ?? true,
-    startDate: raw.startDate ?? new Date().toISOString().slice(0, 10),
-    endDate: raw.endDate ?? new Date().toISOString().slice(0, 10),
+    startDate: raw.startDate ?? localToday(),
+    endDate: raw.endDate ?? localToday(),
     scope:
       raw.scope?.kind ? raw.scope :
       raw.scope === "categories" ? { kind: "categories", categoryIds: raw.scopeIds ?? [] } :
@@ -307,7 +308,7 @@ export interface PromotionApplication {
 }
 
 function isWithinDate(p: Promotion, now = new Date()): boolean {
-  const today = now.toISOString().slice(0, 10);
+  const today = toLocalDateString(now);
   return p.active && today >= p.startDate && today <= p.endDate;
 }
 

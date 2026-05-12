@@ -1,5 +1,6 @@
 package com.example.nhadanshop.service;
 
+import com.example.nhadanshop.exception.BusinessConflictException;
 import com.example.nhadanshop.entity.Category;
 import com.example.nhadanshop.entity.InventoryReceipt;
 import com.example.nhadanshop.entity.Product;
@@ -124,7 +125,7 @@ class ReceiptDeletionLockingIntegrationTest {
         stockMutationService.syncVariantStockWithBatches(variant.getId());
 
         final Long receiptId = receipt.getId();
-        assertThrows(IllegalStateException.class, () -> inventoryReceiptService.deleteReceipt(receiptId));
+        assertThrows(BusinessConflictException.class, () -> inventoryReceiptService.deleteReceipt(receiptId));
 
         assertTrue(receiptRepository.findById(receiptId).isPresent());
         assertEquals(1, batchRepository.findByReceiptIdOrderByExpiryDateAsc(receiptId).size());

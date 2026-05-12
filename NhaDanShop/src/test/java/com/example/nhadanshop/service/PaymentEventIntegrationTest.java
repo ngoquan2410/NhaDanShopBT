@@ -26,6 +26,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.math.BigDecimal;
@@ -113,7 +114,7 @@ class PaymentEventIntegrationTest {
     }
 
     @Test
-    void webhook_bank_transfer_matching_amount_confirms_and_creates_invoice() throws Exception {
+    void webhook_hyphenated_order_code_exact_amount_auto_confirms() throws Exception {
         when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-001");
         ProductVariant v = mkVariant("PAYEVT-CE");
         ProductBatch batch = mkBatch(v, LocalDate.now().plusDays(30), 50);
@@ -131,10 +132,14 @@ class PaymentEventIntegrationTest {
         PendingOrder refreshed = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
         assertEquals(PendingOrder.Status.CONFIRMED, refreshed.getStatus());
         assertNotNull(refreshed.getInvoice());
+        assertTrue(inventoryMovementRepository.count() > 0);
+        var event = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_CE").orElseThrow();
+        assertEquals(PaymentEvent.Status.LINKED, event.getStatus());
+        assertEquals("casso:webhook", event.getLinkedBy());
     }
 
     @Test
-    void webhook_retry_does_not_duplicate_invoice() throws Exception {
+    void webhook_retry_idempotent_no_duplicate_invoice() throws Exception {
         when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-RP");
         ProductVariant v = mkVariant("PAYEVT-RP");
         mkBatch(v, LocalDate.now().plusDays(30), 5);
@@ -156,7 +161,7 @@ class PaymentEventIntegrationTest {
     }
 
     @Test
-    void webhook_insufficient_amount_does_not_confirm() throws Exception {
+    void webhook_compact_order_code_underpaid_review() throws Exception {
         when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-LOW");
         ProductVariant v = mkVariant("PAYEVT-LOW");
         mkBatch(v, LocalDate.now().plusDays(30), 50);
@@ -166,14 +171,118 @@ class PaymentEventIntegrationTest {
         PendingOrder o = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
 
         BigDecimal low = o.getTotalAmount().subtract(BigDecimal.ONE.max(BigDecimal.ZERO));
+        String compact = o.getOrderNo().replace("-", "");
         JsonNode payload = objectMapper.readTree(String.format("""
                 {"error":0,"data":[{"tid":"PAY_EVT_LOW","description":"%s","amount":%s,"when":"2026-04-24 10:15:30"}]}
-                """, o.getOrderNo(), low.toPlainString()));
+                """, compact, low.toPlainString()));
 
         paymentEventService.ingestCassoPayload(payload, null, "test-secure-token");
         PendingOrder refreshed = pendingOrderRepository.findById(o.getId()).orElseThrow();
         assertEquals(PendingOrder.Status.PENDING_PAYMENT, refreshed.getStatus());
         assertNull(refreshed.getInvoice());
+        var event = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_LOW").orElseThrow();
+        assertEquals(PaymentEvent.Status.MATCHED, event.getStatus());
+        assertNull(event.getLinkedPendingOrder());
+    }
+
+    @Test
+    void webhook_compact_order_code_overpaid_review() throws Exception {
+        when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-HIGH");
+        ProductVariant v = mkVariant("PAYEVT-HIGH");
+        mkBatch(v, LocalDate.now().plusDays(30), 50);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+        var quote = quoteStorefront(v, 1, null);
+        var po = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "bank_transfer", "H", "1"));
+        PendingOrder o = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
+
+        BigDecimal high = o.getTotalAmount().add(BigDecimal.ONE);
+        String compact = o.getOrderNo().replace("-", "");
+        JsonNode payload = objectMapper.readTree(String.format("""
+                {"error":0,"data":[{"tid":"PAY_EVT_HIGH","description":"%s","amount":%s,"when":"2026-04-24 10:15:30"}]}
+                """, compact, high.toPlainString()));
+
+        paymentEventService.ingestCassoPayload(payload, null, "test-secure-token");
+        PendingOrder refreshed = pendingOrderRepository.findById(o.getId()).orElseThrow();
+        assertEquals(PendingOrder.Status.PENDING_PAYMENT, refreshed.getStatus());
+        assertNull(refreshed.getInvoice());
+        assertEquals(0L, salesInvoiceRepository.count());
+        var event = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_HIGH").orElseThrow();
+        assertEquals(PaymentEvent.Status.MATCHED, event.getStatus());
+        assertNull(event.getLinkedPendingOrder());
+    }
+
+    @Test
+    void webhook_multiple_distinct_codes_stays_unmatched() throws Exception {
+        when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-MULTI");
+        ProductVariant v = mkVariant("PAYEVT-MULTI");
+        mkBatch(v, LocalDate.now().plusDays(30), 50);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+        var quoteA = quoteStorefront(v, 1, null);
+        var quoteB = quoteStorefront(v, 1, null);
+        var poA = pendingOrderService.createOrder(poFromQuote(quoteA.quoteId(), "bank_transfer", "A", "1"));
+        var poB = pendingOrderService.createOrder(poFromQuote(quoteB.quoteId(), "bank_transfer", "B", "2"));
+        PendingOrder a = pendingOrderRepository.findById(Long.parseLong(poA.id())).orElseThrow();
+
+        JsonNode payload = objectMapper.readTree(String.format("""
+                {"error":0,"data":[{"tid":"PAY_EVT_MULTI","description":"CK %s %s","amount":%s,"when":"2026-04-24 10:15:30"}]}
+                """, poA.code(), poB.code(), a.getTotalAmount().toPlainString()));
+
+        paymentEventService.ingestCassoPayload(payload, null, "test-secure-token");
+        assertEquals(0L, salesInvoiceRepository.count());
+        assertEquals(PendingOrder.Status.PENDING_PAYMENT, pendingOrderRepository.findById(Long.parseLong(poA.id())).orElseThrow().getStatus());
+        assertEquals(PendingOrder.Status.PENDING_PAYMENT, pendingOrderRepository.findById(Long.parseLong(poB.id())).orElseThrow().getStatus());
+        var event = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_MULTI").orElseThrow();
+        assertNull(event.getMatchedCode());
+        assertEquals(PaymentEvent.Status.UNMATCHED, event.getStatus());
+    }
+
+    @Test
+    void webhook_cancelled_order_does_not_confirm_or_link() throws Exception {
+        when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-CANCEL");
+        ProductVariant v = mkVariant("PAYEVT-CANCEL");
+        mkBatch(v, LocalDate.now().plusDays(30), 50);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+        var quote = quoteStorefront(v, 1, null);
+        var po = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "bank_transfer", "X", "1"));
+        pendingOrderService.cancelOrder(Long.parseLong(po.id()), "cancel");
+        PendingOrder o = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
+
+        JsonNode payload = objectMapper.readTree(String.format("""
+                {"error":0,"data":[{"tid":"PAY_EVT_CANCEL","description":"%s","amount":%s,"when":"2026-04-24 10:15:30"}]}
+                """, o.getOrderNo(), o.getTotalAmount().toPlainString()));
+
+        paymentEventService.ingestCassoPayload(payload, null, "test-secure-token");
+        PendingOrder refreshed = pendingOrderRepository.findById(o.getId()).orElseThrow();
+        assertEquals(PendingOrder.Status.CANCELLED, refreshed.getStatus());
+        assertNull(refreshed.getInvoice());
+        var event = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_CANCEL").orElseThrow();
+        assertEquals(PaymentEvent.Status.MATCHED, event.getStatus());
+        assertNull(event.getLinkedPendingOrder());
+    }
+
+    @Test
+    void webhook_confirmed_order_does_not_create_second_invoice() throws Exception {
+        when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-DONE");
+        ProductVariant v = mkVariant("PAYEVT-DONE");
+        mkBatch(v, LocalDate.now().plusDays(30), 50);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+        var quote = quoteStorefront(v, 1, null);
+        var po = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "bank_transfer", "Y", "1"));
+        pendingOrderService.confirmOrder(Long.parseLong(po.id()), null, "admin");
+        PendingOrder o = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
+        long invoiceBefore = salesInvoiceRepository.count();
+        long movementBefore = inventoryMovementRepository.count();
+
+        JsonNode payload = objectMapper.readTree(String.format("""
+                {"error":0,"data":[{"tid":"PAY_EVT_DONE","description":"%s","amount":%s,"when":"2026-04-24 10:15:30"}]}
+                """, o.getOrderNo(), o.getTotalAmount().toPlainString()));
+
+        paymentEventService.ingestCassoPayload(payload, null, "test-secure-token");
+        assertEquals(invoiceBefore, salesInvoiceRepository.count());
+        assertEquals(movementBefore, inventoryMovementRepository.count());
+        var event = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_DONE").orElseThrow();
+        assertEquals(PaymentEvent.Status.MATCHED, event.getStatus());
+        assertNull(event.getLinkedPendingOrder());
     }
 
     @Test
@@ -241,7 +350,7 @@ class PaymentEventIntegrationTest {
         paymentEventService.ingestCassoPayload(payload, null, "test-secure-token");
 
         PendingOrder refreshed = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
-        assertEquals(PendingOrder.Status.PENDING_PAYMENT, refreshed.getStatus());
+        assertEquals(PendingOrder.Status.PAID_AUTO, refreshed.getStatus());
         assertNull(refreshed.getInvoice());
         assertEquals(invoiceBeforeRetry, salesInvoiceRepository.count());
         assertEquals(movementBeforeRetry, inventoryMovementRepository.count());
@@ -330,7 +439,7 @@ class PaymentEventIntegrationTest {
     }
 
     @Test
-    void manual_link_rejects_non_linkable_pending_statuses() throws Exception {
+    void manual_link_cancelled_confirmed_rejected() throws Exception {
         when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-ML4", "INV-PAYEVT-ML5");
         ProductVariant v = mkVariant("PAYEVT-ML4");
         mkBatch(v, LocalDate.now().plusDays(30), 50);
@@ -404,7 +513,33 @@ class PaymentEventIntegrationTest {
         assertEquals(PendingOrder.Status.PENDING_PAYMENT,
                 pendingOrderRepository.findById(o.getId()).orElseThrow().getStatus());
         var event = paymentEventRepository.findByProviderAndProviderTxId("casso", cassoTid).orElseThrow();
-        assertEquals("auto", event.getLinkedBy());
+        assertEquals(PaymentEvent.Status.MATCHED, event.getStatus());
+        assertNull(event.getLinkedPendingOrder());
+    }
+
+    @Test
+    void linkable_candidates_include_only_eligible_pending_orders() throws Exception {
+        when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-CAND");
+        ProductVariant v = mkVariant("PAYEVT-CAND");
+        mkBatch(v, LocalDate.now().plusDays(30), 80);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+
+        var pending = pendingOrderService.createOrder(poFromQuote(quoteStorefront(v, 1, null).quoteId(), "bank_transfer", "HOTFIX-CAND", "100"));
+        var waiting = pendingOrderService.createOrder(poFromQuote(quoteStorefront(v, 1, null).quoteId(), "bank_transfer", "HOTFIX-CAND", "101"));
+        pendingOrderService.markWaitingConfirm(Long.parseLong(waiting.id()), null);
+        var cancelled = pendingOrderService.createOrder(poFromQuote(quoteStorefront(v, 1, null).quoteId(), "bank_transfer", "HOTFIX-CAND", "102"));
+        pendingOrderService.cancelOrder(Long.parseLong(cancelled.id()), "cancel");
+        var confirmed = pendingOrderService.createOrder(poFromQuote(quoteStorefront(v, 1, null).quoteId(), "bank_transfer", "HOTFIX-CAND", "103"));
+        pendingOrderService.confirmOrder(Long.parseLong(confirmed.id()), null, "admin");
+
+        var page = pendingOrderService.listLinkableCandidates(0, 20, "HOTFIX-CAND", PageRequest.of(0, 20));
+        List<String> codes = page.getContent().stream().map(com.example.nhadanshop.dto.PendingOrderResponse::code).toList();
+
+        assertEquals(2L, page.getTotalElements());
+        assertTrue(codes.contains(pending.code()));
+        assertTrue(codes.contains(waiting.code()));
+        assertFalse(codes.contains(cancelled.code()));
+        assertFalse(codes.contains(confirmed.code()));
     }
 
     private static PendingOrderRequest poFromQuote(String quotePublicId, String payment, String name, String phone) {
@@ -470,6 +605,162 @@ class PaymentEventIntegrationTest {
         v.setIsDefault(true);
         v.setIsSellable(true);
         return variantRepository.save(v);
+    }
+
+    @Test
+    void webhook_compact_order_code_exact_amount_auto_confirms() throws Exception {
+        when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-CMP");
+        ProductVariant v = mkVariant("PAYEVT-CMP");
+        mkBatch(v, LocalDate.now().plusDays(30), 20);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+        var quote = quoteStorefront(v, 1, null);
+        var po = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "bank_transfer", "C", "090"));
+        PendingOrder o = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
+        String compact = o.getOrderNo().replace("-", "");
+
+        JsonNode payload = objectMapper.readTree(String.format("""
+                {"error":0,"data":[{"tid":"PAY_EVT_CMP","description":"CK %s khach","amount":%s,"when":"2026-04-24 10:15:30"}]}
+                """, compact, o.getTotalAmount().toPlainString()));
+
+        paymentEventService.ingestCassoPayload(payload, null, "test-secure-token");
+        PendingOrder refreshed = pendingOrderRepository.findById(o.getId()).orElseThrow();
+        assertEquals(PendingOrder.Status.CONFIRMED, refreshed.getStatus());
+        assertNotNull(refreshed.getInvoice());
+        var event = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_CMP").orElseThrow();
+        assertEquals(PaymentEvent.Status.LINKED, event.getStatus());
+    }
+
+    @Test
+    void webhook_multiple_distinct_codes_in_content_stays_unmatched() throws Exception {
+        ProductVariant v = mkVariant("PAYEVT-MULTI");
+        mkBatch(v, LocalDate.now().plusDays(30), 20);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+        var quote = quoteStorefront(v, 1, null);
+        var po = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "bank_transfer", "M", "091"));
+        PendingOrder o = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
+        String compact = o.getOrderNo().replace("-", "");
+        String other = "DH20991231001";
+
+        JsonNode payload = objectMapper.readTree(String.format("""
+                {"error":0,"data":[{"tid":"PAY_EVT_MULTI","description":"mix %s %s end","amount":%s,"when":"2026-04-24 10:15:30"}]}
+                """, compact, other, o.getTotalAmount().toPlainString()));
+
+        paymentEventService.ingestCassoPayload(payload, null, "test-secure-token");
+        var event = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_MULTI").orElseThrow();
+        assertNull(event.getMatchedCode());
+        assertEquals(PaymentEvent.Status.UNMATCHED, event.getStatus());
+        assertNull(event.getLinkedPendingOrder());
+    }
+
+    @Test
+    void manual_link_exact_sets_paid_auto_no_invoice() throws Exception {
+        when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-EX");
+        ProductVariant v = mkVariant("PAYEVT-EXACT");
+        mkBatch(v, LocalDate.now().plusDays(30), 20);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+        var quote = quoteStorefront(v, 1, null);
+        var po = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "bank_transfer", "E", "092"));
+
+        PendingOrder o = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
+        JsonNode payload = objectMapper.readTree(String.format("""
+                {"error":0,"data":[{"tid":"PAY_EVT_EX","description":"no code here","amount":%s,"when":"2026-04-24 10:15:30"}]}
+                """, o.getTotalAmount().toPlainString()));
+        paymentEventService.ingestCassoPayload(payload, null, "test-secure-token");
+        var event = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_EX").orElseThrow();
+
+        long inv0 = salesInvoiceRepository.count();
+        var linked = paymentEventService.linkToOrder(event.getId(), o.getOrderNo(), "admin");
+        assertFalse(linked.autoConfirmed());
+
+        PendingOrder refreshed = pendingOrderRepository.findById(o.getId()).orElseThrow();
+        assertEquals(PendingOrder.Status.PAID_AUTO, refreshed.getStatus());
+        assertNull(refreshed.getInvoice());
+        assertEquals(inv0, salesInvoiceRepository.count());
+        assertEquals(PaymentEvent.Status.LINKED, paymentEventRepository.findById(event.getId()).orElseThrow().getStatus());
+        assertEquals("EXACT_PAID", linked.pendingOrder().paymentLinkStatus());
+    }
+
+    @Test
+    void manual_link_overpaid_links_review_not_paid_auto() throws Exception {
+        when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-OVR");
+        ProductVariant v = mkVariant("PAYEVT-OVR");
+        mkBatch(v, LocalDate.now().plusDays(30), 20);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+        var quote = quoteStorefront(v, 1, null);
+        var po = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "bank_transfer", "O", "093"));
+        PendingOrder o = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
+        BigDecimal over = o.getTotalAmount().add(new BigDecimal("1"));
+        JsonNode payload = objectMapper.readTree(String.format("""
+                {"error":0,"data":[{"tid":"PAY_EVT_OVR","description":"over","amount":%s,"when":"2026-04-24 10:15:30"}]}
+                """, over.toPlainString()));
+        paymentEventService.ingestCassoPayload(payload, null, "test-secure-token");
+        var event = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_OVR").orElseThrow();
+        var linked = paymentEventService.linkToOrder(event.getId(), o.getOrderNo(), "admin");
+        assertEquals("OVERPAID_LINKED", linked.pendingOrder().paymentLinkStatus());
+        assertEquals(0, linked.pendingOrder().paymentDelta().compareTo(new BigDecimal("1")));
+        PendingOrder refreshed = pendingOrderRepository.findById(o.getId()).orElseThrow();
+        assertEquals(PendingOrder.Status.PENDING_PAYMENT, refreshed.getStatus());
+        assertNull(refreshed.getInvoice());
+    }
+
+    @Test
+    void manual_link_underpaid_links_review_not_paid_auto() throws Exception {
+        when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-UND");
+        ProductVariant v = mkVariant("PAYEVT-UND");
+        mkBatch(v, LocalDate.now().plusDays(30), 20);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+        var quote = quoteStorefront(v, 1, null);
+        var po = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "bank_transfer", "U", "094"));
+        PendingOrder o = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
+        BigDecimal under = o.getTotalAmount().subtract(new BigDecimal("5000"));
+        JsonNode payload = objectMapper.readTree(String.format("""
+                {"error":0,"data":[{"tid":"PAY_EVT_UND","description":"under","amount":%s,"when":"2026-04-24 10:15:30"}]}
+                """, under.toPlainString()));
+        paymentEventService.ingestCassoPayload(payload, null, "test-secure-token");
+        var event = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_UND").orElseThrow();
+        var linked = paymentEventService.linkToOrder(event.getId(), o.getOrderNo(), "admin");
+        assertEquals("UNDERPAID_LINKED", linked.pendingOrder().paymentLinkStatus());
+        assertEquals(0, linked.pendingOrder().paymentDelta().compareTo(new BigDecimal("-5000")));
+        assertEquals(PendingOrder.Status.PENDING_PAYMENT,
+                pendingOrderRepository.findById(o.getId()).orElseThrow().getStatus());
+    }
+
+    @Test
+    void manual_link_over_under_visible_in_pending_response() throws Exception {
+        when(invoiceNumberGenerator.nextInvoiceNo()).thenReturn("INV-PAYEVT-VIS");
+        ProductVariant v = mkVariant("PAYEVT-VIS");
+        mkBatch(v, LocalDate.now().plusDays(30), 20);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+
+        var overQuote = quoteStorefront(v, 1, null);
+        var overPo = pendingOrderService.createOrder(poFromQuote(overQuote.quoteId(), "bank_transfer", "VO", "095"));
+        PendingOrder overOrder = pendingOrderRepository.findById(Long.parseLong(overPo.id())).orElseThrow();
+        JsonNode overPayload = objectMapper.readTree(String.format("""
+                {"error":0,"data":[{"tid":"PAY_EVT_VIS_OVR","description":"visible over","amount":%s,"when":"2026-04-24 10:15:30"}]}
+                """, overOrder.getTotalAmount().add(new BigDecimal("7")).toPlainString()));
+        paymentEventService.ingestCassoPayload(overPayload, null, "test-secure-token");
+        var overEvent = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_VIS_OVR").orElseThrow();
+        paymentEventService.linkToOrder(overEvent.getId(), overOrder.getOrderNo(), "admin");
+        var overResponse = pendingOrderService.getById(overOrder.getId());
+        assertEquals("OVERPAID_LINKED", overResponse.paymentLinkStatus());
+        assertEquals(0, overResponse.paymentDelta().compareTo(new BigDecimal("7")));
+        assertEquals(overEvent.getId(), overResponse.linkedPaymentEventId());
+        assertEquals(0, overResponse.linkedPaymentAmount().compareTo(overEvent.getAmount()));
+
+        var underQuote = quoteStorefront(v, 1, null);
+        var underPo = pendingOrderService.createOrder(poFromQuote(underQuote.quoteId(), "bank_transfer", "VU", "096"));
+        PendingOrder underOrder = pendingOrderRepository.findById(Long.parseLong(underPo.id())).orElseThrow();
+        JsonNode underPayload = objectMapper.readTree(String.format("""
+                {"error":0,"data":[{"tid":"PAY_EVT_VIS_UND","description":"visible under","amount":%s,"when":"2026-04-24 10:15:30"}]}
+                """, underOrder.getTotalAmount().subtract(new BigDecimal("9")).toPlainString()));
+        paymentEventService.ingestCassoPayload(underPayload, null, "test-secure-token");
+        var underEvent = paymentEventRepository.findByProviderAndProviderTxId("casso", "PAY_EVT_VIS_UND").orElseThrow();
+        paymentEventService.linkToOrder(underEvent.getId(), underOrder.getOrderNo(), "admin");
+        var underResponse = pendingOrderService.getById(underOrder.getId());
+        assertEquals("UNDERPAID_LINKED", underResponse.paymentLinkStatus());
+        assertEquals(0, underResponse.paymentDelta().compareTo(new BigDecimal("-9")));
+        assertEquals(underEvent.getId(), underResponse.linkedPaymentEventId());
+        assertEquals(0, underResponse.linkedPaymentAmount().compareTo(underEvent.getAmount()));
     }
 
     private ProductBatch mkBatch(ProductVariant variant, LocalDate expiry, int qty) {

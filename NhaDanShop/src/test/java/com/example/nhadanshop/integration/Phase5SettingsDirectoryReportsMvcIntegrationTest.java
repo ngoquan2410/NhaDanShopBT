@@ -127,7 +127,7 @@ class Phase5SettingsDirectoryReportsMvcIntegrationTest {
     }
 
     @Test
-    void admin_users_forbidden_for_non_admin_suppliers_readable_when_logged_in() throws Exception {
+    void admin_users_forbidden_and_suppliers_customers_admin_scoped() throws Exception {
         String adminU = "P5A-" + uniq();
         saveUser(adminU, "Adminpwd1!", roleAdmin);
         String adminTok = loginAccess(adminU, "Adminpwd1!");
@@ -144,8 +144,11 @@ class Phase5SettingsDirectoryReportsMvcIntegrationTest {
                 .andExpect(jsonPath("$.content").isArray());
 
         mockMvc.perform(get("/api/suppliers").header("Authorization", "Bearer " + userTok))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/suppliers").header("Authorization", "Bearer " + adminTok))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray());
+                .andExpect(jsonPath("$.content").isArray());
 
         mockMvc.perform(get("/api/customers").header("Authorization", "Bearer " + userTok))
                 .andExpect(status().isForbidden());

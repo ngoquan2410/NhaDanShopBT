@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTableToolbar } from "@/components/shared/DataTableToolbar";
@@ -14,36 +14,60 @@ import { formatDateTime } from "@/lib/format";
 import { Plus, UserCog, Pencil, Shield, Trash2, KeyRound, Power, PowerOff } from "lucide-react";
 import { toast } from "sonner";
 import type { UserAccount } from "@/lib/mock-data";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 export default function AdminUsers() {
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 250);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<UserAccount | null>(null);
   const [deleting, setDeleting] = useState<UserAccount | null>(null);
-  const { data, loading, error, reload } = useService(() => adminUsers.list(), []);
-  const users = data ?? [];
+  const { data, loading, error, reload } = useService(
+    () =>
+      adminUsers.list({
+        search: debouncedSearch || undefined,
+        page,
+        pageSize,
+      }),
+    [debouncedSearch, page, pageSize],
+  );
+  const users = data?.items ?? [];
+  const total = data?.total ?? 0;
 
-  const filtered = useMemo(() => users.filter(u =>
-    !search || u.username.toLowerCase().includes(search.toLowerCase()) || u.fullName.toLowerCase().includes(search.toLowerCase())
-  ), [users, search]);
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
 
   const tc = useTableControls<UserAccount, "name" | "username" | "role" | "lastLogin">({
-    data: filtered, pageSize: 20, initialSort: { key: "name", dir: "asc" },
+    data: users,
+    pageSize: Math.max(users.length, 1),
+    initialSort: { key: "name", dir: "asc" },
     sortAccessors: {
-      name: (u) => u.fullName, username: (u) => u.username, role: (u) => u.role,
+      name: (u) => u.fullName,
+      username: (u) => u.username,
+      role: (u) => u.role,
       lastLogin: (u) => (u.lastLogin ? new Date(u.lastLogin) : new Date(0)),
     },
-    resetToken: search,
+    resetToken: `${debouncedSearch}|${page}`,
   });
 
   const openAdd = () => { setEditing(null); setDrawerOpen(true); };
-  const openEdit = (u: UserAccount) => { setEditing(u); setDrawerOpen(true); };
+  const openEdit = (u: UserAccount) => {
+    if (u.assignableRole === false) {
+      toast.error(`Không thể sửa vai trò "${u.roleDisplayLabel ?? u.backendRoleName ?? "không hỗ trợ"}" trong màn hình này`);
+      return;
+    }
+    setEditing(u);
+    setDrawerOpen(true);
+  };
 
   return (
     <div className="space-y-4 admin-dense">
       <PageHeader
         title="Người dùng"
-        description={`${users.length} tài khoản`}
+        description={`${total} tài khoản`}
         actions={<button onClick={openAdd} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover"><Plus className="h-3.5 w-3.5" /> Thêm người dùng</button>}
       />
 
@@ -52,7 +76,7 @@ export default function AdminUsers() {
       {loading && <p className="text-sm text-muted-foreground">Đang tải người dùng từ backend...</p>}
       {error && <p className="text-sm text-danger">Không tải được người dùng: {error.message}</p>}
 
-      {!loading && filtered.length === 0 ? (
+      {!loading && users.length === 0 ? (
         <EmptyState icon={UserCog} title="Không tìm thấy người dùng" />
       ) : !loading && (
         <>
@@ -80,9 +104,9 @@ export default function AdminUsers() {
                     </td>
                     <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">{u.username}</td>
                     <td className="px-3 py-2.5 text-center">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full ${u.role === 'admin' ? 'bg-accent-soft text-accent' : 'bg-muted text-muted-foreground'}`}>
-                        {u.role === 'admin' && <Shield className="h-3 w-3" />}
-                        {u.role === 'admin' ? 'Admin' : 'Nhân viên'}
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full ${u.backendRoleName === 'ROLE_ADMIN' ? 'bg-accent-soft text-accent' : 'bg-muted text-muted-foreground'}`}>
+                        {u.backendRoleName === 'ROLE_ADMIN' && <Shield className="h-3 w-3" />}
+                        {u.roleDisplayLabel ?? (u.role === 'admin' ? 'Admin' : 'Nhân viên')}
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-center"><StatusBadge status={u.totpEnabled ? 'totp-enabled' : 'totp-disabled'} /></td>
@@ -93,8 +117,9 @@ export default function AdminUsers() {
                         <RowActions
                           actions={[
                             { label: "Sửa", icon: <Pencil className="h-3.5 w-3.5" />, onClick: () => openEdit(u) },
+                            { label: "Đổi mật khẩu", icon: <KeyRound className="h-3.5 w-3.5" />, onClick: () => { setEditing(u); setDrawerOpen(true); } },
                             {
-                              label: u.active ? "Khóa tài khoản" : "Mở khóa",
+                              label: u.active ? "Khóa" : "Mở khóa",
                               icon: u.active ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />,
                               onClick: () => {
                                 adminUsers.save({ ...u, active: !u.active })
@@ -102,20 +127,7 @@ export default function AdminUsers() {
                                   .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể đổi trạng thái"));
                               },
                             },
-                            {
-                              label: "Đặt lại mật khẩu",
-                              icon: <KeyRound className="h-3.5 w-3.5" />,
-                              onClick: () => toast.success(`Đã gửi link đặt lại mật khẩu cho ${u.username}`),
-                            },
-                            {
-                              separatorBefore: true,
-                              label: "Xóa",
-                              icon: <Trash2 className="h-3.5 w-3.5" />,
-                              danger: true,
-                              disabled: u.username === 'admin',
-                              disabledReason: "Không thể xóa tài khoản admin chính",
-                              onClick: () => setDeleting(u),
-                            },
+                            { separatorBefore: true, label: "Xóa", icon: <Trash2 className="h-3.5 w-3.5" />, danger: true, onClick: () => setDeleting(u) },
                           ]}
                         />
                       </div>
@@ -134,45 +146,38 @@ export default function AdminUsers() {
                     <div className="h-9 w-9 bg-primary-soft rounded-full flex items-center justify-center text-xs font-bold text-primary shrink-0">{u.fullName.charAt(0)}</div>
                     <div>
                       <h3 className="font-medium text-sm">{u.fullName}</h3>
-                      <p className="text-xs text-muted-foreground">@{u.username}</p>
+                      <p className="text-xs text-muted-foreground">{u.username}</p>
                     </div>
                   </div>
                   <StatusBadge status={u.active ? 'active' : 'inactive'} />
                 </div>
-                <div className="flex items-center gap-2 mt-2 pt-2 border-t">
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full ${u.role === 'admin' ? 'bg-accent-soft text-accent' : 'bg-muted text-muted-foreground'}`}>
-                    {u.role === 'admin' ? 'Admin' : 'Nhân viên'}
-                  </span>
-                  <StatusBadge status={u.totpEnabled ? 'totp-enabled' : 'totp-disabled'} />
-                </div>
               </div>
             ))}
           </div>
-          <TablePagination page={tc.page} totalPages={tc.totalPages} total={tc.total} rangeStart={tc.rangeStart} rangeEnd={tc.rangeEnd} pageSize={tc.pageSize} onPageChange={tc.setPage} onPageSizeChange={tc.setPageSize} />
+          <TablePagination
+            page={page}
+            totalPages={Math.max(1, Math.ceil(total / pageSize))}
+            total={total}
+            rangeStart={total === 0 ? 0 : (page - 1) * pageSize + 1}
+            rangeEnd={Math.min(total, page * pageSize)}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
+          />
         </>
       )}
 
-      <UserFormDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        user={editing}
-        onSave={async (input) => { await adminUsers.save(input); reload(); }}
-      />
-      <ConfirmDialog
-        open={!!deleting}
-        onClose={() => setDeleting(null)}
-        onConfirm={() => {
-          if (deleting) {
-            adminUsers.remove(deleting.id)
-              .then(() => { toast.success("Đã xóa người dùng"); reload(); })
-              .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể xóa người dùng"));
-          }
-        }}
-        title="Xóa người dùng?"
-        description={`Tài khoản "${deleting?.username}" sẽ bị xóa vĩnh viễn. Lịch sử thao tác vẫn được giữ lại.`}
-        variant="danger"
-        confirmLabel="Xóa"
-      />
+      <UserFormDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} user={editing} onSave={async (input) => { await adminUsers.save(input); reload(); }} />
+      <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} onConfirm={() => {
+        if (deleting) {
+          adminUsers.remove(deleting.id)
+            .then(() => { toast.success("Đã xóa người dùng"); reload(); })
+            .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể xóa người dùng"));
+        }
+      }} title="Xóa người dùng?" description={`Bạn chắc chắn muốn xóa "${deleting?.username}"?`} variant="danger" confirmLabel="Xóa" />
     </div>
   );
 }

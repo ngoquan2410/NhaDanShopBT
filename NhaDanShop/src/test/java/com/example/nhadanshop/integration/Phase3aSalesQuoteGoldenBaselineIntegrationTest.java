@@ -364,6 +364,32 @@ class Phase3aSalesQuoteGoldenBaselineIntegrationTest {
         assertMoney(new BigDecimal("12000"), q.voucherSnapshot().shippingDiscountAmount());
     }
 
+    @Test
+    @DisplayName("Golden 9b: Mã FREESHIP* cấu hình sai (fixed trên tiền hàng) — chỉ giảm phí ship, tối đa phí ship")
+    void golden_freeship_prefix_legacy_fixed_routes_to_shipping_bucket() {
+        Category cat = mkCategory("FSP");
+        ProductVariant v = mkVariantInCategory(cat, "FSP32", new BigDecimal("32000"));
+        mkBatch(v, 5);
+        Voucher vo = mkVoucherBase("FREESHIP100" + PREFIX);
+        vo.setPercent(BigDecimal.ZERO);
+        vo.setFreeShipping(false);
+        vo.setFixedAmount(new BigDecimal("100000"));
+        vo.setCap(BigDecimal.ZERO);
+        vo = voucherRepository.save(vo);
+        BigDecimal shipFee = new BigDecimal("38000");
+        SalesQuoteResponse q = salesQuoteService.quote(new SalesQuoteRequest(
+                "pos", null,
+                List.of(line(v, 1, BigDecimal.ZERO, null)),
+                null, vo.getCode(),
+                new ShippingQuoteSnapshotDto("client", "Z", shipFee, null),
+                null, BigDecimal.ZERO, BigDecimal.ZERO
+        ));
+        assertEquals(0, q.pricingBreakdownSnapshot().voucherDiscount().compareTo(BigDecimal.ZERO));
+        assertMoney(new BigDecimal("38000"), q.pricingBreakdownSnapshot().shippingDiscount());
+        assertTrue(q.voucherSnapshot().freeShipping());
+        assertMoney(new BigDecimal("38000"), q.voucherSnapshot().shippingDiscountAmount());
+    }
+
     // --- 10. Loyalty ---
     @Test
     @DisplayName("Golden 10: Loyalty redeem — loyaltySnapshot + loyaltyDiscount trong breakdown")

@@ -25,8 +25,19 @@ public class StockAdjustmentController {
 
     @GetMapping
     public Page<StockAdjustmentResponse> getAll(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String status,
             @PageableDefault(size = 20, sort = "adjDate", direction = Sort.Direction.DESC) Pageable pageable) {
-        return service.getAll(pageable);
+        com.example.nhadanshop.entity.StockAdjustment.Status st = null;
+        if (status != null && !status.isBlank()) {
+            String s = status.trim().toLowerCase();
+            if ("draft".equals(s)) {
+                st = com.example.nhadanshop.entity.StockAdjustment.Status.DRAFT;
+            } else if ("confirmed".equals(s)) {
+                st = com.example.nhadanshop.entity.StockAdjustment.Status.CONFIRMED;
+            }
+        }
+        return service.getAll(pageable, st, search);
     }
 
     @GetMapping("/{id}")

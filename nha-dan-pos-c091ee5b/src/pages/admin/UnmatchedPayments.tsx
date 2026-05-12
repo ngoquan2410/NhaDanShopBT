@@ -3,7 +3,7 @@
 // - "Đã khớp tự động": rows the trigger linked (status='matched' or 'linked')
 // - "Đã bỏ qua": rows admin marked as ignored → restorable
 // Refresh uses short-interval polling plus visibility re-sync.
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { paymentEvents, pendingOrders } from "@/services";
 import type { PaymentEvent } from "@/services";
 import type { PendingOrder } from "@/services/types";
@@ -356,7 +356,7 @@ function LinkDialog({
     if (!event) return;
     let alive = true;
     (async () => {
-      const res = await pendingOrders.list({
+      const res = await pendingOrders.listLinkable({
         query: query.trim() || undefined,
         pageSize: 20,
       });
@@ -372,16 +372,21 @@ function LinkDialog({
     setBusyId(order.id);
     try {
       await paymentEvents.linkToOrder(event.id, order.code);
-      if (event.amount >= order.pricingBreakdownSnapshot.total) {
-        toast.success(
-          `Đã gắn giao dịch vào ${order.code}. Thanh toán đã được ghi nhận, nhưng vẫn cần xác nhận đơn riêng.`,
-        );
+      const total = order.pricingBreakdownSnapshot.total;
+      const ev = Number(event.amount);
+      if (ev === total) {
+        toast.success(`Đã ghi nhận thanh toán cho ${order.code} — chờ xác nhận đơn (chưa xuất hóa đơn).`);
       } else {
-        toast.success(`Đã gắn giao dịch vào ${order.code} (số tiền chưa đủ).`);
+        toast.success(`Đã gắn giao dịch vào ${order.code}. Cần đối soát số tiền trước khi xác nhận đơn.`);
       }
       onLinked();
     } catch (err: any) {
-      toast.error(err?.message ?? "Không gắn được giao dịch");
+      const message = String(err?.message ?? "");
+      toast.error(
+        message.includes("không còn đủ điều kiện")
+          ? "Đơn không còn đủ điều kiện để gắn giao dịch."
+          : message || "Không gắn được giao dịch",
+      );
     } finally {
       setBusyId(null);
     }
@@ -429,10 +434,21 @@ function LinkDialog({
                 </div>
               ) : (
                 orders.map((o) => {
-                  const enough = event.amount >= o.pricingBreakdownSnapshot.total;
+                  const orderTotal = o.pricingBreakdownSnapshot.total;
+                  const evAmt = Number(event.amount);
+                  const deltaAbs = Math.abs(Math.round(evAmt - orderTotal));
+                  const moneyLabel =
+                    evAmt === orderTotal
+                      ? { cls: "text-success", text: "Khớp đúng số tiền" }
+                      : evAmt < orderTotal
+                        ? { cls: "text-warning", text: `Thiếu ${formatVND(deltaAbs)} — cần đối soát` }
+                        : { cls: "text-warning", text: `Dư ${formatVND(deltaAbs)} — cần đối soát` };
                   return (
                     <button
                       key={o.id}
+                      type="button"
+                      data-testid={`unmatched-link-candidate-${o.code}`}
+                      data-amount-relation={evAmt === orderTotal ? "exact" : evAmt < orderTotal ? "under" : "over"}
                       onClick={() => handleLink(o)}
                       disabled={busyId === o.id}
                       className="w-full flex items-center justify-between gap-3 p-3 text-left text-sm hover:bg-muted/50 transition disabled:opacity-50"
@@ -446,12 +462,10 @@ function LinkDialog({
                       </div>
                       <div className="text-right shrink-0">
                         <div className="font-semibold">
-                          {formatVND(o.pricingBreakdownSnapshot.total)}
+                          {formatVND(orderTotal)}
                         </div>
-                        <div
-                          className={`text-[11px] ${enough ? "text-success" : "text-warning"}`}
-                        >
-                          {enough ? "Đủ tiền — chờ xác nhận đơn" : "Thiếu tiền"}
+                        <div className={`text-[11px] ${moneyLabel.cls}`}>
+                          {moneyLabel.text}
                         </div>
                       </div>
                     </button>

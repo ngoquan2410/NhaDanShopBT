@@ -100,6 +100,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/products/low-stock-variants").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/products/*/variants")
                         .hasAnyAuthority("ROLE_ADMIN", "ROLE_STAFF")
+                        .requestMatchers(HttpMethod.GET, "/api/products/variants/search")
+                        .hasAnyAuthority("ROLE_ADMIN", "ROLE_STAFF")
                         .requestMatchers(HttpMethod.GET, "/api/products/variants/by-code/*")
                         .hasAnyAuthority("ROLE_ADMIN", "ROLE_STAFF")
                         // Storefront-safe public catalog endpoints only.

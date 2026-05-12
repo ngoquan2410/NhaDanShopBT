@@ -65,6 +65,9 @@ class InvoiceBatchAllocationIntegrationTest {
     @MockBean
     private CustomerLoyaltyService customerLoyaltyService;
 
+    @MockBean
+    private StockedCatalogGuardService stockedCatalogGuardService;
+
     @Autowired
     private InvoiceService invoiceService;
     @Autowired

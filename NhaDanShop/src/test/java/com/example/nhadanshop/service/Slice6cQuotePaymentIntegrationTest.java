@@ -349,12 +349,55 @@ class Slice6cQuotePaymentIntegrationTest {
     }
 
     @Test
-    void storefront_quote_applies_free_shipping_voucher() {
+    void quote_free_shipping_voucher_caps_to_shipping_fee() {
         ProductVariant v = mkVariant("S6C-FSHP");
         mkBatch(v, LocalDate.now().plusDays(30), 50);
         stockMutationService.syncVariantStockWithBatches(v.getId());
         Voucher vo = new Voucher();
-        vo.setCode("FREESHIP");
+        vo.setCode("FREESHIP100");
+        vo.setActive(true);
+        vo.setFreeShipping(true);
+        vo.setPercent(new BigDecimal("100"));
+        vo.setMinSubtotal(BigDecimal.ZERO);
+        voucherRepository.save(vo);
+
+        var q = salesQuoteService.quote(new SalesQuoteRequest(
+                "storefront",
+                null,
+                List.of(new SalesQuoteLineRequest(v.getProduct().getId(), v.getId(), 1, BigDecimal.ZERO, null, false)),
+                null,
+                "FREESHIP100",
+                null,
+                storefrontShipAddr(),
+                null,
+                BigDecimal.ZERO
+        ));
+        assertTrue(q.shippingQuoteSnapshot().fee().compareTo(BigDecimal.ZERO) > 0);
+        assertTrue(q.pricingBreakdownSnapshot().shippingDiscount().compareTo(BigDecimal.ZERO) > 0);
+        assertTrue(q.pricingBreakdownSnapshot().shippingDiscount().compareTo(q.shippingQuoteSnapshot().fee()) <= 0);
+        assertEquals(0, q.pricingBreakdownSnapshot().voucherDiscount().compareTo(BigDecimal.ZERO));
+    }
+
+    @Test
+    void quote_promotion_and_free_shipping_voucher_do_not_overwrite() {
+        ProductVariant v = mkVariant("S6C-FSHP-PROMO");
+        mkBatch(v, LocalDate.now().plusDays(30), 50);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+
+        Promotion promo = new Promotion();
+        promo.setName("Ship promo partial");
+        promo.setType("FREE_SHIPPING");
+        promo.setDiscountValue(BigDecimal.ZERO);
+        promo.setMaxDiscount(new BigDecimal("5000"));
+        promo.setMinOrderValue(BigDecimal.ZERO);
+        promo.setStartDate(LocalDateTime.now(clock).minusDays(1));
+        promo.setEndDate(LocalDateTime.now(clock).plusDays(30));
+        promo.setActive(true);
+        promo.setAppliesTo("ALL");
+        Long promoId = promotionRepository.save(promo).getId();
+
+        Voucher vo = new Voucher();
+        vo.setCode("FREESHIP_STACK");
         vo.setActive(true);
         vo.setFreeShipping(true);
         vo.setMinSubtotal(BigDecimal.ZERO);
@@ -364,16 +407,31 @@ class Slice6cQuotePaymentIntegrationTest {
                 "storefront",
                 null,
                 List.of(new SalesQuoteLineRequest(v.getProduct().getId(), v.getId(), 1, BigDecimal.ZERO, null, false)),
-                null,
-                "FREESHIP",
+                promoId,
+                "FREESHIP_STACK",
                 null,
                 storefrontShipAddr(),
                 null,
                 BigDecimal.ZERO
         ));
-        assertTrue(q.shippingQuoteSnapshot().fee().compareTo(BigDecimal.ZERO) > 0);
-        assertTrue(q.pricingBreakdownSnapshot().shippingDiscount().compareTo(BigDecimal.ZERO) > 0);
+
         assertEquals(0, q.pricingBreakdownSnapshot().voucherDiscount().compareTo(BigDecimal.ZERO));
+        assertTrue(q.promotionSnapshot().shippingDiscountAmount().compareTo(BigDecimal.ZERO) > 0);
+        assertTrue(q.voucherSnapshot().shippingDiscountAmount().compareTo(BigDecimal.ZERO) > 0);
+        assertEquals(0, q.pricingBreakdownSnapshot().shippingDiscount().compareTo(q.shippingQuoteSnapshot().fee()));
+    }
+
+    @Test
+    void pending_created_from_quote_total_matches() {
+        ProductVariant v = mkVariant("S6C-PENDING-TOTAL");
+        mkBatch(v, LocalDate.now().plusDays(30), 50);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+        var quote = quoteStorefront(v, 2, null);
+
+        var pending = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "bank_transfer", "Total", "090"));
+
+        assertEquals(0, pending.pricingBreakdownSnapshot().total().compareTo(quote.pricingBreakdownSnapshot().total()));
+        assertEquals(0, pending.totalAmount().compareTo(quote.pricingBreakdownSnapshot().total()));
     }
 
     @Test

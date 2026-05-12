@@ -27,15 +27,18 @@ import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import jakarta.persistence.criteria.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -45,8 +48,14 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class PaymentEventService {
 
-    private static final Pattern ORDER_CODE_PATTERN =
-            Pattern.compile("\\bDH-\\d{8}-\\d{3,}\\b", Pattern.CASE_INSENSITIVE);
+    /** Canonical hyphenated order reference, e.g. {@code DH-20260512-014}. */
+    private static final Pattern ORDER_CODE_HYPHEN =
+            Pattern.compile("\\b(DH)-(\\d{8})-(\\d{3,})\\b", Pattern.CASE_INSENSITIVE);
+    /**
+     * Bank apps may strip hyphens: {@code DH20260512014} → canonical {@code DH-20260512-014}.
+     */
+    private static final Pattern ORDER_CODE_COMPACT =
+            Pattern.compile("\\b(DH)(\\d{8})(\\d{3,})\\b", Pattern.CASE_INSENSITIVE);
     private static final DateTimeFormatter CASSO_DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter CASSO_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
@@ -54,6 +63,7 @@ public class PaymentEventService {
     private final PendingOrderRepository pendingOrderRepository;
     private final PendingOrderService pendingOrderService;
     private final ObjectMapper objectMapper;
+    private final Clock businessClock;
 
     @Value("${casso.webhook-secure-token:}")
     private String cassoWebhookSecureToken;
@@ -120,8 +130,33 @@ public class PaymentEventService {
         attachEventToOrder(event, order, normalizeManualLinkedBy(linkedBy));
 
         paymentEventRepository.save(event);
+        maybeMarkPaidAutoAfterManualLink(order.getId(), event.getAmount());
         PendingOrderResponse pendingOrder = pendingOrderService.getById(order.getId());
         return new PaymentEventLinkResponse(toResponse(event), pendingOrder, false);
+    }
+
+    /**
+     * Manual link never confirms or creates an invoice. When the transfer amount matches the pending
+     * total exactly and the order is still awaiting payment/review, move to {@link PendingOrder.Status#PAID_AUTO}.
+     */
+    private void maybeMarkPaidAutoAfterManualLink(Long orderId, BigDecimal paidAmount) {
+        if (paidAmount == null || orderId == null) {
+            return;
+        }
+        pendingOrderRepository.findById(orderId).ifPresent(o -> {
+            if (o.getTotalAmount() == null || paidAmount.compareTo(o.getTotalAmount()) != 0) {
+                return;
+            }
+            if (o.getInvoice() != null) {
+                return;
+            }
+            if (o.getStatus() != PendingOrder.Status.PENDING_PAYMENT
+                    && o.getStatus() != PendingOrder.Status.WAITING_CONFIRM) {
+                return;
+            }
+            o.setStatus(PendingOrder.Status.PAID_AUTO);
+            pendingOrderRepository.save(o);
+        });
     }
 
     @Transactional
@@ -195,21 +230,15 @@ public class PaymentEventService {
             event.setStatus(StringUtils.hasText(matchedCode) ? PaymentEvent.Status.MATCHED : PaymentEvent.Status.UNMATCHED);
         }
 
-        boolean autoLinked = false;
         boolean markedPaidAuto = false;
         if (StringUtils.hasText(matchedCode) && event.getLinkedPendingOrder() == null) {
-            Optional<PendingOrder> matchedOrder = pendingOrderRepository.findByOrderCodeOrPaymentReference(matchedCode);
-            if (matchedOrder.isPresent()) {
-                attachEventToOrder(event, matchedOrder.get(), "auto");
-                autoLinked = true;
-                markedPaidAuto = maybeMarkOrderPaidAuto(matchedOrder.get(), event.getAmount());
-            }
+            markedPaidAuto = maybeAutoConfirmCassoBankTransfer(event, matchedCode);
         } else if (event.getLinkedPendingOrder() != null && isAutoLinkedEvent(event)) {
             markedPaidAuto = maybeMarkOrderPaidAuto(event.getLinkedPendingOrder(), event.getAmount());
         }
 
         paymentEventRepository.save(event);
-        return new UpsertOutcome(true, autoLinked, markedPaidAuto);
+        return new UpsertOutcome(true, markedPaidAuto, markedPaidAuto);
     }
 
     private void attachEventToOrder(PaymentEvent event, PendingOrder order, String linkedBy) {
@@ -250,28 +279,62 @@ public class PaymentEventService {
             throw new IllegalStateException("Giao dịch đã được liên kết với đơn hàng khác");
         }
         if (!isManualLinkableStatus(order.getStatus())) {
-            throw new IllegalStateException("Đơn hàng không ở trạng thái có thể liên kết giao dịch");
+            throw new IllegalStateException("Đơn không còn đủ điều kiện để gắn giao dịch.");
+        }
+        if (order.getInvoice() != null) {
+            throw new IllegalStateException("Đơn không còn đủ điều kiện để gắn giao dịch.");
+        }
+        if (order.getExpiresAt() == null || !order.getExpiresAt().isAfter(LocalDateTime.now(businessClock))) {
+            throw new IllegalStateException("Đơn không còn đủ điều kiện để gắn giao dịch.");
         }
     }
 
     private boolean isManualLinkableStatus(PendingOrder.Status status) {
         return status == PendingOrder.Status.PENDING_PAYMENT
-                || status == PendingOrder.Status.WAITING_CONFIRM;
+                || status == PendingOrder.Status.WAITING_CONFIRM
+                || status == PendingOrder.Status.PAID_AUTO;
+    }
+
+    private boolean maybeAutoConfirmCassoBankTransfer(PaymentEvent event, String matchedCode) {
+        Optional<PendingOrder> matchedOrder = pendingOrderRepository.findByOrderCodeOrPaymentReference(matchedCode);
+        if (matchedOrder.isEmpty()) {
+            log.debug("casso.autoConfirm reason=ORDER_NOT_FOUND matchedCode={}", matchedCode);
+            return false;
+        }
+        PendingOrder order = matchedOrder.get();
+        if (!isAutoConfirmEligible(order, event.getAmount())) {
+            if (event.getAmount() != null && order.getTotalAmount() != null) {
+                int cmp = event.getAmount().compareTo(order.getTotalAmount());
+                if (cmp < 0) {
+                    log.debug("casso.autoConfirm reason=AMOUNT_UNDERPAID order={}", order.getOrderNo());
+                } else if (cmp > 0) {
+                    log.debug("casso.autoConfirm reason=AMOUNT_OVERPAID order={}", order.getOrderNo());
+                } else {
+                    log.debug("casso.autoConfirm reason=ORDER_NOT_ELIGIBLE order={}", order.getOrderNo());
+                }
+            } else {
+                log.debug("casso.autoConfirm reason=ORDER_NOT_ELIGIBLE order={}", order.getOrderNo());
+            }
+            return false;
+        }
+        boolean confirmed = maybeMarkOrderPaidAuto(order, event.getAmount());
+        if (confirmed) {
+            log.debug("casso.autoConfirm reason=AUTO_CONFIRMED order={}", order.getOrderNo());
+            PendingOrder fresh = pendingOrderRepository.findById(order.getId()).orElse(order);
+            attachEventToOrder(event, fresh, "casso:webhook");
+        } else {
+            log.debug("casso.autoConfirm reason=CONFIRM_FAILED order={}", order.getOrderNo());
+        }
+        return confirmed;
     }
 
     private boolean maybeMarkOrderPaidAuto(PendingOrder order, BigDecimal amount) {
-        if (amount == null || order == null || order.getStatus() == PendingOrder.Status.CANCELLED) {
+        if (!isAutoConfirmEligible(order, amount)) {
             return false;
         }
         if (order.getStatus() == PendingOrder.Status.CONFIRMED) {
             PendingOrder fresh = pendingOrderRepository.findById(order.getId()).orElse(order);
             return fresh.getInvoice() != null;
-        }
-        if (!"bank_transfer".equals(order.getPaymentMethod())) {
-            return false;
-        }
-        if (amount.compareTo(order.getTotalAmount()) < 0) {
-            return false;
         }
         try {
             pendingOrderService.confirmOrder(order.getId(), null, "casso:webhook");
@@ -280,6 +343,25 @@ public class PaymentEventService {
             log.warn("Casso auto-confirm failed for {}: {}", order.getOrderNo(), ex.toString());
             return false;
         }
+    }
+
+    private boolean isAutoConfirmEligible(PendingOrder order, BigDecimal amount) {
+        if (amount == null || order == null) {
+            return false;
+        }
+        if (!"bank_transfer".equals(order.getPaymentMethod())) {
+            return false;
+        }
+        if (!isManualLinkableStatus(order.getStatus())) {
+            return false;
+        }
+        if (order.getInvoice() != null) {
+            return false;
+        }
+        if (order.getExpiresAt() == null || !order.getExpiresAt().isAfter(LocalDateTime.now(businessClock))) {
+            return false;
+        }
+        return order.getTotalAmount() != null && amount.compareTo(order.getTotalAmount()) == 0;
     }
 
     private void validateWebhookAuth(
@@ -423,14 +505,38 @@ public class PaymentEventService {
         };
     }
 
+    /**
+     * Collects all candidate order codes, normalizes to canonical {@code DH-YYYYMMDD-SEQ} form,
+     * de-duplicates; returns a single code, or {@code null} for none / ambiguous (multiple distinct codes).
+     */
     private String extractOrderCode(String transferContent) {
-        if (!StringUtils.hasText(transferContent)) return null;
-        Matcher matcher = ORDER_CODE_PATTERN.matcher(transferContent.toUpperCase(Locale.ROOT));
-        if (matcher.find()) {
-            return matcher.group();
+        if (!StringUtils.hasText(transferContent)) {
+            log.debug("casso.orderCode reason=NO_CODE (empty content)");
+            return null;
         }
-        String trimmed = transferContent.trim().toUpperCase(Locale.ROOT);
-        return ORDER_CODE_PATTERN.matcher(trimmed).matches() ? trimmed : null;
+        String upper = transferContent.toUpperCase(Locale.ROOT);
+        Set<String> normalized = new LinkedHashSet<>();
+
+        Matcher hyphen = ORDER_CODE_HYPHEN.matcher(upper);
+        while (hyphen.find()) {
+            normalized.add(hyphen.group(1) + "-" + hyphen.group(2) + "-" + hyphen.group(3));
+        }
+        Matcher compact = ORDER_CODE_COMPACT.matcher(upper);
+        while (compact.find()) {
+            normalized.add(compact.group(1) + "-" + compact.group(2) + "-" + compact.group(3));
+        }
+
+        if (normalized.isEmpty()) {
+            log.debug("casso.orderCode reason=NO_CODE");
+            return null;
+        }
+        if (normalized.size() > 1) {
+            log.debug("casso.orderCode reason=MULTIPLE_CODES candidates={}", normalized);
+            return null;
+        }
+        String single = normalized.iterator().next();
+        log.debug("casso.orderCode reason=EXTRACTED code={}", single);
+        return single;
     }
 
     private String text(JsonNode row, String field) {

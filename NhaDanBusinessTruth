@@ -1,0 +1,527 @@
+1. Source Of Truth Cấp Hệ Thống
+ProductBatch.remainingQty là stock truth thật.
+ProductVariant.stockQty chỉ là projection/compatibility field, phải sync từ tổng batch, không phải nguồn sự thật.
+Product-level stock không phải canonical truth.
+InventoryMovement là append-only ledger, không được sửa/xóa để “làm đẹp lịch sử”.
+Quote/pending/invoice/profit dùng backend snapshot làm source of truth.
+UI không được tự tính lại historical total từ catalog/promotion/loyalty hiện tại.
+Business event đã phát sinh thì ưu tiên cancel, void, reverse, archive, không hard delete tùy tiện.
+Historical snapshot phải đọc được kể cả master data đã đổi/xóa/archive.
+Không recompute invoice/pending/profit cũ từ promotion, recipe, product price, batch cost hiện tại.
+Mọi mutation kho phải đi qua controlled mutation path, không direct-write stockQty hoặc remainingQty tùy tiện.
+Nếu total stock và batch stock lệch, batch là gốc để audit; variant stock là projection cần sync lại.
+2. Catalog / Product / Variant
+Product là master catalog.
+ProductVariant là đơn vị giao dịch thật: bán, nhập, tồn, batch, quote, invoice, production đều gắn variant.
+Product có type SINGLE hoặc COMBO.
+SINGLE có variant/import unit/batch thật.
+COMBO là bundle thương mại ảo, không phải batch tồn kho thật.
+Product code và variant code là định danh nghiệp vụ, không nên tái sử dụng bừa nếu đã có lịch sử.
+Product.active=false nghĩa là không bán/chọn mới, nhưng lịch sử vẫn phải đọc được.
+ProductVariant.active=false nghĩa là variant không còn active cho flow mới, nhưng lịch sử/batch vẫn tồn tại.
+ProductVariant.isSellable=false nghĩa là variant không bán POS/storefront, nhưng vẫn có thể là nguyên liệu sản xuất hoặc inventory/admin item.
+isSellable=false không đồng nghĩa inactive.
+Public catalog/storefront chỉ được trả product/variant active và sellable.
+Admin inventory/production có thể thấy non-sellable raw variants.
+Quick create/product import phải validate giá theo sellability:
+sellable thì costPrice > 0; nếu bán storefront/POS thì sellPrice > 0.
+non-sellable/NVL có thể sellPrice=0; receipt import vẫn phải có unitCost > 0 vì tạo batch cost thật.
+Không được dùng base64 dài trong imageUrl; ảnh upload phải qua /api/images/upload, DB chỉ lưu URL ngắn.
+3. Batch / Stock / Sellable Stock
+Batch có status: active, depleted, voided, blocked, archived.
+Expired không phải status persist; expired là date predicate theo business date.
+Sales sellable predicate:
+remainingQty > 0
+batch status=active
+không hết hạn
+product active
+variant active
+variant isSellable=true
+Production input predicate khác sales:
+batch status=active
+remainingQty > 0
+expiryDate >= current date
+product active
+variant active
+không yêu cầu isSellable=true
+Stock adjustment current-adjustable predicate khác sales:
+unsourced negative được trừ active/blocked physical stock
+không filter expiry
+không cần product/variant sellable
+không được trừ voided/depleted/archived
+InventoryProjection.onHand là current/system/physical stock.
+InventoryProjection.available giữ nghĩa hiện tại onHand - reserved, không được dùng như sale-sellable.
+sellableQty là field additive, không thay nghĩa onHand/available.
+SINGLE sellableQty là integer.
+COMBO sellableQty là null, vì combo stock là virtual.
+Combo virtual sellable stock phải tính từ batch sellable của component default variants, không dùng raw variant.stockQty.
+Không được để batch voided còn remainingQty > 0 nhưng vẫn lọt FEFO/projection/valuation.
+Nếu product/variant/combo còn physical stock ở bất kỳ batch nào thì không được archive/delete/toggle inactive một cách làm mất khả năng xử lý stock.
+Blocked/expired stock vẫn là physical stock, phải xử lý bằng kiểm kê/void/tiêu hủy/adjustment trước khi archive SKU.
+4. Goods Receipt / Nhập Kho
+Goods receipt backend hiện là confirmed-on-create.
+Không có lifecycle draft/confirm receipt ở backend hiện tại.
+POST /api/receipts tạo receipt, batch, stock mutation, goods_receipt movement trong một transaction.
+FE backend adapter không được giả vờ có createDraft/confirm nếu backend không hỗ trợ.
+Receipt delete hiện chỉ an toàn khi batch chưa bị tiêu thụ.
+Receipt delete hard-delete receipt/batch chỉ khi mọi batch còn nguyên remainingQty == importQty.
+Nếu đã có downstream consumption thì delete bị block.
+Receipt void là lifecycle bảo toàn lịch sử:
+giữ receipt row và batch row.
+zero only exact remaining qty của receipt-owned batches.
+append goods_receipt_void movement.
+không FEFO guessing.
+duplicate void phải idempotent hoặc reject, không double movement.
+Fully consumed receipt void là metadata-only, vì còn lại 0.
+Voided receipt không được delete.
+Receipt-derived report phải exclude voided receipt nếu đang tính inbound/current stock.
+Receipt label barcode phải encode BATCH:{batchId}, không dùng variant code giả làm batch.
+5. POS / Barcode / Exact Batch
+Canonical batch barcode payload là BATCH:{batchId}.
+GET /api/pos/scan/{code} hỗ trợ batch scan và variant/product scan.
+Scan response chỉ phục vụ display/cashier feedback.
+Final invoice creation vẫn phải revalidate dưới lock.
+Nếu invoice line có batchId, backend phải trừ đúng batch đó, không auto-FEFO.
+Nếu không có batchId, FEFO là fallback.
+Batch-scanned cart lines merge theo batchId.
+Different batches của cùng variant phải là dòng riêng.
+Exact-batch sale ghi SalesInvoiceItemBatchAllocation.
+Cancel invoice restore đúng batch từ allocation trace.
+COGS cho exact-batch sale dùng đúng batch.costPrice.
+Production output batch chỉ trace physical đúng khi bán bằng BATCH:{outputBatchId}; nếu bán không batchId thì vẫn FEFO.
+6. Stock Adjustment / Kiểm Kê
+Stock adjustment có DRAFT và CONFIRMED.
+DRAFT được delete.
+CONFIRMED không được delete.
+Confirm tính diff = actualQty - systemQty.
+Positive adjustment tạo batch mới, default active.
+Negative adjustment:
+nếu có sourceBatch, trừ đúng batch đó.
+nếu không có source batch, dùng current-adjustable physical batches, không dùng sales sellable predicate.
+Stock adjustment không dùng InventoryMovement trong phase hiện tại; audit nằm ở adjustment linkage + batch allocation trace.
+Reversal phải dùng allocation trace làm primary source.
+Không reverse bằng cách chạy lại FEFO hiện tại.
+Không dùng tổng variant stock để chứng minh có thể reverse; phải đủ trên từng original batch.
+Positive adjustment reversal chỉ được nếu full created batch quantity còn nguyên.
+Không partial reverse created adjustment batch.
+Legacy negative FEFO adjustment không có trace phải reject nếu không chứng minh được effect 1:1.
+Reversal không mutate confirmed record cũ; tạo reversal linkage/record rõ ràng.
+Sau confirm/reverse, invariant bắt buộc: ProductVariant.stockQty == SUM(ProductBatch.remainingQty).
+7. Sales Quote
+POST /api/sales/quote là source chính cho checkout/POS pricing.
+Anonymous quote chỉ hợp lệ cho source=storefront.
+Storefront quote không được gửi manual discount.
+Storefront quote không được gửi line discount.
+Client không được gửi rewardLine; reward/gift line chỉ do backend tạo.
+Storefront quote phải dùng shipping address để backend quote shipping; không tin shipping snapshot client gửi.
+POS/admin quote có thể dùng shippingQuoteSnapshot.
+Quote lưu SalesQuote có TTL, payload snapshot, captured lines, reward lines.
+Quote snapshot gồm:
+billable lines
+reward lines
+pricing breakdown
+promotion snapshot
+voucher snapshot
+shipping snapshot
+loyalty snapshot
+Quote-backed pending/invoice phải dùng snapshot này, không tính lại catalog price.
+Quote đã consumed bởi pending/invoice không được dùng lại.
+Quote expired không được tạo invoice trực tiếp, nhưng pending đã reserve quote có rule riêng khi confirm.
+8. Pricing / Commercial Allocation
+Merchandise subtotal là tổng billable paid lines trước invoice-level discounts.
+Line gross: originalUnitPrice * quantity.
+Line own discount: lineGrossAmount - lineNetBeforeInvoiceDiscount.
+Line net before invoice discount: unitPrice * quantity.
+Invoice-level manual/promotion/voucher/loyalty discount phải allocate xuống paid merchandise lines.
+Allocation weight dùng lineNetBeforeInvoiceDiscount, không dùng quantity, không dùng profit.
+lineNetRevenue = lineNetBeforeInvoiceDiscount - allocatedMerchandiseDiscount.
+lineCOGS = unitCostSnapshot * quantity.
+lineGrossProfitAfterDiscount = lineNetRevenue - lineCOGS.
+Reward/free item:
+revenue = 0
+vẫn trừ stock
+vẫn có COGS nếu batch cost > 0
+không earn loyalty
+Shipping là invoice-level bucket, không phân bổ vào product/category revenue/profit.
+VAT truth mới:
+vatBase = sum(lineNetRevenue) cho merchandise.
+vatAmount = floor(vatBase * vatPercent / 100).
+VAT không tính trên shipping.
+VAT excluded khỏi revenue/profit.
+Product/category reports dùng persisted line net revenue/profit:
+revenue = sum(lineNetRevenue)
+COGS = sum(lineCOGS)
+profit = sum(lineNetRevenue - lineCOGS)
+9. Promotion Truth
+Một order chỉ có một selected promotion chính.
+Promotion types mutually exclusive:
+PERCENT_DISCOUNT
+FIXED_DISCOUNT
+FREE_SHIPPING
+BUY_X_GET_Y
+QUANTITY_GIFT
+Voucher là lớp riêng, có thể áp cùng selected promotion theo engine.
+Loyalty là lớp riêng, có thể áp cùng promotion/voucher theo engine.
+Backend PromotionEvaluationService là preview truth cho:
+/api/promotions/evaluate
+/api/promotions/pick-best
+Hai endpoint promotion preview là stateless, không tạo quote/order/invoice/payment/inventory.
+Admin promotion mutations là ADMIN-only.
+POS promotion phải load backend promotions và evaluate bằng backend; không dùng local store promotion làm truth.
+Storefront Cart giữ selectedPromotionId và selectedPromotionMode.
+Manual selected promotion không được auto-switch sang promo khác nếu invalid.
+Auto mode có thể fallback/pick best.
+Checkout quote phải gửi effective promotion id đã resolve, tránh race đọc store cũ.
+BE quote response có effective promotion id/name/type là source-of-truth cho UI label sau quote.
+10. Promotion Scope / Min Order
+appliesTo=ALL: eligible amount là toàn đơn hàng hóa.
+appliesTo=PRODUCT: eligible lines là product được chọn.
+appliesTo=CATEGORY: eligible lines là product thuộc category được chọn.
+minOrderScope:
+ELIGIBLE_ITEMS: đơn tối thiểu tính trên hàng trong phạm vi KM.
+WHOLE_ORDER: đơn tối thiểu tính trên toàn bộ đơn.
+Với PRODUCT/CATEGORY:
+min order có thể tính whole order nếu admin chọn WHOLE_ORDER.
+nhưng discount vẫn chỉ áp trên eligible lines.
+Hàng ngoài phạm vi không nhận merchandise discount allocation.
+Fixed discount phải cap theo eligible subtotal nếu scope product/category.
+Percent discount tính trên eligible subtotal nếu scope product/category.
+Reason/progress phải rõ basis:
+ELIGIBLE_ITEMS
+WHOLE_ORDER
+ITEM_QUANTITY
+SHIPPING_ADDRESS
+11. Free Shipping Promotion
+Free shipping chỉ ảnh hưởng shippingDiscount.
+promotionDiscount=0 với FREE_SHIPPING.
+Free ship không giảm merchandise revenue/profit.
+Free shipping chỉ apply sau khi có shipping fee.
+Cart được phép cho user chọn FREE_SHIPPING trước địa chỉ như pending-eligible preview.
+Khi chưa có địa chỉ, Cart không cộng shipping discount vào total.
+Checkout sau khi có shipping fee phải quote lại và apply nếu đủ điều kiện.
+maxDiscount == null || maxDiscount <= 0: giảm toàn bộ phí ship.
+maxDiscount > 0: giảm tối đa số đó.
+Tổng shipping discount không vượt shipping fee.
+Voucher free shipping và promotion free shipping đều đi vào shipping bucket, phải cap tổng theo shipping fee.
+12. Gift Promotion
+BUY_X_GET_Y:
+điều kiện mua theo từng product/buy item.
+có thể repeat theo bội số nếu repeatable=true.
+gift qty = times * getQty.
+QUANTITY_GIFT:
+là loại “Quà tặng” admin đang dùng.
+trigger theo order-only, product scope, hoặc min quantity tùy cấu hình.
+cần checkbox repeatable.
+promo mới default repeatable=false.
+legacy thiếu field giữ behavior cũ nếu plan đã chốt.
+Gift line tạo bởi backend, giá 0.
+Gift phải validate:
+gift product tồn tại.
+gift product active.
+gift variant default tồn tại.
+gift variant active và sellable.
+đủ stock cho paid same variant + gift qty.
+Gift promo financial impact không phải discount tiền.
+Invoice detail phải hiển thị gift trong section quà tặng riêng.
+Không được list toàn bộ eligible paid lines trong “tác động lên sản phẩm” nếu chúng không bị discount thật.
+Với gift promo, “affected product lines” phải hiểu là:
+reward/gift lines thật.
+hoặc discounted lines nếu có discount tiền.
+không phải toàn bộ sản phẩm đủ điều kiện.
+13. Voucher Truth
+Voucher code case-insensitive.
+Voucher có thể:
+percent discount
+fixed discount
+free shipping
+Voucher free shipping không được combine với percent/fixed trong cùng voucher.
+Percent và fixed không được bật cùng lúc.
+Voucher min subtotal tính trên merchandise subtotal.
+Voucher shipping discount chỉ apply nếu có shipping fee.
+Voucher cap áp dụng vào amount tương ứng.
+Voucher snapshot lưu vào quote/pending/invoice.
+Voucher admin CRUD backend-backed; local voucher adapter chỉ demo/test.
+14. Loyalty / Points
+Loyalty settings là global record.
+Customer points gồm:
+pointBalance
+pointReserved
+available = balance - reserved
+lifetime earned/redeemed
+Checkout redeem points phải cap theo:
+enabled setting
+available points
+minimum redeem points
+max redeem percent
+redeem value per point
+max discount base
+Quote tạo LoyaltyRedemptionSnapshot.
+Pending order reserve points.
+Confirm pending -> invoice redeem points.
+Cancel/expire pending -> release reservation.
+Invoice completed -> earn points.
+Cancel invoice -> reverse earned points via adjustment transaction.
+Loyalty display phải lấy snapshot:
+pricingBreakdownSnapshot.loyaltyDiscount
+pricingBreakdownSnapshot.loyaltyRedeemedPoints
+Không lấy balance hiện tại để render order/invoice cũ.
+Label chuẩn: Đổi điểm (N điểm) -Xđ.
+Loyalty là row riêng, không gộp vào promotion/voucher.
+15. Pending Order
+Public pending order phải có quotePublicId từ backend quote.
+Pending order không trừ stock thật.
+Pending order lưu:
+shipping address snapshot
+gift lines snapshot
+promotion snapshot
+voucher snapshot
+shipping quote snapshot
+pricing breakdown snapshot
+total amount snapshot
+Pending order status:
+PENDING_PAYMENT
+WAITING_CONFIRM
+CONFIRMED
+PAID_AUTO
+CANCELLED
+Pending confirm là sole authority để tạo invoice từ pending.
+Manual payment link không tạo invoice và không mark confirmed.
+Pending confirm phải idempotent: confirm lại không tạo duplicate invoice/movement.
+Pending order list cần server-side pagination/sort/filter.
+Tab counts phải từ backend counts/toàn bộ filter, không đếm page hiện tại.
+Pending order detail phải hiển thị loyalty/promo/voucher/gift/shipping từ snapshot.
+16. Invoice
+Invoice completed không được hard-delete theo business truth mới; dùng cancel.
+Invoice cancel:
+giữ invoice row.
+set status CANCELLED.
+restore stock theo allocation trace.
+append invoice_cancel movement khi có allocation.
+reverse earned loyalty nếu có.
+Reports filter COMPLETED.
+Deleted invoice biến mất hoàn toàn nên không nên dùng cho business document đã posted.
+Invoice từ quote phải materialize lines từ quote payload, không recompute catalog price.
+Invoice direct legacy vẫn tồn tại nhưng quote-mode là chuẩn cho commercial parity.
+Invoice total display phải dùng pricing snapshot:
+subtotal
+manual discount
+promotion discount
+voucher discount
+loyalty discount
+shipping fee
+shipping discount
+VAT
+total
+Invoice item phải lưu:
+unit price snapshot
+original unit price
+unit cost snapshot
+commercial allocation
+batch allocations
+reward flag
+Invoice detail “tác động khuyến mãi” phải phân biệt:
+financial discount affected lines
+gift lines
+eligible lines không nhất thiết affected.
+17. Shipping / Address
+Shipping fee backend-owned.
+Storefront quote dùng ShippingQuoteService.
+Nếu thiếu province/district/ward thì shipping quote status incomplete.
+GHN carrier failure có thể fallback zone nếu config có rule.
+rawAddress chỉ dùng lưu và hiển thị cho admin/shipper đối chiếu, không dùng tính phí.
+Address autocomplete/Goong fail phải fallback manual, không được làm checkout chết bằng lỗi hệ thống thô.
+Business truth mới: street/số nhà bắt buộc khi tạo quote/pending/order.
+Bỏ helper “dán địa chỉ đầy đủ...” nếu không còn tác dụng.
+Shipping actual cost hiện chưa có carrier settlement feed; shippingActualCost null/deferred.
+Shipping profit/reporting carrier settlement là future slice.
+18. Production / Recipe / Cost
+Production không phải Combo.
+Production không phải Goods Receipt.
+Production consumes raw material batches and creates real finished product batch.
+Raw materials là normal product variants/batches, thường isSellable=false.
+Không tạo bảng raw materials riêng.
+Production recipe gồm:
+output product
+output variant
+output qty
+outputMustBeSellable
+overheadCost
+components
+Recipe outputMustBeSellable=true default.
+Nếu true: output variant phải active và sellable.
+Nếu false: chỉ cần output product/variant active.
+Recipe validate intent, không mutate ProductVariant.isSellable.
+Recipe edit chỉ forward-looking.
+Recipe code/output identity không nên sửa sau khi tạo nếu đã có lịch sử.
+Production order là source of truth cho:
+raw material consumption
+output batch creation
+recipe snapshot
+exact raw batch allocation trace
+Production v1 completed-on-create.
+Production order status: completed/voided.
+Production preview và create phải dùng cùng allocation engine.
+Allocation order: FEFO; tie-break FIFO by createdAt/id.
+Component cost = tổng qtyAllocatedFromBatch * batch.unitCost.
+Total production cost = component costs + overhead.
+Output unit cost = total production cost / outputQty.
+Output batch costPrice = output unit cost snapshot.
+ProductVariant.costPrice update chỉ là tham khảo tương lai, không đổi batch/invoice cũ.
+Nếu nguyên liệu C thiếu rồi nhập thêm batch C2 giá khác:
+preview cũ không còn đủ truth.
+phải preview lại.
+allocation dùng C1 còn lại trước, rồi C2 theo FEFO/FIFO.
+create lock batch và simulate lại.
+snapshot production order lưu đúng từng batch/qty/unitCost.
+Nếu after-lock allocation khác preview vì tồn thay đổi:
+backend dùng allocation thật sau lock.
+nếu thiếu thì trả 409 structured shortage.
+Production output expiry = min consumed raw expiry và/or shelf cap theo variant expiryDays.
+Production void:
+all-or-nothing.
+chỉ allowed khi output batch chưa downstream consumption.
+restore exact raw allocations.
+zero/void output batch.
+không partial void.
+không guessing.
+19. Revenue / Profit / Reports
+Profit report dựa trên persisted invoice item line snapshots.
+Revenue/product/category report không dùng current catalog price.
+Cancelled invoices excluded.
+VAT excluded from revenue/profit.
+Shipping excluded khỏi product/category revenue/profit.
+Shipping fee/discount/net là invoice-level bucket.
+Inventory report valuation phải dùng remaining batch cost.
+Inventory report không được drop product vì thiếu category; category null/blank fallback “Không phân loại”.
+Report export phải gọi backend .xlsx, không fake toast success.
+Product-filtered export nếu backend chưa hỗ trợ thì phải nói rõ scope, không giả vờ xuất đúng.
+20. Payment / Casso / Unmatched
+Casso/payment events backend-owned, không dùng Supabase live path.
+Webhook phải validate auth/signature/token nếu config.
+Payment event statuses:
+UNMATCHED
+MATCHED
+LINKED
+IGNORED
+Matched nghĩa là parse được mã đơn.
+Linked nghĩa là đã gắn pending order.
+Only bank_transfer có auto-confirm.
+Auto-confirm khi amount >= pending total.
+Momo/ZaloPay/COD không auto-confirm qua Casso.
+Manual link payment event không tự tạo invoice nếu rule chưa cho phép.
+Unmatched payments cần server-side pagination/sort/search.
+Ignore/unignore là archive-like flow cho payment event; không xóa event.
+21. Customer / Supplier / Archive
+Customer/Supplier có historical references nên không hard-delete nếu đã dùng.
+New order/customer selection mặc định exclude archived/inactive customers.
+Historical invoices/pending vẫn hiển thị snapshot/name/phone.
+Supplier selection cho receipt mới exclude archived suppliers.
+Historical receipts vẫn đọc supplier snapshot/reference.
+Customer signup phone matching hiện link vào active customer nếu có, nhưng nếu customer đã có user thì duplicate signup phải trả 409 thân thiện.
+Không để DB unique constraint leak ra UI.
+22. Auth / Role / Session
+Hiện source code có ROLE_ADMIN và ROLE_USER; plan truth muốn chuẩn hóa:
+ADMIN: full admin.
+STAFF: chỉ POS/Tạo hóa đơn và API cần cho POS.
+CUSTOMER/ROLE_USER: storefront/account, không admin.
+Admin route/API cần guard đúng role.
+Customer không vào admin.
+Staff không xem reports/promotions/inventory management nếu không thuộc POS scope.
+Signup:
+username unique.
+phone duplicate with existing user/customer phải trả controlled error.
+Password policy:
+tối thiểu 10 ký tự.
+có lowercase/uppercase/number/special.
+không chứa username.
+Refresh token TTL đã plan về 15 phút.
+Logout nên idempotent, không kẹt UX vì 403.
+TOTP:
+setup secret.
+verify enable.
+login nếu TOTP enabled thì dùng pre-auth token.
+disable cần OTP.
+Expired session UX dùng modal, không raw toast/redirect gây mất context.
+23. FE Architecture / Local Mock Truth
+Active production screens phải dùng backend adapters.
+Local adapters/mock chỉ dành cho test/demo explicit env.
+POS local invoice path chỉ được phép khi test/demo env, không âm thầm dùng khi backend/session lỗi.
+Admin vouchers/promotions/invoices phải backend-backed.
+Storefront checkout submit phải dựa vào beQuote.quoteId.
+Cart preview được phép dùng FE before quote, nhưng sau quote thì backend snapshot thắng.
+Selenium automation phải assert business behavior thật:
+seed data/API
+click UI thật
+chọn promo/address thật
+inspect /api/sales/quote
+assert request/response + UI
+Smoke test chỉ kiểm tra element tồn tại không chứng minh business pass.
+24. Pagination / Counts / Lists
+Pending orders, unmatched payments, voucher, promotion list cần server-side pagination/sort/search/filter.
+totalElements phải là tổng toàn bộ theo filter, không phải page length.
+Tab count không được tính từ data page hiện tại.
+List default phải ẩn archived nếu không ở audit/includeArchived mode.
+Search/filter/sort phải gửi query về BE, không filter client sau khi chỉ load một page.
+25. Soft Delete / Archive / Void Guardlist
+Không physical delete referenced customer/supplier/voucher/promotion/combo/product/variant.
+Không hard delete completed invoice.
+Không hard delete confirmed stock adjustment.
+Không hard delete receipt nếu có downstream consumption.
+Không archive/delete product/variant/combo khi còn physical stock.
+Không xóa/ẩn historical snapshots.
+Không rewrite invoice/pending/gift/promotion/voucher snapshot theo master data hiện tại.
+Không tăng imageUrl size để chứa base64.
+Không fake report export.
+Không dùng current FEFO để reverse historical effects.
+Không dùng total variant stock thay cho per-batch exactness.
+Không đổi semantics onHand/available để thành sellable.
+Không đưa archived/inactive records vào new transaction selection mặc định.
+26. Error Contract Truth
+Business conflict nên trả 409.
+Validation bad request nên trả 400.
+Duplicate signup phone: 409 PHONE_ALREADY_REGISTERED.
+Promotion delete referenced không được raw SQL/500.
+Production shortage: 409 với structured shortages.
+Stock/archive blocked: 409 có code/SKU, physical stock, sellable stock, blocking batch count.
+Không bao giờ leak SQL constraint/JDBC stack trace ra storefront/admin UI.
+UI toast/banner phải hiển thị message nghiệp vụ sạch.
+27. Test / Regression Truth
+Backend integration tests là gate cho money/stock/history.
+Selenium browser tests là gate cho UX thật nhưng phải assert business data, không chỉ smoke.
+Critical scenarios cần giữ:
+quote -> pending -> invoice snapshot parity
+promotion selected manual survives address
+free ship preview -> apply after address
+gift promo checkout/invoice detail
+loyalty checkout -> pending -> invoice
+exact batch POS sale + cancel restore
+receipt void/delete matrix
+stock adjustment reverse exactness
+production multi-batch cost + shortage
+signup duplicate phone
+pending tab count/pagination
+Full regression matrix trong docs cho biết nhiều khu vực đã có coverage, nhưng coverage “partial” không được coi là done business.
+28. Các Điểm Đang Là Target Truth Chưa Chắc Đã Implement Hết
+Role STAFF riêng có thể chưa đầy đủ trong code.
+Street required ở BE quote/pending/order cần verify/fix.
+Promotion archive field/list includeArchived có thể chưa hoàn chỉnh.
+QUANTITY_GIFT repeatable default mới/legacy behavior cần verify.
+Pending/unmatched/voucher/promotion pagination server-side có thể chưa xong toàn bộ.
+Signup duplicate phone vẫn đang có dấu hiệu leak constraint nếu chưa fix.
+Invoice promotion impact UI cần kiểm tra kỹ với gift promo để không list toàn bộ paid lines.
+Shipping actual cost/reporting vẫn deferred.
+ProductVariant archive semantics còn cần nhất quán với stocked guard.
+Receipt void lifecycle trong plan có trạng thái “cancelled” ở todos cũ nhưng docs addendum nói đã có behavior; cần đối chiếu source trước khi sửa tiếp.
+Kết Luận Chuẩn Để Dùng Về Sau
+Nếu sau này có thay đổi, ưu tiên tuyệt đối theo thứ tự này:
+Snapshot lịch sử không đổi: quote/pending/invoice/production/order/report cũ không bị recompute.
+Batch là truth: mọi stock/cost/profit phải trace được đến batch/allocation.
+Một nghiệp vụ đã posted thì reverse/cancel/void/archive, không sửa/xóa tùy tiện.
+Promotion/voucher/loyalty/shipping là các bucket riêng, không gộp sai vào nhau.
+Gift không phải discount tiền, phải hiển thị gift riêng.
+Production cost là actual weighted batch allocation + overhead, không lấy giá vốn tham khảo.
+UI chỉ preview trước quote; backend quote/invoice snapshot mới là tổng tiền thật.
+Pagination/count/report phải tính trên backend toàn bộ dữ liệu theo filter, không tính từ page đang nhìn.
+Không leak lỗi kỹ thuật ra người dùng, mọi lỗi phải có message nghiệp vụ.
+Test automation phải chứng minh business flow thật, không chấp nhận smoke test giả xanh.
+

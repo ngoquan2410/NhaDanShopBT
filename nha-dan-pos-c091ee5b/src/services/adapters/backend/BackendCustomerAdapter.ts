@@ -8,6 +8,13 @@ import type {
   PagedResult,
 } from "@/services/types";
 
+type SpringPage = {
+  content?: Record<string, unknown>[];
+  totalElements?: number;
+  number?: number;
+  size?: number;
+};
+
 function mapCustomer(raw: Record<string, unknown>): Customer {
   return {
     id: String(raw.id ?? ""),
@@ -24,13 +31,19 @@ function mapCustomer(raw: Record<string, unknown>): Customer {
 
 export class BackendCustomerAdapter implements CustomerService {
   async list(params?: ListQuery): Promise<PagedResult<Customer>> {
-    const q = params?.query ? `?q=${encodeURIComponent(params.query)}` : "";
-    const rows = await adminFetchJson<Record<string, unknown>[]>(`/api/customers${q}`);
+    const qs = new URLSearchParams();
+    qs.set("page", String(Math.max(0, (params?.page ?? 1) - 1)));
+    qs.set("size", String(Math.min(100, Math.max(1, params?.pageSize ?? 20))));
+    if (params?.query?.trim()) qs.set("q", params.query.trim());
+    const group = params?.filters?.group;
+    if (typeof group === "string" && group.trim()) qs.set("group", group.trim());
+    const raw = await adminFetchJson<SpringPage>(`/api/customers?${qs.toString()}`);
+    const items = Array.isArray(raw.content) ? raw.content.map(mapCustomer) : [];
     return {
-      items: rows.map(mapCustomer),
-      total: rows.length,
-      page: params?.page ?? 1,
-      pageSize: params?.pageSize ?? (rows.length || 1),
+      items,
+      total: Number(raw.totalElements ?? 0),
+      page: typeof raw.number === "number" ? raw.number + 1 : (params?.page ?? 1),
+      pageSize: typeof raw.size === "number" ? raw.size : Number(qs.get("size")),
     };
   }
 

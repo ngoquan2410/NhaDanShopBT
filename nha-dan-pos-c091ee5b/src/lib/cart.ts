@@ -12,14 +12,27 @@ import type { CartLine } from "@/services/types";
 const STORAGE_KEY = "nhadan.cart.v1";
 
 export interface CartItem extends CartLine {
-  /** Variant stock at time of add — used for over-stock warnings on Cart page. */
-  stock: number;
+  /** Known stock from trusted/admin flows only. Public storefront catalog intentionally omits raw stock. */
+  stock?: number;
+  /** Explicit opt-in marker for preserving persisted stock; absent public cart stock is treated as unknown. */
+  stockSource?: "trusted";
 }
 
 interface CartState {
   items: CartItem[];
   selectedPromotionId?: string | null;
   selectedPromotionMode?: "auto" | "manual";
+}
+
+function normalizePersistedCartLine(line: CartItem): CartItem {
+  if (line.stockSource === "trusted") {
+    return line;
+  }
+  if (Object.prototype.hasOwnProperty.call(line, "stock")) {
+    const { stock: _stock, stockSource: _stockSource, ...rest } = line;
+    return rest;
+  }
+  return line;
 }
 
 function loadInitial(): CartState {
@@ -29,15 +42,16 @@ function loadInitial(): CartState {
     if (!raw) return { items: [], selectedPromotionId: null, selectedPromotionMode: "auto" };
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.items)) return { items: [] };
-    const valid = parsed.items.filter(isBackendCartLine);
-    if (valid.length !== parsed.items.length) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ items: valid, selectedPromotionId: parsed.selectedPromotionId ?? null }));
-    }
-    return {
+    const valid = parsed.items.filter(isBackendCartLine).map(normalizePersistedCartLine);
+    const nextState = {
       items: valid,
       selectedPromotionId: typeof parsed.selectedPromotionId === "string" ? parsed.selectedPromotionId : null,
-      selectedPromotionMode: parsed.selectedPromotionMode === "manual" ? "manual" : "auto",
+      selectedPromotionMode: parsed.selectedPromotionMode === "manual" ? "manual" as const : "auto" as const,
     };
+    if (valid.length !== parsed.items.length || JSON.stringify(valid) !== JSON.stringify(parsed.items)) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+    }
+    return nextState;
   } catch {
     return { items: [], selectedPromotionId: null, selectedPromotionMode: "auto" };
   }
@@ -84,6 +98,14 @@ function recompute(line: CartItem): CartItem {
   return { ...line, lineSubtotal: line.unitPrice * line.qty };
 }
 
+export function hasKnownCartStock(line: Pick<CartItem, "stock">): line is Pick<CartItem, "stock"> & { stock: number } {
+  return Number.isFinite(line.stock);
+}
+
+function stockCap(line: Pick<CartItem, "stock">): number {
+  return hasKnownCartStock(line) ? Math.max(0, line.stock) : Number.MAX_SAFE_INTEGER;
+}
+
 export function getCartSnapshot(): CartItem[] {
   return state.items;
 }
@@ -110,7 +132,7 @@ export const cartActions = {
           ...s,
           items: s.items.map((i) =>
             i === existing
-              ? recompute({ ...i, qty: Math.min((i.stock || Infinity), i.qty + input.qty) })
+              ? recompute({ ...i, qty: Math.min(stockCap(i), i.qty + input.qty) })
               : i,
           ),
         };
@@ -130,7 +152,7 @@ export const cartActions = {
     setState((s) => ({
       ...s,
       items: s.items.map((i) =>
-        i.id === id ? recompute({ ...i, qty: Math.max(1, Math.min(i.stock ?? Number.MAX_SAFE_INTEGER, qty)) }) : i,
+        i.id === id ? recompute({ ...i, qty: Math.max(1, Math.min(stockCap(i), qty)) }) : i,
       ),
     }));
   },

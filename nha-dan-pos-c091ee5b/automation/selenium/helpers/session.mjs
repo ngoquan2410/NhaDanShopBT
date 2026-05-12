@@ -3,7 +3,13 @@
  */
 export async function resetBrowserSession(driver, baseUrl) {
   const origin = baseUrl.replace(/\/$/, "");
-  await driver.get(`${origin}/`);
+  try {
+    await driver.get(`${origin}/`);
+  } catch (e) {
+    // Retry once after slow Vite/chromium cold start (renderer timeout).
+    await new Promise((r) => setTimeout(r, 2000));
+    await driver.get(`${origin}/`);
+  }
   await driver.manage().deleteAllCookies();
   await driver.executeScript(`
     try {

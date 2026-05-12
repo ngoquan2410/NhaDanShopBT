@@ -24,6 +24,7 @@ import {
   type Invoice,
   type PendingOrder,
 } from "./mock-data";
+import { localToday } from "./localDate";
 import { migratePromotion, type Promotion } from "./promotions";
 
 interface State {
@@ -238,7 +239,7 @@ export const supplierActions = {
 // ===== Users =====
 export const userActions = {
   create(input: Omit<UserAccount, "id" | "createdAt">) {
-    const u: UserAccount = { ...input, id: uid("u"), createdAt: new Date().toISOString().slice(0, 10) };
+    const u: UserAccount = { ...input, id: uid("u"), createdAt: localToday() };
     setState((s) => ({ ...s, users: [u, ...s.users] }));
     return u;
   },

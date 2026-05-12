@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
 import { adminFetchJson } from "@/services/auth/adminApi";
@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/table";
 import { formatVND } from "@/lib/format";
 import { CheckCircle2, XCircle, RefreshCw, Search } from "lucide-react";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { TablePagination } from "@/components/shared/TablePagination";
 
 /** Backend GhnQuoteLog JSON (camelCase). */
 interface LogRow {
@@ -68,43 +70,46 @@ const SAVED_VIEWS: SavedView[] = [
 
 export default function GhnQuoteLogsPage() {
   const [rows, setRows] = useState<LogRow[]>([]);
+  const [totalElements, setTotalElements] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [reasonFilter, setReasonFilter] = useState<ReasonFilter>("all");
+  const [page, setPage] = useState(1);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await adminFetchJson<{ content?: LogRow[] }>(
-        `/api/admin/ghn-quote-logs?page=0&size=${PAGE_SIZE}&sort=createdAt,desc`,
+      const u = new URLSearchParams();
+      u.set("page", String(Math.max(0, page - 1)));
+      u.set("size", String(PAGE_SIZE));
+      u.set("sort", "createdAt,desc");
+      if (debouncedSearch.trim()) u.set("search", debouncedSearch.trim());
+      if (statusFilter === "ok") u.set("ok", "true");
+      else if (statusFilter === "fail") u.set("ok", "false");
+      if (reasonFilter !== "all") u.set("reason", reasonFilter);
+      const data = await adminFetchJson<{ content?: LogRow[]; totalElements?: number }>(
+        `/api/admin/ghn-quote-logs?${u.toString()}`,
       );
-      setRows(Array.isArray(data.content) ? data.content : []);
+      const content = Array.isArray(data.content) ? data.content : [];
+      setRows(content);
+      setTotalElements(typeof data.totalElements === "number" ? data.totalElements : content.length);
     } catch {
       setRows([]);
+      setTotalElements(0);
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, debouncedSearch, statusFilter, reasonFilter]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (statusFilter === "ok" && !r.ok) return false;
-      if (statusFilter === "fail" && r.ok) return false;
-      if (reasonFilter !== "all" && r.reason !== reasonFilter) return false;
-      if (!q) return true;
-      const hay = [
-        r.provinceName, r.districtName, r.wardName,
-        r.orderCode, r.reason, r.message,
-      ].filter(Boolean).join(" ").toLowerCase();
-      return hay.includes(q);
-    });
-  }, [rows, search, statusFilter, reasonFilter]);
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, statusFilter, reasonFilter]);
 
   const stats = useMemo(() => {
     const total = rows.length;
@@ -136,10 +141,10 @@ export default function GhnQuoteLogsPage() {
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label={`Tổng (${PAGE_SIZE} gần nhất)`} value={String(stats.total)} />
-        <StatCard label="Thành công" value={String(stats.ok)} tone="success" />
-        <StatCard label="Thất bại" value={String(stats.fail)} tone={stats.fail > 0 ? "danger" : "muted"} />
-        <StatCard label="Độ trễ TB" value={`${stats.avgLatency} ms`} />
+        <StatCard label={`Tổng (lọc BE)`} value={String(totalElements)} />
+        <StatCard label="OK (trang)" value={String(stats.ok)} tone="success" />
+        <StatCard label="FAIL (trang)" value={String(stats.fail)} tone={stats.fail > 0 ? "danger" : "muted"} />
+        <StatCard label="Độ trễ TB (trang)" value={`${stats.avgLatency} ms`} />
       </div>
 
       <Card>
@@ -212,14 +217,14 @@ export default function GhnQuoteLogsPage() {
                       Đang tải…
                     </TableCell>
                   </TableRow>
-                ) : filtered.length === 0 ? (
+                ) : rows.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                       Chưa có log nào khớp bộ lọc.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((r) => (
+                  rows.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell className="font-mono text-xs whitespace-nowrap">
                         {format(new Date(r.createdAt), "dd/MM HH:mm:ss")}
@@ -274,6 +279,15 @@ export default function GhnQuoteLogsPage() {
               </TableBody>
             </Table>
           </div>
+          <TablePagination
+            page={page}
+            totalPages={Math.max(1, Math.ceil(totalElements / PAGE_SIZE))}
+            total={totalElements}
+            rangeStart={totalElements === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}
+            rangeEnd={Math.min(totalElements, page * PAGE_SIZE)}
+            pageSize={PAGE_SIZE}
+            onPageChange={setPage}
+          />
         </CardContent>
       </Card>
     </div>

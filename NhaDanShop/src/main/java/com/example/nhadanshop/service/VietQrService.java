@@ -9,7 +9,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -90,7 +89,7 @@ public class VietQrService {
                 .replace("đ", "d")
                 .replace("Đ", "D")
                 .replaceAll("\\p{M}", "")
-                .replaceAll("[^A-Za-z0-9 ]", " ")
+                .replaceAll("[^A-Za-z0-9 -]", " ")
                 .replaceAll("\\s+", " ")
                 .trim()
                 .toUpperCase()
@@ -99,7 +98,7 @@ public class VietQrService {
                         .replace("đ", "d")
                         .replace("Đ", "D")
                         .replaceAll("\\p{M}", "")
-                        .replaceAll("[^A-Za-z0-9 ]", " ")
+                        .replaceAll("[^A-Za-z0-9 -]", " ")
                         .replaceAll("\\s+", " ")
                         .trim()
                         .toUpperCase()

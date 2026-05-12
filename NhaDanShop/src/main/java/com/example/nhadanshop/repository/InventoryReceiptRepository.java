@@ -6,17 +6,19 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface InventoryReceiptRepository extends JpaRepository<InventoryReceipt, Long> {
+public interface InventoryReceiptRepository extends JpaRepository<InventoryReceipt, Long>, JpaSpecificationExecutor<InventoryReceipt> {
 
     Optional<InventoryReceipt> findByReceiptNo(String receiptNo);
 
@@ -43,6 +45,26 @@ public interface InventoryReceiptRepository extends JpaRepository<InventoryRecei
     @EntityGraph(attributePaths = {"createdBy", "supplier", "items", "items.product", "items.variant"})
     @Query("SELECT r FROM InventoryReceipt r ORDER BY r.receiptDate DESC")
     Page<InventoryReceipt> findAllWithDetails(Pageable pageable);
+
+    @Query("""
+            SELECT r.id FROM InventoryReceipt r
+            WHERE (:from IS NULL OR r.receiptDate >= :from)
+              AND (:to IS NULL OR r.receiptDate <= :to)
+              AND (:q IS NULL OR :q = ''
+                   OR LOWER(r.receiptNo) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(COALESCE(r.supplierName, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(COALESCE(r.note, '')) LIKE LOWER(CONCAT('%', :q, '%')))
+            ORDER BY r.receiptDate DESC, r.id DESC
+            """)
+    Page<Long> findReceiptIdsForList(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("q") String q,
+            Pageable pageable);
+
+    @EntityGraph(attributePaths = {"createdBy", "supplier", "items", "items.product", "items.variant"})
+    @Query("SELECT r FROM InventoryReceipt r WHERE r.id IN :ids")
+    List<InventoryReceipt> findAllByIdInWithDetails(@Param("ids") Collection<Long> ids);
 
     /**
      * Tổng số lượng nhập kho đã quy đổi sang đơn vị BÁN LẺ.

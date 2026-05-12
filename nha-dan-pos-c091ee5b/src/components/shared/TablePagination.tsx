@@ -36,7 +36,7 @@ export function TablePagination({
     <div className={cn("flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground", className)}>
       <div className="flex items-center gap-2">
         <span>
-          {rangeStart}–{rangeEnd} / <strong className="text-foreground">{total}</strong>
+          {rangeStart}-{rangeEnd} / <strong className="text-foreground">{total}</strong>
         </span>
         {onPageSizeChange && (
           <label className="flex items-center gap-1">

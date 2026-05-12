@@ -58,6 +58,7 @@ public class PendingOrderService {
     private final CustomerLoyaltyService loyaltyService;
     private final AccountService accountService;
     private final ProductComboRepository comboItemRepo;
+    private final PaymentEventRepository paymentEventRepository;
 
     private static final Set<String> ONLINE_PAYMENT_METHODS = Set.of(
             "bank_transfer", "momo", "zalopay", "cod", "cash_on_delivery");
@@ -401,6 +402,22 @@ public class PendingOrderService {
     }
 
     @Transactional
+    public Page<PendingOrderResponse> listLinkableCandidates(
+            Integer page,
+            Integer size,
+            String search,
+            Pageable pageable) {
+        Pageable safePageable = sanitizePageable(page, size, pageable);
+        Page<PendingOrder> poPage = pendingOrderRepo.findLinkableCandidates(
+                linkableStatuses(),
+                LocalDateTime.now(businessClock),
+                normalizeBlank(search),
+                safePageable);
+        List<PendingOrderResponse> content = mapOrdersForList(poPage.getContent());
+        return new PageImpl<>(content, safePageable, poPage.getTotalElements());
+    }
+
+    @Transactional
     public PendingOrderCountsResponse countAdmin(String paymentMethod, String search) {
         String normalizedPaymentMethod = normalizeBlank(paymentMethod);
         String normalizedSearch = normalizeBlank(search);
@@ -496,7 +513,7 @@ public class PendingOrderService {
 
     @Transactional
     public PendingOrderConfirmResponse confirmOrder(Long id, String note, String confirmedBy) {
-        PendingOrder order = pendingOrderRepo.findById(id)
+        PendingOrder order = pendingOrderRepo.findByIdForUpdate(id)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy đơn hàng ID: " + id));
 
         if (order.getStatus() == PendingOrder.Status.CANCELLED) {
@@ -586,9 +603,39 @@ public class PendingOrderService {
         List<Long> ids = orderedLightRows.stream().map(PendingOrder::getId).filter(Objects::nonNull).toList();
         List<PendingOrder> hydrated = pendingOrderRepo.findAllByIdInForListHydrate(ids);
         Map<Long, PendingOrder> byId = hydrated.stream().collect(Collectors.toMap(PendingOrder::getId, Function.identity()));
+        Map<Long, PaymentEvent> linkedByOrder = pickLatestLinkedPaymentEventPerOrder(ids);
         return orderedLightRows.stream()
-                .map(po -> toResponse(Objects.requireNonNull(byId.get(po.getId()), "missing pending id " + po.getId()), false))
+                .map(po -> mapToPendingOrderResponse(
+                        Objects.requireNonNull(byId.get(po.getId()), "missing pending id " + po.getId()),
+                        false,
+                        linkedByOrder.get(po.getId())))
                 .toList();
+    }
+
+    private Map<Long, PaymentEvent> pickLatestLinkedPaymentEventPerOrder(List<Long> orderIds) {
+        if (orderIds.isEmpty()) {
+            return Map.of();
+        }
+        List<PaymentEvent> rows = paymentEventRepository.findByLinkedPendingOrder_IdInAndStatus(
+                orderIds, PaymentEvent.Status.LINKED);
+        Map<Long, PaymentEvent> best = new HashMap<>();
+        for (PaymentEvent e : rows) {
+            if (e.getLinkedPendingOrder() == null) {
+                continue;
+            }
+            Long oid = e.getLinkedPendingOrder().getId();
+            PaymentEvent prev = best.get(oid);
+            if (prev == null) {
+                best.put(oid, e);
+                continue;
+            }
+            LocalDateTime pt = prev.getLinkedAt();
+            LocalDateTime et = e.getLinkedAt();
+            if (et != null && (pt == null || et.isAfter(pt))) {
+                best.put(oid, e);
+            }
+        }
+        return best;
     }
 
     private PendingOrderResponse toResponse(PendingOrder order) {
@@ -596,6 +643,37 @@ public class PendingOrderService {
     }
 
     private PendingOrderResponse toResponse(PendingOrder order, boolean includeFullInvoice) {
+        PaymentEvent linked = paymentEventRepository
+                .findFirstByLinkedPendingOrder_IdOrderByLinkedAtDesc(order.getId())
+                .orElse(null);
+        return mapToPendingOrderResponse(order, includeFullInvoice, linked);
+    }
+
+    private record PaymentLinkSlice(
+            String paymentLinkStatus,
+            BigDecimal paymentDelta,
+            Long linkedPaymentEventId,
+            BigDecimal linkedPaymentAmount) {
+        static PaymentLinkSlice none() {
+            return new PaymentLinkSlice("NONE", null, null, null);
+        }
+    }
+
+    private PaymentLinkSlice derivePaymentLink(PendingOrder order, PaymentEvent linked) {
+        if (linked == null || linked.getStatus() != PaymentEvent.Status.LINKED) {
+            return PaymentLinkSlice.none();
+        }
+        if (order.getTotalAmount() == null || linked.getAmount() == null) {
+            return PaymentLinkSlice.none();
+        }
+        BigDecimal delta = linked.getAmount().subtract(order.getTotalAmount());
+        int cmp = delta.compareTo(BigDecimal.ZERO);
+        String st = cmp == 0 ? "EXACT_PAID" : (cmp < 0 ? "UNDERPAID_LINKED" : "OVERPAID_LINKED");
+        return new PaymentLinkSlice(st, delta, linked.getId(), linked.getAmount());
+    }
+
+    private PendingOrderResponse mapToPendingOrderResponse(
+            PendingOrder order, boolean includeFullInvoice, PaymentEvent linkedOrNull) {
         ShippingAddressDto shippingAddress = readJson(order.getShippingAddressJson(), new TypeReference<>() {});
         List<GiftLineSnapshotDto> giftLines = readJsonList(order.getGiftLinesSnapshotJson(), new TypeReference<>() {});
         PromotionSnapshotDto promotionSnapshot = readJson(order.getPromotionSnapshotJson(), new TypeReference<>() {});
@@ -627,6 +705,7 @@ public class PendingOrderService {
             }
         }
 
+        PaymentLinkSlice pl = derivePaymentLink(order, linkedOrNull);
         return new PendingOrderResponse(
                 String.valueOf(order.getId()),
                 order.getOrderNo(),
@@ -650,13 +729,24 @@ public class PendingOrderService {
                 order.getCreatedBy() != null ? order.getCreatedBy().getUsername() : null,
                 order.getCancelReason(),
                 order.getTotalAmount(),
-                invoiceOut
+                invoiceOut,
+                pl.paymentLinkStatus(),
+                pl.paymentDelta(),
+                pl.linkedPaymentEventId(),
+                pl.linkedPaymentAmount()
         );
     }
 
     private boolean isTerminal(PendingOrder order) {
         return order.getStatus() == PendingOrder.Status.CONFIRMED
                 || order.getStatus() == PendingOrder.Status.CANCELLED;
+    }
+
+    private Set<PendingOrder.Status> linkableStatuses() {
+        return Set.of(
+                PendingOrder.Status.PENDING_PAYMENT,
+                PendingOrder.Status.WAITING_CONFIRM,
+                PendingOrder.Status.PAID_AUTO);
     }
 
     private boolean isAnonymousUser() {

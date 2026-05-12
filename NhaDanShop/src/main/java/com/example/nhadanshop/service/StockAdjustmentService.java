@@ -174,13 +174,31 @@ public class StockAdjustmentService {
 
             item.setSourceBatch(sourceBatch);
 
-            int systemQty = variant.getStockQty() != null ? variant.getStockQty() : 0;
+            boolean batchScoped = isBatchScopedReason(adj.getReason());
+
+            int systemQty = batchScoped && sourceBatch != null
+
+                    ? sourceBatch.getRemainingQty()
+
+                    : variant.getStockQty() != null ? variant.getStockQty() : 0;
 
             item.setSystemQty(systemQty); // snapshot
 
             item.setActualQty(ir.actualQty());
 
             assertReasonAllowsDiff(adj.getReason(), ir.actualQty() - systemQty, "tao phieu " + adj.getAdjNo());
+
+            if (batchScoped && ir.actualQty() - systemQty != 0 && sourceBatch == null) {
+
+                throw new IllegalArgumentException("Vui lòng chọn lô điều chỉnh cho lý do " + adj.getReason() + ".");
+
+            }
+
+            if (!batchScoped && ir.sourceBatchId() != null && ir.actualQty() > systemQty) {
+
+                throw new IllegalArgumentException("Không được gửi sourceBatchId khi tăng tồn.");
+
+            }
 
             if (ir.actualQty() > systemQty) {
 
@@ -236,7 +254,37 @@ public class StockAdjustmentService {
 
                     .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy variant ID: " + item.getVariant().getId()));
 
-            int currentSystemQty = variant.getStockQty() != null ? variant.getStockQty() : 0;
+            boolean batchScoped = isBatchScopedReason(adj.getReason());
+
+            ProductBatch lockedContextBatch = null;
+
+            if (batchScoped && item.getSourceBatch() != null) {
+
+                List<ProductBatch> lockedSourceBatches = lockSourceBatchesInDeterministicOrder(List.of(item.getSourceBatch().getId()));
+
+                lockedContextBatch = lockedSourceBatches.stream().findFirst()
+
+                        .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy batch ID: " + item.getSourceBatch().getId()));
+
+                if (lockedContextBatch.getVariant() == null
+
+                        || !variant.getId().equals(lockedContextBatch.getVariant().getId())) {
+
+                    throw new IllegalArgumentException(
+
+                            "Batch ID " + lockedContextBatch.getId() + " không thuộc variant ID: " + variant.getId());
+
+                }
+
+                assertSourceBatchStatusAllowedForExplicitNegative(lockedContextBatch, adj.getAdjNo());
+
+            }
+
+            int currentSystemQty = batchScoped && lockedContextBatch != null
+
+                    ? lockedContextBatch.getRemainingQty()
+
+                    : variant.getStockQty() != null ? variant.getStockQty() : 0;
 
             int snapshotSystemQty = item.getSystemQty() != null ? item.getSystemQty() : 0;
 
@@ -253,6 +301,12 @@ public class StockAdjustmentService {
             int diff = item.getActualQty() - snapshotSystemQty; // diff_qty
 
             assertReasonAllowsDiff(adj.getReason(), diff, "xac nhan phieu " + adj.getAdjNo());
+
+            if (batchScoped && diff != 0 && lockedContextBatch == null) {
+
+                throw new IllegalArgumentException("Vui lòng chọn lô điều chỉnh cho lý do " + adj.getReason() + ".");
+
+            }
 
 
 
@@ -276,7 +330,19 @@ public class StockAdjustmentService {
 
                 int toDeduct = -diff;
 
-                ProductBatch sourceBatch = item.getSourceBatch();
+                ProductBatch sourceBatch = lockedContextBatch != null ? lockedContextBatch : item.getSourceBatch();
+
+                if (sourceBatch == null
+
+                        && requiresExplicitSourceBatchForNegative(adj.getReason())
+
+                        && batchRepo.countAdjustableRemainingByVariantId(variant.getId()) > 0) {
+
+                    throw new IllegalArgumentException(
+
+                            "Vui lòng chọn lô nguồn cho điều chỉnh giảm với lý do " + adj.getReason() + ".");
+
+                }
 
                 if (sourceBatch != null) {
 
@@ -370,6 +436,14 @@ public class StockAdjustmentService {
 
             } else {
 
+                if (!batchScoped && item.getSourceBatch() != null) {
+
+                    throw new IllegalArgumentException(
+
+                            "Không được ghi nhận lô nguồn khi tăng tồn (ADJ " + adj.getAdjNo() + ").");
+
+                }
+
                 // Tăng tồn: tạo batch mới với batchCode = ADJ-xxx
 
                 ProductBatch newBatch = new ProductBatch();
@@ -380,7 +454,11 @@ public class StockAdjustmentService {
 
                 newBatch.setBatchCode(adj.getAdjNo() + "-" + variant.getVariantCode());
 
-                newBatch.setExpiryDate(
+                newBatch.setExpiryDate(lockedContextBatch != null && lockedContextBatch.getExpiryDate() != null
+
+                        ? lockedContextBatch.getExpiryDate()
+
+                        :
 
                         variant.getExpiryDays() != null && variant.getExpiryDays() > 0
 
@@ -394,7 +472,11 @@ public class StockAdjustmentService {
 
                 newBatch.setRemainingQty(diff);
 
-                newBatch.setCostPrice(variant.getCostPrice());
+                newBatch.setCostPrice(lockedContextBatch != null && lockedContextBatch.getCostPrice() != null
+
+                        ? lockedContextBatch.getCostPrice()
+
+                        : variant.getCostPrice());
 
                 stockMutationService.updateStockWithBatches(
 
@@ -887,8 +969,17 @@ public class StockAdjustmentService {
     @Transactional(readOnly = true)
 
     public Page<StockAdjustmentResponse> getAll(Pageable pageable) {
+        return getAll(pageable, null, null);
+    }
 
-        Page<Long> idPage = adjRepo.findIdsByOrderByAdjDateDescIdDesc(pageable);
+    /**
+     * List adjustments with optional status and DB-side text search (adj no, note, reason, creator username).
+     */
+    public Page<StockAdjustmentResponse> getAll(Pageable pageable, StockAdjustment.Status status, String query) {
+        String q = (query != null && !query.isBlank()) ? query.trim() : null;
+        Page<Long> idPage = (status != null || q != null)
+                ? adjRepo.findIdsFiltered(status, q, pageable)
+                : adjRepo.findIdsByOrderByAdjDateDescIdDesc(pageable);
 
         if (idPage.isEmpty()) {
 
@@ -926,6 +1017,18 @@ public class StockAdjustmentService {
             throw new IllegalArgumentException(
                     "Ly do " + reason + " chi duoc giam ton. Khong duoc tang ton khi " + context + ".");
         }
+    }
+
+    private static boolean requiresExplicitSourceBatchForNegative(StockAdjustment.Reason reason) {
+        return reason == StockAdjustment.Reason.DAMAGED
+                || reason == StockAdjustment.Reason.EXPIRED
+                || reason == StockAdjustment.Reason.LOST
+                || isBatchScopedReason(reason);
+    }
+
+    private static boolean isBatchScopedReason(StockAdjustment.Reason reason) {
+        return reason == StockAdjustment.Reason.WRONG_RECEIPT
+                || reason == StockAdjustment.Reason.PERIODIC_STOCKTAKE;
     }
 
 

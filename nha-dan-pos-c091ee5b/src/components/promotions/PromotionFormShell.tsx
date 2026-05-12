@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { useService } from "@/hooks/useService";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { categories as categoryService, products as productService } from "@/services";
 import { DateInput } from "@/components/shared/DateInput";
 import {
@@ -23,10 +24,47 @@ interface Props {
 export function PromotionFormShell({ promo, onClose, onSave }: Props) {
   const [form, setForm] = useState<Promotion>(promo);
   const { data: categoryData } = useService(() => categoryService.list({ active: true }), []);
-  const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 200, active: true }), []);
   const categories = categoryData?.items ?? [];
-  const products = productData?.items ?? [];
+  const [productScopeSearch, setProductScopeSearch] = useState("");
+  const debouncedProductScopeSearch = useDebouncedValue(productScopeSearch, 250);
+  const [productScopeOptions, setProductScopeOptions] = useState<{ id: string; label: string; sub?: string }[]>([]);
   const isEdit = !!promo.id;
+
+  useEffect(() => {
+    if (form.scope.kind !== "products") {
+      setProductScopeOptions([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const q = debouncedProductScopeSearch.trim();
+        const page = await productService.list({
+          page: 1,
+          pageSize: 20,
+          query: q.length >= 2 ? q : undefined,
+          active: true,
+        });
+        if (!cancelled) {
+          setProductScopeOptions(page.items.map((p) => ({ id: p.id, label: p.name, sub: p.code })));
+        }
+      } catch {
+        if (!cancelled) setProductScopeOptions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [form.scope.kind, debouncedProductScopeSearch]);
+
+  const scopeProductOptions = useMemo(() => {
+    if (form.scope.kind !== "products") return productScopeOptions;
+    const ids = new Set(productScopeOptions.map((o) => o.id));
+    const extras = form.scope.productIds
+      .filter((id) => !ids.has(id))
+      .map((id) => ({ id, label: `Sản phẩm (${id.slice(0, 8)}…)`, sub: "Đã chọn" }));
+    return [...extras, ...productScopeOptions];
+  }, [form.scope, productScopeOptions]);
 
   const validation = useMemo(() => validatePromotion(form), [form]);
   const hasErrors = Object.keys(validation.errors).length > 0;
@@ -188,11 +226,13 @@ export function PromotionFormShell({ promo, onClose, onSave }: Props) {
               {form.scope.kind === "products" && (
                 <div className="mt-2 rounded-md border bg-muted/30 p-2">
                   <MultiPicker
-                    options={products.map((p) => ({ id: p.id, label: p.name, sub: p.code }))}
+                    options={scopeProductOptions}
                     selectedIds={form.scope.productIds}
                     onToggle={toggleScopeId}
                     onClear={clearScopeIds}
                     placeholder="Tìm sản phẩm hoặc mã SP..."
+                    remoteMode
+                    onSearchChange={setProductScopeSearch}
                   />
                   {e.scope && <p className="text-[11px] text-danger mt-1">{e.scope}</p>}
                 </div>

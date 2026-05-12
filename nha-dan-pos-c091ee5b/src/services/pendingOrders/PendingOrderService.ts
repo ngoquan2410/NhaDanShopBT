@@ -11,6 +11,7 @@ export type PendingOrderOnlinePaymentMethod = Exclude<PaymentMethod, "cash">;
 
 export interface PendingOrderService {
   list(params?: PendingOrderListParams): Promise<PagedResult<PendingOrder>>;
+  listLinkable(params?: PendingOrderListParams): Promise<PagedResult<PendingOrder>>;
   counts(params?: { paymentMethod?: string; search?: string }): Promise<Record<string, number>>;
   get(id: string): Promise<PendingOrder | null>;
   getByCode(code: string): Promise<PendingOrder | null>;

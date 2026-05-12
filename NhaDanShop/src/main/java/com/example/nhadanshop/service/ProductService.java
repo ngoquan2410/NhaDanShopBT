@@ -3,6 +3,9 @@ package com.example.nhadanshop.service;
 import com.example.nhadanshop.dto.ProductPatchRequest;
 import com.example.nhadanshop.dto.ProductRequest;
 import com.example.nhadanshop.dto.ProductResponse;
+import com.example.nhadanshop.dto.PublicProductResponse;
+import com.example.nhadanshop.dto.PublicVariantResponse;
+import com.example.nhadanshop.dto.ProductVariantSearchResponse;
 import com.example.nhadanshop.dto.ProductVariantResponse;
 import com.example.nhadanshop.entity.Category;
 import com.example.nhadanshop.entity.Product;
@@ -30,6 +33,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -48,7 +52,7 @@ public class ProductService {
     private final StockedCatalogGuardService stockedCatalogGuardService;
 
     public List<ProductResponse> findAll() {
-        return toResponsesWithVariants(productRepository.findByActiveTrue());
+        return toResponsesWithVariants(productRepository.findByActiveTrue(), false);
     }
 
     public Page<ProductResponse> search(
@@ -56,6 +60,7 @@ public class ProductService {
             Long categoryId,
             boolean includeInactive,
             String productTypeStr,
+            boolean restrictVariantMatchToActiveSellable,
             Pageable pageable) {
         Product.ProductType pType = null;
         if (productTypeStr != null && !productTypeStr.isBlank()) {
@@ -68,21 +73,89 @@ public class ProductService {
                 categoryId,
                 includeInactive,
                 pType,
+                restrictVariantMatchToActiveSellable,
                 pageable);
-        List<ProductResponse> content = toResponsesWithVariants(page.getContent());
+        List<ProductResponse> content = toResponsesWithVariants(page.getContent(), restrictVariantMatchToActiveSellable);
         return new PageImpl<>(content, page.getPageable(), page.getTotalElements());
     }
 
+    public Page<PublicProductResponse> searchPublic(
+            String search,
+            Long categoryId,
+            String productTypeStr,
+            Pageable pageable) {
+        Product.ProductType pType = null;
+        if (productTypeStr != null && !productTypeStr.isBlank()) {
+            try {
+                pType = Product.ProductType.valueOf(productTypeStr.trim().toUpperCase());
+            } catch (IllegalArgumentException ignored) { /* all types */ }
+        }
+        Page<Product> page = productRepository.searchProducts(
+                search != null && !search.isBlank() ? search.trim() : null,
+                categoryId,
+                false,
+                pType,
+                true,
+                pageable);
+        List<PublicProductResponse> content = toPublicResponses(page.getContent());
+        return new PageImpl<>(content, page.getPageable(), page.getTotalElements());
+    }
+
+    /**
+     * Backend-owned paginated variant search for transaction UIs. Filters before pagination.
+     */
+    public Page<ProductVariantSearchResponse> searchVariantsForTransactions(
+            String search,
+            boolean activeOnly,
+            boolean sellableOnly,
+            boolean singleProductOnly,
+            Pageable pageable) {
+        if (search == null || search.isBlank()) {
+            return Page.empty(pageable);
+        }
+        String term = search.trim();
+        return variantRepository.searchVariantRows(term, activeOnly, sellableOnly, singleProductOnly, pageable);
+    }
+
     public Page<ProductResponse> findByCategory(Long categoryId, Pageable pageable) {
+        return findByCategory(categoryId, pageable, false);
+    }
+
+    public Page<ProductResponse> findByCategory(Long categoryId, Pageable pageable, boolean restrictToPublicVisibleVariants) {
         Page<Product> page = productRepository.findByCategoryIdAndActiveTrue(categoryId, pageable);
-        List<ProductResponse> content = toResponsesWithVariants(page.getContent());
+        List<ProductResponse> content = toResponsesWithVariants(page.getContent(), restrictToPublicVisibleVariants);
+        return new PageImpl<>(content, page.getPageable(), page.getTotalElements());
+    }
+
+    public Page<PublicProductResponse> findByCategoryPublic(Long categoryId, Pageable pageable) {
+        Page<Product> page = productRepository.searchProducts(
+                null,
+                categoryId,
+                false,
+                null,
+                true,
+                pageable);
+        List<PublicProductResponse> content = toPublicResponses(page.getContent());
         return new PageImpl<>(content, page.getPageable(), page.getTotalElements());
     }
 
     public ProductResponse findById(Long id) {
+        return findById(id, false);
+    }
+
+    public ProductResponse findById(Long id, boolean restrictToPublicVisibleVariants) {
         Product p = findEntityById(id);
+        if (restrictToPublicVisibleVariants && !Boolean.TRUE.equals(p.getActive())) {
+            throw new EntityNotFoundException("Không tìm thấy sản phẩm ID: " + id);
+        }
         if (p.getProductType() == Product.ProductType.SINGLE) {
             List<ProductVariant> vv = variantRepository.findByProductIdOrderByIsDefaultDescVariantCodeAsc(id);
+            if (restrictToPublicVisibleVariants) {
+                vv = vv.stream().filter(this::isPublicVisibleVariant).toList();
+                if (vv.isEmpty()) {
+                    throw new EntityNotFoundException("Không tìm thấy sản phẩm ID: " + id);
+                }
+            }
             LocalDate today = LocalDate.now(businessClock);
             List<Long> variantIds = vv.stream().map(ProductVariant::getId).toList();
             Map<Long, Integer> sellableByVid = buildSellableStockMap(variantIds, today);
@@ -92,6 +165,27 @@ public class ProductService {
             return DtoMapper.toResponseWithVariants(p, variantRows);
         }
         return DtoMapper.toResponse(p);
+    }
+
+    public PublicProductResponse findByIdPublic(Long id) {
+        Product p = findEntityById(id);
+        if (!Boolean.TRUE.equals(p.getActive())) {
+            throw new EntityNotFoundException("Không tìm thấy sản phẩm ID: " + id);
+        }
+        if (p.getProductType() == Product.ProductType.COMBO) {
+            throw new EntityNotFoundException("Không tìm thấy sản phẩm ID: " + id);
+        }
+        List<ProductVariant> vv = variantRepository.findByProductIdOrderByIsDefaultDescVariantCodeAsc(id)
+                .stream()
+                .filter(this::isPublicVisibleVariant)
+                .toList();
+        if (vv.isEmpty()) {
+            throw new EntityNotFoundException("Không tìm thấy sản phẩm ID: " + id);
+        }
+        List<PublicVariantResponse> variantRows = vv.stream()
+                .map(DtoMapper::toPublicResponse)
+                .toList();
+        return DtoMapper.toPublicResponse(p, variantRows);
     }
 
     @Transactional
@@ -375,7 +469,7 @@ public class ProductService {
      * Public list/detail DTOs must include variant rows for SINGLE products (lazy bag is often empty on
      * detached/listed entities). COMBO responses stay without variants.
      */
-    private List<ProductResponse> toResponsesWithVariants(List<Product> products) {
+    private List<ProductResponse> toResponsesWithVariants(List<Product> products, boolean restrictToPublicVisibleVariants) {
         if (products.isEmpty()) {
             return List.of();
         }
@@ -405,11 +499,54 @@ public class ProductService {
                 return DtoMapper.toResponse(p);
             }
             List<ProductVariant> vv = byProductId.getOrDefault(p.getId(), List.of());
+            if (restrictToPublicVisibleVariants) {
+                vv = vv.stream().filter(this::isPublicVisibleVariant).toList();
+            }
             List<ProductVariantResponse> variantRows = vv.stream()
                     .map(v -> DtoMapper.toResponse(v, sellableByVid.getOrDefault(v.getId(), 0)))
                     .toList();
+            if (restrictToPublicVisibleVariants && variantRows.isEmpty()) {
+                return null;
+            }
             return DtoMapper.toResponseWithVariants(p, variantRows);
-        }).toList();
+        }).filter(Objects::nonNull).toList();
+    }
+
+    private List<PublicProductResponse> toPublicResponses(List<Product> products) {
+        if (products.isEmpty()) {
+            return List.of();
+        }
+        List<Long> ids = products.stream().map(Product::getId).toList();
+        List<ProductVariant> allVariants = variantRepository.findByProductIdIn(ids);
+        Map<Long, List<ProductVariant>> byProductId = new HashMap<>();
+        for (ProductVariant v : allVariants) {
+            Long pid = v.getProduct().getId();
+            byProductId.computeIfAbsent(pid, k -> new ArrayList<>()).add(v);
+        }
+        Comparator<ProductVariant> variantOrder = Comparator
+                .comparing((ProductVariant v) -> Boolean.TRUE.equals(v.getIsDefault()))
+                .reversed()
+                .thenComparing(v -> v.getVariantCode() != null ? v.getVariantCode() : "", String.CASE_INSENSITIVE_ORDER);
+        for (List<ProductVariant> list : byProductId.values()) {
+            list.sort(variantOrder);
+        }
+        return products.stream().map(p -> {
+            if (!Boolean.TRUE.equals(p.getActive())) {
+                return null;
+            }
+            List<PublicVariantResponse> variantRows = byProductId.getOrDefault(p.getId(), List.of()).stream()
+                    .filter(this::isPublicVisibleVariant)
+                    .map(DtoMapper::toPublicResponse)
+                    .toList();
+            if (variantRows.isEmpty()) {
+                return null;
+            }
+            return DtoMapper.toPublicResponse(p, variantRows);
+        }).filter(Objects::nonNull).toList();
+    }
+
+    private boolean isPublicVisibleVariant(ProductVariant v) {
+        return Boolean.TRUE.equals(v.getActive()) && !Boolean.FALSE.equals(v.getIsSellable());
     }
 
     private java.util.Map<Long, Integer> buildSellableStockMap(List<Long> variantIds, LocalDate asOf) {

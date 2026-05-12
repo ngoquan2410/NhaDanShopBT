@@ -131,6 +131,19 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             """)
     List<ProductBatch> findCurrentAdjustableByVariantIdForUpdate(@Param("variantId") Long variantId);
 
+    /**
+     * Read-only count: lô có thể giảm theo policy điều chỉnh (active|blocked, remaining &gt; 0).
+     * Dùng để bắt buộc chọn {@code sourceBatchId} cho một số lý do mà không cần lock toàn bộ lô.
+     */
+    @Query("""
+            SELECT COUNT(b)
+            FROM ProductBatch b
+            WHERE b.variant.id = :variantId
+              AND b.remainingQty > 0
+              AND b.status IN ('active', 'blocked')
+            """)
+    long countAdjustableRemainingByVariantId(@Param("variantId") Long variantId);
+
     /** Lô còn hàng cho nhiều variants, dùng cho projection read model. */
     @Query("""
             SELECT b FROM ProductBatch b

@@ -52,17 +52,20 @@ public class InventoryReceiptController {
         return ResponseEntity.ok().headers(headers).body(bytes);
     }
 
-    /** GET /api/receipts?from=&to=&page=&size= */
+    /** GET /api/receipts?from=&to=&search=&page=&size= */
     @GetMapping
     public Page<InventoryReceiptResponse> list(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) String search,
             @PageableDefault(size = 20) Pageable pageable) {
+        java.time.LocalDateTime fromDt = null;
+        java.time.LocalDateTime toDt = null;
         if (from != null && to != null) {
-            return receiptService.listReceiptsByDateRange(
-                    from.atStartOfDay(), to.atTime(LocalTime.MAX), pageable);
+            fromDt = from.atStartOfDay();
+            toDt = to.atTime(LocalTime.MAX);
         }
-        return receiptService.listReceipts(pageable);
+        return receiptService.listReceipts(fromDt, toDt, search, pageable);
     }
 
     /** GET /api/receipts/{id} */
@@ -114,14 +117,14 @@ public class InventoryReceiptController {
 
     /** DELETE /api/receipts/{id} */
     @DeleteMapping("/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(
+    public ResponseEntity<Void> delete(
             @PathVariable Long id,
             @RequestHeader(value = IdempotencyScopes.HEADER_NAME, required = false) String idempotencyKey) {
         idempotencyService.executeVoid(
                 IdempotencyScopes.receiptDelete(id),
                 idempotencyKey,
                 () -> receiptService.deleteReceipt(id));
+        return ResponseEntity.noContent().build();
     }
 
     /**

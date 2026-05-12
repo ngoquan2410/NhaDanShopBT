@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTableToolbar, FilterChip } from "@/components/shared/DataTableToolbar";
@@ -8,15 +8,17 @@ import { AsyncBoundary } from "@/components/shared/AsyncBoundary";
 import { InvoiceDetailDrawer } from "@/components/shared/InvoiceDetailDrawer";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { SortableTh } from "@/components/shared/SortableTh";
-import { PeriodFilter, matchesPeriod, type PeriodValue } from "@/components/shared/PeriodFilter";
+import { PeriodFilter, type PeriodValue } from "@/components/shared/PeriodFilter";
 import { invoices as invoiceService } from "@/services";
 import { useService } from "@/hooks/useService";
 import type { Invoice } from "@/lib/mock-data";
 import { formatVND, formatDateTime } from "@/lib/format";
-import { useTableControls } from "@/hooks/useTableControls";
+import type { SortState } from "@/hooks/useTableControls";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Receipt, Printer, XCircle, Trash2, Eye, ShieldAlert, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { localToday, toLocalDateString } from "@/lib/localDate";
 
 /** Merchandise-oriented profit from backend when present (`itemGrossProfit` preferred). */
 function displayMerchProfit(inv: Invoice): number | null {
@@ -29,59 +31,86 @@ function displayMerchProfit(inv: Invoice): number | null {
 function canPhysicallyDeleteInvoice(inv: Invoice): boolean {
   if (inv.allowPhysicalDelete === false) return false;
   if (inv.allowPhysicalDelete === true) return true;
-  const day = new Date().toISOString().slice(0, 10);
+  const day = localToday();
   return inv.date.startsWith(day);
 }
 
 type SortKey = "number" | "date" | "customer" | "total" | "profit" | "status";
 
+function startOfWeekISO(): string {
+  const d = new Date();
+  const day = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - day);
+  return toLocalDateString(d);
+}
+
+function startOfMonthISO(): string {
+  const d = new Date();
+  d.setDate(1);
+  return toLocalDateString(d);
+}
+
+/** Maps UI period to inclusive yyyy-mm-dd bounds for GET /api/invoices?from&to */
+function periodToInvoiceDateRange(period: PeriodValue): { from: string; to: string } | undefined {
+  if (period.preset === "all") return undefined;
+  const to = localToday();
+  let from: string;
+  if (period.preset === "today") {
+    from = to;
+  } else if (period.preset === "week") {
+    from = startOfWeekISO();
+  } else if (period.preset === "month") {
+    from = startOfMonthISO();
+  } else {
+    if (!period.from || !period.to) return undefined;
+    return { from: period.from, to: period.to };
+  }
+  return { from, to };
+}
+
 export default function AdminInvoices() {
   const initialQ = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('q') ?? '' : '';
   const [search, setSearch] = useState(initialQ);
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [filterStatus, setFilterStatus] = useState<string | null>(null);
   const [period, setPeriod] = useState<PeriodValue>({ preset: "all" });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [sort, setSort] = useState<SortState<SortKey>>({ key: "date", dir: "desc" });
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
 
-  // Real async load via the canonical InvoiceService. We pass the BE-friendly
-  // `status` filter; period + free-text search remain client-side because the
-  // local adapter already filters on date/query, but we keep the UI-side
-  // filters too so behaviour is identical when the BE adapter takes over.
+  const dateRange = useMemo(() => periodToInvoiceDateRange(period), [period]);
+
   const { data, loading, error, isEmpty, reload } = useService(
     () =>
       invoiceService.list({
-        status: filterStatus === 'active' || filterStatus === 'cancelled' ? filterStatus : undefined,
-        sort: [{ field: "date", direction: "desc" }],
+        page,
+        pageSize,
+        query: debouncedSearch || undefined,
+        status: filterStatus === "active" || filterStatus === "cancelled" ? filterStatus : undefined,
+        dateRange,
+        sort: sort.key ? [{ field: sort.key, direction: sort.dir }] : [{ field: "date", direction: "desc" }],
       }),
-    [filterStatus],
+    [debouncedSearch, filterStatus, dateRange, page, pageSize, sort.key, sort.dir],
   );
 
   const invoiceList: Invoice[] = useMemo(() => data?.items ?? [], [data]);
 
-  const filtered = useMemo(() => invoiceList.filter(inv => {
-    if (search && !inv.number.toLowerCase().includes(search.toLowerCase()) && !inv.customerName.toLowerCase().includes(search.toLowerCase())) return false;
-    if (filterStatus && inv.status !== filterStatus) return false;
-    if (!matchesPeriod(inv.date, period)) return false;
-    return true;
-  }), [invoiceList, search, filterStatus, period]);
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, filterStatus, period.preset, period.from, period.to]);
 
-  const tc = useTableControls<Invoice, SortKey>({
-    data: filtered,
-    pageSize: 20,
-    initialSort: { key: "date", dir: "desc" },
-      sortAccessors: {
-      number: (i) => i.number,
-      date: (i) => new Date(i.date),
-      customer: (i) => i.customerName,
-      total: (i) => i.total,
-      profit: (i) => displayMerchProfit(i) ?? -1,
-      status: (i) => i.status,
-    },
-    resetToken: `${search}|${filterStatus}|${period.preset}|${period.from}|${period.to}`,
-  });
+  const toggleSort = (key: SortKey) => {
+    setPage(1);
+    setSort((prev) => {
+      if (prev.key !== key) return { key, dir: "asc" };
+      return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
+    });
+  };
 
-  const knownProfits = filtered.map(displayMerchProfit).filter((p): p is number => p != null);
+  const knownProfits = invoiceList.map(displayMerchProfit).filter((p): p is number => p != null);
   const totalProfitDisplay = knownProfits.length > 0 ? knownProfits.reduce((a, b) => a + b, 0) : null;
 
   const handleCancel = async () => {
@@ -116,7 +145,7 @@ export default function AdminInvoices() {
     <div className="space-y-4 admin-dense">
       <PageHeader
         title="Hóa đơn"
-        description={`${data?.total ?? invoiceList.length} hóa đơn`}
+        description={`${data?.total ?? 0} hóa đơn`}
         actions={
           <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-success-soft text-success rounded-md">
             <TrendingUp className="h-3.5 w-3.5" />
@@ -142,8 +171,8 @@ export default function AdminInvoices() {
       <AsyncBoundary
         loading={loading}
         error={error}
-        isEmpty={!loading && !error && filtered.length === 0}
-        data={tc.pageRows}
+        isEmpty={!loading && !error && invoiceList.length === 0}
+        data={invoiceList}
         onRetry={reload}
         emptyFallback={<EmptyState icon={Receipt} title="Không tìm thấy hóa đơn" />}
       >
@@ -153,13 +182,13 @@ export default function AdminInvoices() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
-                  <SortableTh label="Số hóa đơn" sortKey="number" sort={tc.sort} onSort={tc.toggleSort} />
-                  <SortableTh label="Thời gian" sortKey="date" sort={tc.sort} onSort={tc.toggleSort} />
-                  <SortableTh label="Khách hàng" sortKey="customer" sort={tc.sort} onSort={tc.toggleSort} />
+                  <SortableTh label="Số hóa đơn" sortKey="number" sort={sort} onSort={toggleSort} />
+                  <SortableTh label="Thời gian" sortKey="date" sort={sort} onSort={toggleSort} />
+                  <SortableTh label="Khách hàng" sortKey="customer" sort={sort} onSort={toggleSort} />
                   <th className="text-center px-3 py-2 font-medium text-muted-foreground">Thanh toán</th>
-                  <SortableTh label="Tổng" sortKey="total" sort={tc.sort} onSort={tc.toggleSort} align="right" />
-                  <SortableTh label="Lợi nhuận" sortKey="profit" sort={tc.sort} onSort={tc.toggleSort} align="right" />
-                  <SortableTh label="Trạng thái" sortKey="status" sort={tc.sort} onSort={tc.toggleSort} align="center" />
+                  <SortableTh label="Tổng" sortKey="total" sort={sort} onSort={toggleSort} align="right" />
+                  <SortableTh label="Lợi nhuận" sortKey="profit" sort={sort} onSort={toggleSort} align="right" />
+                  <SortableTh label="Trạng thái" sortKey="status" sort={sort} onSort={toggleSort} align="center" />
                   <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden lg:table-cell">Người tạo</th>
                   <th className="text-right px-3 py-2 font-medium text-muted-foreground w-[120px]">Thao tác</th>
                 </tr>
@@ -266,9 +295,17 @@ export default function AdminInvoices() {
           </div>
 
           <TablePagination
-            page={tc.page} totalPages={tc.totalPages} total={tc.total}
-            rangeStart={tc.rangeStart} rangeEnd={tc.rangeEnd}
-            pageSize={tc.pageSize} onPageChange={tc.setPage} onPageSizeChange={tc.setPageSize}
+            page={page}
+            totalPages={Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))}
+            total={data?.total ?? 0}
+            rangeStart={(data?.total ?? 0) === 0 ? 0 : (page - 1) * pageSize + 1}
+            rangeEnd={Math.min(data?.total ?? 0, page * pageSize)}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
           />
           </>
         )}

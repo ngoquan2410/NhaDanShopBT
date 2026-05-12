@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTableToolbar, FilterChip } from "@/components/shared/DataTableToolbar";
@@ -7,7 +7,6 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { CustomerFormDrawer } from "@/components/shared/CustomerFormDrawer";
 import { RowActions } from "@/components/shared/RowActions";
 import { TablePagination } from "@/components/shared/TablePagination";
-import { SortableTh } from "@/components/shared/SortableTh";
 import { useTableControls } from "@/hooks/useTableControls";
 import { useService } from "@/hooks/useService";
 import { adminCustomers } from "@/services";
@@ -15,26 +14,38 @@ import { formatVND } from "@/lib/format";
 import { Plus, Users, Pencil, Trash2, Power, PowerOff } from "lucide-react";
 import { toast } from "sonner";
 import type { Customer } from "@/lib/mock-data";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 export default function AdminCustomers() {
   const initialQ = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('q') ?? '' : '';
   const [search, setSearch] = useState(initialQ);
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [filterGroup, setFilterGroup] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [deleting, setDeleting] = useState<Customer | null>(null);
-  const { data, loading, error, reload } = useService(() => adminCustomers.list(search), [search]);
-  const customers = data ?? [];
+  const { data, loading, error, reload } = useService(
+    () =>
+      adminCustomers.list({
+        q: debouncedSearch || undefined,
+        group: filterGroup ?? undefined,
+        page,
+        pageSize,
+      }),
+    [debouncedSearch, filterGroup, page, pageSize],
+  );
+  const customers = data?.items ?? [];
+  const total = data?.total ?? 0;
 
-  const filtered = useMemo(() => customers.filter(c => {
-    if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !c.phone.includes(search) && !c.code.toLowerCase().includes(search.toLowerCase())) return false;
-    if (filterGroup && c.group !== filterGroup) return false;
-    return true;
-  }), [customers, search, filterGroup]);
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, filterGroup]);
 
   const tc = useTableControls<Customer, "name" | "code" | "phone" | "group" | "total" | "orders" | "status">({
-    data: filtered,
-    pageSize: 20,
+    data: customers,
+    pageSize: Math.max(customers.length, 1),
     initialSort: { key: "total", dir: "desc" },
     sortAccessors: {
       name: (c) => c.name,
@@ -45,7 +56,7 @@ export default function AdminCustomers() {
       orders: (c) => c.orderCount,
       status: (c) => (c.active ? 1 : 0),
     },
-    resetToken: `${search}|${filterGroup}`,
+    resetToken: `${debouncedSearch}|${filterGroup}|${page}`,
   });
 
   const openAdd = () => { setEditing(null); setDrawerOpen(true); };
@@ -55,7 +66,7 @@ export default function AdminCustomers() {
     <div className="space-y-4 admin-dense">
       <PageHeader
         title="Khách hàng"
-        description={`${customers.length} khách hàng`}
+        description={`${total} khách hàng`}
         actions={<button onClick={openAdd} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover"><Plus className="h-3.5 w-3.5" /> Thêm khách hàng</button>}
       />
 
@@ -72,7 +83,7 @@ export default function AdminCustomers() {
       {loading && <p className="text-sm text-muted-foreground">Đang tải khách hàng từ backend...</p>}
       {error && <p className="text-sm text-danger">Không tải được khách hàng: {error.message}</p>}
 
-      {!loading && filtered.length === 0 ? (
+      {!loading && customers.length === 0 ? (
         <EmptyState icon={Users} title="Không tìm thấy khách hàng" description="Thử thay đổi bộ lọc hoặc thêm mới" />
       ) : !loading && (
         <>
@@ -153,7 +164,19 @@ export default function AdminCustomers() {
               </div>
             ))}
           </div>
-          <TablePagination page={tc.page} totalPages={tc.totalPages} total={tc.total} rangeStart={tc.rangeStart} rangeEnd={tc.rangeEnd} pageSize={tc.pageSize} onPageChange={tc.setPage} onPageSizeChange={tc.setPageSize} />
+          <TablePagination
+            page={page}
+            totalPages={Math.max(1, Math.ceil(total / pageSize))}
+            total={total}
+            rangeStart={total === 0 ? 0 : (page - 1) * pageSize + 1}
+            rangeEnd={Math.min(total, page * pageSize)}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
+          />
         </>
       )}
 

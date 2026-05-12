@@ -6,6 +6,8 @@ import com.example.nhadanshop.entity.Supplier;
 import com.example.nhadanshop.repository.SupplierRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +31,14 @@ public class SupplierService {
         if (q == null || q.isBlank()) return getAll();
         return supplierRepository.searchActive(q.trim())
                 .stream().map(this::toResponse).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Page<SupplierResponse> listPage(Pageable pageable, String q) {
+        Page<Supplier> page = (q != null && !q.isBlank())
+                ? supplierRepository.searchActivePage(q.trim(), pageable)
+                : supplierRepository.findByActiveTrueOrderByNameAsc(pageable);
+        return page.map(this::toResponse);
     }
 
     @Transactional(readOnly = true)

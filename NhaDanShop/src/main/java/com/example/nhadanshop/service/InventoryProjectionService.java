@@ -95,6 +95,7 @@ public class InventoryProjectionService {
             byBatch.add(new InventoryProjectionBatchResponse(
                     batch.getId(),
                     batch.getBatchCode(),
+                    batch.getStatus(),
                     qty,
                     batch.getCostPrice(),
                     batch.getExpiryDate(),

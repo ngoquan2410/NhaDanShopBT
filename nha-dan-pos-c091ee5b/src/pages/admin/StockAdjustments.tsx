@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -13,34 +13,51 @@ import { adminStockAdjustments } from "@/services";
 import { formatDate } from "@/lib/format";
 import { Plus, ClipboardCheck, Eye, Pencil, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 export default function AdminStockAdjustments() {
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [filterStatus, setFilterStatus] = useState<string | null>(null);
   const [detail, setDetail] = useState<StockAdjustment | null>(null);
-  const { data, loading, error, reload } = useService(() => adminStockAdjustments.list(), []);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  const { data, loading, error, reload } = useService(
+    () =>
+      adminStockAdjustments.list({
+        search: debouncedSearch || undefined,
+        status: filterStatus ?? undefined,
+        page,
+        pageSize,
+      }),
+    [debouncedSearch, filterStatus, page, pageSize],
+  );
+
   const stockAdjustments = data?.items ?? [];
   const apiTotal = data?.total ?? 0;
 
-  const filtered = useMemo(() => stockAdjustments.filter(a => {
-    if (search && !a.code.toLowerCase().includes(search.toLowerCase()) && !a.reason.toLowerCase().includes(search.toLowerCase())) return false;
-    if (filterStatus && a.status !== filterStatus) return false;
-    return true;
-  }), [search, filterStatus]);
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, filterStatus]);
 
   const tc = useTableControls<StockAdjustment, "code" | "date" | "items">({
-    data: filtered, pageSize: 20, initialSort: { key: "date", dir: "desc" },
+    data: stockAdjustments,
+    pageSize: Math.max(stockAdjustments.length, 1),
+    initialSort: { key: "date", dir: "desc" },
     sortAccessors: {
-      code: (a) => a.code, date: (a) => new Date(a.createdDate), items: (a) => a.itemCount,
+      code: (a) => a.code,
+      date: (a) => new Date(a.createdDate),
+      items: (a) => a.itemCount,
     },
-    resetToken: `${search}|${filterStatus}`,
+    resetToken: `${debouncedSearch}|${filterStatus}|${page}`,
   });
 
   return (
     <div className="space-y-4 admin-dense">
       <PageHeader
         title="Kiểm kho / Điều chỉnh"
-        description={`${apiTotal || stockAdjustments.length} phiếu`}
+        description={`${apiTotal} phiếu`}
         actions={
           <Link to="/admin/stock-adjustments/create" className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover">
             <Plus className="h-3.5 w-3.5" /> Tạo phiếu điều chỉnh
@@ -50,7 +67,9 @@ export default function AdminStockAdjustments() {
 
       <DataTableToolbar
         search={search}
-        onSearchChange={setSearch}
+        onSearchChange={(v) => {
+          setSearch(v);
+        }}
         searchPlaceholder="Tìm mã phiếu, lý do..."
         filters={<>
           <FilterChip label="Tất cả" active={!filterStatus} onClick={() => setFilterStatus(null)} />
@@ -64,8 +83,6 @@ export default function AdminStockAdjustments() {
 
       {!loading && stockAdjustments.length === 0 ? (
         <EmptyState icon={ClipboardCheck} title="Chưa có phiếu điều chỉnh" description="Tạo phiếu kiểm kho đầu tiên" />
-      ) : !loading && filtered.length === 0 ? (
-        <EmptyState icon={ClipboardCheck} title="Không có phiếu khớp bộ lọc" description="Đổi trạng thái hoặc xóa ô tìm kiếm — trên máy chủ vẫn có dữ liệu." />
       ) : !loading && (
         <>
           <div className="hidden md:block bg-card rounded-lg border overflow-hidden">
@@ -127,7 +144,19 @@ export default function AdminStockAdjustments() {
               </div>
             ))}
           </div>
-          <TablePagination page={tc.page} totalPages={tc.totalPages} total={tc.total} rangeStart={tc.rangeStart} rangeEnd={tc.rangeEnd} pageSize={tc.pageSize} onPageChange={tc.setPage} onPageSizeChange={tc.setPageSize} />
+          <TablePagination
+            page={page}
+            totalPages={Math.max(1, Math.ceil(apiTotal / pageSize))}
+            total={apiTotal}
+            rangeStart={apiTotal === 0 ? 0 : (page - 1) * pageSize + 1}
+            rangeEnd={Math.min(apiTotal, page * pageSize)}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
+          />
         </>
       )}
 

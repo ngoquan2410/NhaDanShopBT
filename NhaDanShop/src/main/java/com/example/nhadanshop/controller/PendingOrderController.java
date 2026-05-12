@@ -58,6 +58,15 @@ public class PendingOrderController {
         return pendingOrderService.listAdminPage(page, size, status, paymentMethod, search, pageable);
     }
 
+    @GetMapping("/linkable")
+    public Page<PendingOrderResponse> listLinkable(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String search,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+        return pendingOrderService.listLinkableCandidates(page, size, search, pageable);
+    }
+
     @GetMapping("/counts")
     public PendingOrderCountsResponse counts(
             @RequestParam(required = false) String paymentMethod,

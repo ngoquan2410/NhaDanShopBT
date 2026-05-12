@@ -1,5 +1,6 @@
 package com.example.nhadanshop.service;
 
+import com.example.nhadanshop.exception.BusinessConflictException;
 import com.example.nhadanshop.dto.InventoryReceiptRequest;
 import com.example.nhadanshop.dto.InventoryReceiptResponse;
 import com.example.nhadanshop.dto.InventoryReceiptVoidRequest;
@@ -10,7 +11,11 @@ import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
@@ -367,13 +372,46 @@ public class InventoryReceiptService {
     }
 
     public Page<InventoryReceiptResponse> listReceipts(Pageable pageable) {
-        return mapReceiptPage(receiptRepo.findAllWithDetails(pageable));
+        return listReceipts(null, null, null, pageable);
     }
 
     public Page<InventoryReceiptResponse> listReceiptsByDateRange(
             LocalDateTime from, LocalDateTime to, Pageable pageable) {
-        return mapReceiptPage(
-                receiptRepo.findByReceiptDateBetweenOrderByReceiptDateDesc(from, to, pageable));
+        return listReceipts(from, to, null, pageable);
+    }
+
+    /**
+     * Paginated receipts with optional date bounds and text search (receipt no, supplier name snapshot, note).
+     */
+    public Page<InventoryReceiptResponse> listReceipts(
+            LocalDateTime from, LocalDateTime to, String query, Pageable pageable) {
+        String q = (query != null && !query.isBlank()) ? query.trim() : null;
+        Pageable pageRequest = PageRequest.of(
+                pageable.getPageNumber(),
+                pageable.getPageSize(),
+                Sort.by(Sort.Order.desc("receiptDate"), Sort.Order.desc("id")));
+        Specification<InventoryReceipt> spec = Specification.allOf(
+                from == null ? null : (root, cq, cb) -> cb.greaterThanOrEqualTo(root.get("receiptDate"), from),
+                to == null ? null : (root, cq, cb) -> cb.lessThanOrEqualTo(root.get("receiptDate"), to),
+                q == null ? null : (root, cq, cb) -> {
+                    String like = "%" + q.toLowerCase(Locale.ROOT) + "%";
+                    return cb.or(
+                            cb.like(cb.lower(root.get("receiptNo")), like),
+                            cb.like(cb.lower(cb.coalesce(root.get("supplierName"), "")), like),
+                            cb.like(cb.lower(cb.coalesce(root.get("note"), "")), like));
+                });
+        Page<Long> idPage = receiptRepo.findAll(spec, pageRequest).map(InventoryReceipt::getId);
+        if (idPage.isEmpty()) {
+            return new PageImpl<>(List.of(), pageRequest, idPage.getTotalElements());
+        }
+        List<Long> ids = idPage.getContent();
+        Map<Long, InventoryReceipt> byId = receiptRepo.findAllByIdInWithDetails(ids).stream()
+                .collect(Collectors.toMap(InventoryReceipt::getId, r -> r, (a, b) -> a));
+        List<InventoryReceipt> ordered = ids.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .toList();
+        return mapReceiptPageFromOrdered(ordered, pageRequest, idPage.getTotalElements());
     }
 
     /**
@@ -389,7 +427,9 @@ public class InventoryReceiptService {
         InventoryReceipt receipt = receiptRepo.findByIdForUpdate(id)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy phiếu nhập ID: " + id));
         if (InventoryReceipt.STATUS_VOIDED.equals(receipt.getStatus())) {
-            throw new IllegalStateException("Phiếu nhập đã bị hủy (void).");
+            throw new BusinessConflictException(
+                    ReceiptDeleteEligibility.REASON_ALREADY_VOIDED,
+                    "Phiếu nhập đã bị hủy (void).");
         }
 
         // CRIT-003: cùng thứ tự lock với deleteReceipt
@@ -444,7 +484,9 @@ public class InventoryReceiptService {
         InventoryReceipt receipt = receiptRepo.findByIdForUpdate(id)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy phiếu nhập ID: " + id));
         if (InventoryReceipt.STATUS_VOIDED.equals(receipt.getStatus())) {
-            throw new IllegalStateException("Không thể xóa phiếu đã hủy (void).");
+            throw new BusinessConflictException(
+                    ReceiptDeleteEligibility.REASON_VOIDED,
+                    "Không thể xóa phiếu đã hủy (void).");
         }
 
         List<Long> variantIdsToLock = batchRepo.findByReceiptIdOrderByExpiryDateAsc(id).stream()
@@ -462,9 +504,10 @@ public class InventoryReceiptService {
 
         ReceiptDeleteEligibility deleteEligibility = ReceiptDeleteEligibility.fromBatches(batches);
         if (!deleteEligibility.canDelete()) {
-            throw new IllegalStateException(
-                "Không thể xóa phiếu nhập — một số lô hàng đã được bán. " +
-                "Hãy tạo phiếu điều chỉnh tồn kho thay thế.");
+            throw new BusinessConflictException(
+                    ReceiptDeleteEligibility.REASON_DOWNSTREAM_CONSUMPTION,
+                    "Không thể xóa phiếu nhập — một số lô hàng đã được bán. " +
+                            "Hãy tạo phiếu điều chỉnh tồn kho thay thế.");
         }
 
         Set<Long> affectedVariantIds = new HashSet<>();
@@ -498,15 +541,26 @@ public class InventoryReceiptService {
         if (content.isEmpty()) {
             return page.map(this::mapToResponse);
         }
-        List<Long> receiptIds = content.stream().map(InventoryReceipt::getId).toList();
+        return mapReceiptPageFromOrdered(content, page.getPageable(), page.getTotalElements());
+    }
+
+    private Page<InventoryReceiptResponse> mapReceiptPageFromOrdered(
+            List<InventoryReceipt> ordered, Pageable pageable, long totalElements) {
+        if (ordered.isEmpty()) {
+            return new PageImpl<>(List.of(), pageable, totalElements);
+        }
+        List<Long> receiptIds = ordered.stream().map(InventoryReceipt::getId).toList();
         List<ProductBatch> allBatches = batchRepo.findByReceipt_IdIn(receiptIds);
         Map<Long, List<ProductBatch>> batchesByReceiptId = allBatches.stream()
                 .collect(Collectors.groupingBy(b -> b.getReceipt().getId()));
-        return page.map(r -> DtoMapper.toResponse(
-                r,
-                ReceiptDeleteEligibility.forReceipt(
+        List<InventoryReceiptResponse> responses = ordered.stream()
+                .map(r -> DtoMapper.toResponse(
                         r,
-                        batchesByReceiptId.getOrDefault(r.getId(), List.of()))));
+                        ReceiptDeleteEligibility.forReceipt(
+                                r,
+                                batchesByReceiptId.getOrDefault(r.getId(), List.of()))))
+                .toList();
+        return new PageImpl<>(responses, pageable, totalElements);
     }
 
     /**

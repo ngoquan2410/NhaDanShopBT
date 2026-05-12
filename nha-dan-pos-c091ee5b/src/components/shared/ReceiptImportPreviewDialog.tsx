@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { importStaging } from "@/lib/import-staging";
 import { parseReceiptExcel } from "@/lib/excel-parser";
 import { downloadAdminBlob } from "@/services/auth/adminApi";
+import { localToday } from "@/lib/localDate";
 
 interface Props {
   open: boolean;
@@ -49,7 +50,7 @@ export function ReceiptImportPreviewDialog({ open, onClose }: Props) {
       importStaging.setReceipt({
         filename: file.name,
         rows,
-        meta: { supplierName: "", receiptDate: new Date().toISOString().slice(0, 10) },
+        meta: { supplierName: "", receiptDate: localToday() },
         createdAt: Date.now(),
       });
       const errors = rows.filter((row) => row.status === "error").length;

@@ -1,7 +1,10 @@
 package com.example.nhadanshop.repository;
 
+import com.example.nhadanshop.dto.ProductVariantSearchResponse;
 import com.example.nhadanshop.entity.ProductVariant;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
@@ -123,4 +126,68 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
               OR EXISTS (SELECT 1 FROM InventoryMovement m WHERE m.variant.id = :variantId))
             """)
     boolean isVariantStructurallyUsed(@Param("variantId") Long variantId);
+
+    /**
+     * Paginated variant rows for admin/staff transaction pickers. Filters apply before pagination.
+     * One row per {@link ProductVariant} (no duplicates).
+     */
+    @Query(
+            value = """
+                    SELECT new com.example.nhadanshop.dto.ProductVariantSearchResponse(
+                      v.id,
+                      v.variantCode,
+                      v.variantName,
+                      p.id,
+                      p.code,
+                      p.name,
+                      p.productType,
+                      v.active,
+                      v.isSellable,
+                      v.sellUnit,
+                      v.importUnit,
+                      cat.id,
+                      COALESCE(cat.name, ''),
+                      v.stockQty,
+                      v.sellPrice,
+                      v.costPrice,
+                      v.piecesPerUnit,
+                      v.minStockQty,
+                      v.expiryDays
+                    )
+                    FROM ProductVariant v
+                    JOIN v.product p
+                    LEFT JOIN p.category cat
+                    WHERE p.active = TRUE
+                      AND (
+                        LOWER(v.variantCode) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(v.variantName) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(p.code) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(p.name) LIKE LOWER(CONCAT('%', :search, '%'))
+                      )
+                      AND (:activeOnly = FALSE OR v.active = TRUE)
+                      AND (:sellableOnly = FALSE OR v.isSellable = TRUE)
+                      AND (:singleProductOnly = FALSE OR p.productType = com.example.nhadanshop.entity.Product.ProductType.SINGLE)
+                    ORDER BY p.code ASC, v.variantCode ASC
+                    """,
+            countQuery = """
+                    SELECT COUNT(v)
+                    FROM ProductVariant v
+                    JOIN v.product p
+                    WHERE p.active = TRUE
+                      AND (
+                        LOWER(v.variantCode) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(v.variantName) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(p.code) LIKE LOWER(CONCAT('%', :search, '%'))
+                        OR LOWER(p.name) LIKE LOWER(CONCAT('%', :search, '%'))
+                      )
+                      AND (:activeOnly = FALSE OR v.active = TRUE)
+                      AND (:sellableOnly = FALSE OR v.isSellable = TRUE)
+                      AND (:singleProductOnly = FALSE OR p.productType = com.example.nhadanshop.entity.Product.ProductType.SINGLE)
+                    """)
+    Page<ProductVariantSearchResponse> searchVariantRows(
+            @Param("search") String search,
+            @Param("activeOnly") boolean activeOnly,
+            @Param("sellableOnly") boolean sellableOnly,
+            @Param("singleProductOnly") boolean singleProductOnly,
+            Pageable pageable);
 }

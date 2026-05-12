@@ -21,6 +21,23 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     /** Tất cả KH đang hoạt động, sort theo tên */
     List<Customer> findByActiveTrueOrderByNameAsc();
 
+    /** Paginated active customers with optional DB-side text search and customer group. */
+    @Query("""
+            SELECT c FROM Customer c
+            WHERE c.active = TRUE
+              AND (:group IS NULL OR c.group = :group)
+              AND (:q IS NULL OR :q = ''
+                   OR LOWER(c.name) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(COALESCE(c.phone, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(COALESCE(c.code, '')) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(COALESCE(c.email, '')) LIKE LOWER(CONCAT('%', :q, '%')))
+            ORDER BY c.name ASC
+            """)
+    Page<Customer> pageActiveFiltered(
+            @Param("q") String q,
+            @Param("group") com.example.nhadanshop.entity.Customer.CustomerGroup group,
+            Pageable pageable);
+
     /** Tìm theo mã — để validate unique */
     Optional<Customer> findByCode(String code);
 

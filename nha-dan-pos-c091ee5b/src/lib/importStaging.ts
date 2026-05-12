@@ -1,4 +1,5 @@
 import type { ProductImportRow, ReceiptImportRow } from "./import-types";
+import { localToday } from "./localDate";
 
 /** In-memory handoff from import modal → review page (single consumer per load). */
 export type StagedProductImport = {
@@ -42,7 +43,7 @@ export function stageProductImportRows(rows: ProductImportRow[]): StagedProductI
 
 export function stageReceiptImportRows(
   rows: ReceiptImportRow[],
-  meta: StagedReceiptImport["meta"] = { supplierName: "", receiptDate: new Date().toISOString().slice(0, 10) }
+  meta: StagedReceiptImport["meta"] = { supplierName: "", receiptDate: localToday() }
 ): StagedReceiptImport {
   return { filename: "staged", rows, meta, createdAt: Date.now() };
 }

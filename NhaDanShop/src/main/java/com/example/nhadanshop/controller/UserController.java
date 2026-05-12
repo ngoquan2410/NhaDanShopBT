@@ -19,10 +19,12 @@ public class UserController {
 
     private final UserService userService;
 
-    /** GET /api/admin/users?page=0&size=10 */
+    /** GET /api/admin/users?page=0&size=10&search= */
     @GetMapping
-    public Page<UserResponse> list(@PageableDefault(size = 20) Pageable pageable) {
-        return userService.listUsers(pageable);
+    public Page<UserResponse> list(
+            @RequestParam(required = false) String search,
+            @PageableDefault(size = 20) Pageable pageable) {
+        return userService.listUsers(pageable, search);
     }
 
     /** GET /api/admin/users/{id} */

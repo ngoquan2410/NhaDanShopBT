@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.*;
 import org.springframework.security.access.AccessDeniedException;
@@ -37,7 +38,7 @@ public class ProductController {
      * {@code includeInactive=true} để quản trị thấy cả đã lưu kho.
      */
     @GetMapping
-    public Page<ProductResponse> list(
+    public Page<?> list(
             @RequestParam(required = false) String search,
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false, defaultValue = "false") boolean includeInactive,
@@ -46,7 +47,11 @@ public class ProductController {
         if (includeInactive && !isRoleAdmin()) {
             throw new AccessDeniedException("Không có quyền xem sản phẩm không hoạt động");
         }
-        return productService.search(search, categoryId, includeInactive, productType, pageable);
+        if (!hasAdminOrStaffRole()) {
+            return productService.searchPublic(search, categoryId, productType, pageable);
+        }
+        return productService.search(
+                search, categoryId, includeInactive, productType, false, pageable);
     }
 
     private boolean isRoleAdmin() {
@@ -55,6 +60,19 @@ public class ProductController {
             return false;
         }
         return auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+    }
+
+    /** Admin/staff catalog search may match variant code/name on any variant row (see repository). */
+    private boolean hasAdminOrStaffRole() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            return false;
+        }
+        return auth.getAuthorities().stream()
+                .anyMatch(a -> {
+                    String g = a.getAuthority();
+                    return "ROLE_ADMIN".equals(g) || "ROLE_STAFF".equals(g);
+                });
     }
 
     /**
@@ -69,15 +87,21 @@ public class ProductController {
     }
 
     @GetMapping("/category/{categoryId}")
-    public Page<ProductResponse> byCategory(
+    public Page<?> byCategory(
             @PathVariable Long categoryId,
             @PageableDefault(size = 20, sort = "name") Pageable pageable) {
-        return productService.findByCategory(categoryId, pageable);
+        if (!hasAdminOrStaffRole()) {
+            return productService.findByCategoryPublic(categoryId, pageable);
+        }
+        return productService.findByCategory(categoryId, pageable, false);
     }
 
     @GetMapping("/{id}")
-    public ProductResponse one(@PathVariable Long id) {
-        return productService.findById(id);
+    public Object one(@PathVariable Long id) {
+        if (!hasAdminOrStaffRole()) {
+            return productService.findByIdPublic(id);
+        }
+        return productService.findById(id, false);
     }
 
     @PostMapping
@@ -234,6 +258,45 @@ public class ProductController {
     @GetMapping("/low-stock-variants")
     public List<ProductVariantResponse> getLowStockVariants() {
         return variantService.getLowStockVariants();
+    }
+
+    /**
+     * GET /api/products/variants/search — paginated variant rows for admin/staff transaction pickers.
+     * Matches variant code/name and parent product code/name (case-insensitive). Filters before pagination.
+     */
+    @GetMapping("/variants/search")
+    public Page<ProductVariantSearchResponse> searchVariants(
+            @RequestParam String search,
+            @RequestParam(required = false, defaultValue = "true") boolean activeOnly,
+            @RequestParam(required = false) Boolean sellableOnly,
+            @RequestParam(required = false) String context,
+            @PageableDefault(size = 20) Pageable pageable) {
+        if (!hasAdminOrStaffRole()) {
+            throw new AccessDeniedException("Chỉ admin/nhân viên được tìm biến thể giao dịch");
+        }
+        boolean sellableResolved = sellableOnly != null ? sellableOnly : defaultSellableOnlyForContext(context);
+        boolean singleOnly = singleProductOnlyForContext(context);
+        String term = search != null ? search.trim() : "";
+        if (term.length() < 2) {
+            return new PageImpl<>(List.of(), pageable, 0);
+        }
+        return productService.searchVariantsForTransactions(term, activeOnly, sellableResolved, singleOnly, pageable);
+    }
+
+    private static boolean defaultSellableOnlyForContext(String context) {
+        if (context == null || context.isBlank()) {
+            return false;
+        }
+        return "pos".equalsIgnoreCase(context.trim());
+    }
+
+    /** Receipt/recipe/combo components/stock adjustment use SINGLE products only; POS mirrors sellable catalog surface. */
+    private static boolean singleProductOnlyForContext(String context) {
+        if (context == null || context.isBlank()) {
+            return true;
+        }
+        String c = context.trim().toLowerCase();
+        return !"pos".equals(c);
     }
 
     /**

@@ -8,6 +8,9 @@ import com.example.nhadanshop.repository.CustomerRepository;
 import com.example.nhadanshop.repository.SalesInvoiceRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +46,16 @@ public class CustomerService {
         if (q == null || q.isBlank()) return getAll();
         List<Customer> customers = customerRepository.searchActive(q.trim());
         return toResponsesWithBatchStats(customers);
+    }
+
+    /** Paginated active customers; optional {@code q} and {@code group} filter in the database before pagination. */
+    @Transactional(readOnly = true)
+    public Page<CustomerResponse> listPage(
+            Pageable pageable, String q, com.example.nhadanshop.entity.Customer.CustomerGroup group) {
+        String qq = (q != null && !q.isBlank()) ? q.trim() : null;
+        Page<Customer> page = customerRepository.pageActiveFiltered(qq, group, pageable);
+        List<CustomerResponse> content = toResponsesWithBatchStats(page.getContent());
+        return new PageImpl<>(content, pageable, page.getTotalElements());
     }
 
     @Transactional(readOnly = true)

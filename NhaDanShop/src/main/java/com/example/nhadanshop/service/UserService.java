@@ -30,6 +30,14 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
 
     public Page<UserResponse> listUsers(Pageable pageable) {
+        return listUsers(pageable, null);
+    }
+
+    public Page<UserResponse> listUsers(Pageable pageable, String search) {
+        String q = (search != null && !search.isBlank()) ? search.trim() : null;
+        if (q != null) {
+            return userRepo.findForAdminList(q, pageable).map(DtoMapper::toResponse);
+        }
         return userRepo.findAllByOrderByCreatedAtDesc(pageable)
                 .map(DtoMapper::toResponse);
     }

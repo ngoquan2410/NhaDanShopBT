@@ -1,10 +1,12 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Home, Search, ShoppingCart, User, Layers, Menu, X, Store, LogOut, LayoutDashboard } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/admin-auth";
 import { toast } from "sonner";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { listPublicProductsPage, type StorefrontProduct } from "@/services/catalog/publicCatalog";
 
 interface NavItem {
   path: string;
@@ -24,6 +26,19 @@ export function StorefrontNav() {
   const navigate = useNavigate();
   const auth = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchHits, setSearchHits] = useState<StorefrontProduct[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
+  const searchReqIdRef = useRef(0);
+  const debouncedSearch = useDebouncedValue(searchInput, 250);
+  const submitSearch = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const q = searchInput.trim();
+    setSearchOpen(false);
+    navigate(q ? `/products?q=${encodeURIComponent(q)}` : "/products");
+  };
   const cartItems = useCart();
   const cartCount = cartItems.reduce((s, i) => s + i.qty, 0);
   const loggedIn = !!auth.session && !auth.loading;
@@ -48,6 +63,49 @@ export function StorefrontNav() {
     await auth.signOut();
     toast.success("Đã đăng xuất");
     navigate("/", { replace: true });
+  };
+
+  useEffect(() => {
+    const term = debouncedSearch.trim();
+    const reqId = ++searchReqIdRef.current;
+    if (term.length < 2) {
+      setSearchHits([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    listPublicProductsPage({ search: term, page: 0, size: 8, sort: "name,asc" })
+      .then((page) => {
+        if (reqId !== searchReqIdRef.current) return;
+        setSearchHits(page.items);
+      })
+      .catch(() => {
+        if (reqId !== searchReqIdRef.current) return;
+        setSearchHits([]);
+      })
+      .finally(() => {
+        if (reqId !== searchReqIdRef.current) return;
+        setSearchLoading(false);
+      });
+  }, [debouncedSearch]);
+
+  useEffect(() => {
+    const onMouseDown = (event: MouseEvent) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(event.target as Node)) {
+        setSearchOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, []);
+
+  const renderMatchedVariant = (product: StorefrontProduct) => {
+    const q = searchInput.trim().toLowerCase();
+    const match = q
+      ? product.variants.find((v) => v.code.toLowerCase().includes(q) || v.name.toLowerCase().includes(q))
+      : undefined;
+    if (!match) return null;
+    return <span className="block truncate text-[11px] text-muted-foreground">Phân loại: {match.name || "Mặc định"} · {match.code}</span>;
   };
 
   return (
@@ -80,15 +138,66 @@ export function StorefrontNav() {
 
           <div className="flex-1" />
 
-          <div className="hidden sm:block max-w-xs flex-1">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <div ref={searchBoxRef} className="hidden sm:block max-w-xs flex-1 relative">
+            <form onSubmit={submitSearch} role="search" className="relative block">
+              <span className="sr-only">Tìm sản phẩm</span>
+              <button
+                type="submit"
+                aria-label="Tìm kiếm"
+                className="absolute left-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground rounded-full"
+              >
+                <Search className="h-4 w-4" />
+              </button>
               <input
-                type="text"
+                type="search"
+                name="storefront-search"
+                data-testid="storefront-nav-search-input"
+                aria-label="Tìm sản phẩm"
                 placeholder="Tìm sản phẩm..."
-                className="w-full h-9 pl-9 pr-3 text-sm bg-muted rounded-full border-0 focus:outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground"
+                value={searchInput}
+                onFocus={() => setSearchOpen(true)}
+                onChange={(e) => {
+                  setSearchInput(e.target.value);
+                  setSearchOpen(true);
+                }}
+                className="w-full h-9 pl-9 pr-3 text-sm bg-muted rounded-full border border-transparent focus:outline-none focus:bg-background focus:border-primary/30 focus:ring-2 focus:ring-primary/20 placeholder:text-muted-foreground transition-colors"
               />
-            </div>
+            </form>
+            {searchOpen && searchInput.trim().length >= 2 && (
+              <div
+                data-testid="storefront-nav-typeahead-dropdown"
+                className="absolute right-0 top-full z-50 mt-2 w-[min(420px,90vw)] overflow-hidden rounded-xl border bg-card shadow-lg"
+              >
+                {searchLoading && <div className="px-3 py-2 text-xs text-muted-foreground">Đang tìm trên catalog backend…</div>}
+                {!searchLoading && searchHits.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-muted-foreground">Không tìm thấy sản phẩm công khai phù hợp.</div>
+                )}
+                {!searchLoading && searchHits.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="block w-full px-3 py-2 text-left hover:bg-muted"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      setSearchOpen(false);
+                      navigate(`/products/${p.id}`);
+                    }}
+                  >
+                    <span className="block truncate text-sm font-semibold">{p.name}</span>
+                    <span className="block truncate text-[11px] text-muted-foreground">{p.code} · {p.categoryName}</span>
+                    {renderMatchedVariant(p)}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="block w-full border-t px-3 py-2 text-left text-xs font-semibold text-primary hover:bg-muted"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => submitSearch()}
+                >
+                  Nhấn Enter hoặc bấm để xem tất cả kết quả cho “{searchInput.trim()}”
+                </button>
+              </div>
+            )}
           </div>
 
           <Link

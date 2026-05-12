@@ -9,6 +9,7 @@ import { formatVND, formatPercent, formatNumber } from "@/lib/format";
 import { DollarSign, TrendingUp, Download, Receipt, Search, X, Check } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { localToday } from "@/lib/localDate";
 import { Area, AreaChart, CartesianGrid, Legend, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartContainer } from "@/components/ui/chart";
 
@@ -40,7 +41,7 @@ function mapRowToMetrics(row: BeProductRow | undefined) {
 export default function AdminProfitReport() {
   const [groupBy, setGroupBy] = useState<ProfitGroup>("daily");
   const [from, setFrom] = useState("2026-04-01");
-  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [to, setTo] = useState(localToday());
   const [excelBusy, setExcelBusy] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -59,15 +60,44 @@ export default function AdminProfitReport() {
   const selectedKey = selected.length ? [...selected].sort().join(",") : "";
 
   const { data: reportData, loading, error } = useService(async () => {
-    const [profitRows, productRowsRaw, productPage] = await Promise.all([
+    const [profitRows, productRowsRaw] = await Promise.all([
       adminReports.profitSeries(from, to, groupBy, productIdsArg),
       adminReports.revenueByProduct(from, to, "daily", productIdsArg),
-      productService.list({ page: 1, pageSize: 100 }),
     ]);
-    return { profitRows, productRowsRaw, products: productPage.items };
+    return { profitRows, productRowsRaw };
   }, [from, to, groupBy, selectedKey]);
 
-  const products = reportData?.products ?? [];
+  const [pickerHits, setPickerHits] = useState<{ id: string; name: string; code?: string }[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    let cancelled = false;
+    setPickerLoading(true);
+    const handle = setTimeout(async () => {
+      try {
+        const q = pickerSearch.trim();
+        const page = await productService.list({
+          page: 1,
+          pageSize: 20,
+          query: q.length >= 2 ? q : undefined,
+        });
+        if (cancelled) return;
+        setPickerHits(page.items.map((p) => ({ id: p.id, name: p.name, code: p.code })));
+      } catch (e) {
+        if (!cancelled) {
+          setPickerHits([]);
+          toast.error(e instanceof Error ? e.message : "Không tải danh sách sản phẩm");
+        }
+      } finally {
+        if (!cancelled) setPickerLoading(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [pickerOpen, pickerSearch]);
   const backendProductRows = (reportData?.productRowsRaw ?? []) as BeProductRow[];
   const profitSeries = reportData?.profitRows ?? [];
 
@@ -107,8 +137,11 @@ export default function AdminProfitReport() {
   const filteredDetailRows = useMemo(() => {
     if (!isFiltered) return [];
     return selected.map((id) => {
-      const p = products.find((x) => x.id === id);
+      const fromPicker = pickerHits.find((x) => x.id === id);
       const row = backendProductRows.find((x) => String(x.productId ?? x.id) === id);
+      const p =
+        fromPicker ??
+        (row ? { id, name: String(row.productName ?? row.name ?? id), code: String(row.productCode ?? row.code ?? "") } : null);
       const { revenue, cost, profit, qty } = mapRowToMetrics(row);
       const missing = !row || (revenue == null && profit == null);
       const margin = revenue != null && revenue > 0 && profit != null ? profit / revenue : null;
@@ -123,7 +156,7 @@ export default function AdminProfitReport() {
         missing,
       };
     });
-  }, [selected, products, backendProductRows, isFiltered]);
+  }, [selected, pickerHits, backendProductRows, isFiltered]);
 
   const footerFiltered = useMemo(() => {
     const withData = filteredDetailRows.filter((r) => !r.missing && r.revenue != null);
@@ -137,17 +170,6 @@ export default function AdminProfitReport() {
   const money = (n: number | null | undefined) => (n == null || Number.isNaN(n) ? "—" : formatVND(n));
   const pct = (n: number | null | undefined) => (n == null || Number.isNaN(n) ? "—" : formatPercent(n));
 
-  const pickerProducts = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; code?: string }>();
-    for (const p of products) map.set(p.id, { id: p.id, name: p.name, code: p.code });
-    for (const r of backendProductRows) {
-      const id = String(r.productId ?? r.id ?? "");
-      if (!id || map.has(id)) continue;
-      map.set(id, { id, name: String(r.productName ?? r.name ?? id), code: String(r.productCode ?? r.code ?? "") });
-    }
-    const q = pickerSearch.trim().toLowerCase();
-    return [...map.values()].filter((p) => !q || p.name.toLowerCase().includes(q) || String(p.code ?? "").toLowerCase().includes(q));
-  }, [backendProductRows, pickerSearch, products]);
   const toggle = (id: string) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
@@ -232,10 +254,12 @@ export default function AdminProfitReport() {
                 </div>
               </div>
               <div className="max-h-64 overflow-y-auto scrollbar-thin">
-                {pickerProducts.length === 0 ? (
+                {pickerLoading ? (
+                  <p className="p-4 text-center text-xs text-muted-foreground">Đang tải…</p>
+                ) : pickerHits.length === 0 ? (
                   <p className="p-4 text-center text-xs text-muted-foreground">Không tìm thấy</p>
                 ) : (
-                  pickerProducts.map((p) => {
+                  pickerHits.map((p) => {
                     const checked = selected.includes(p.id);
                     return (
                       <button
@@ -275,7 +299,17 @@ export default function AdminProfitReport() {
       {isFiltered && (
         <div className="flex flex-wrap gap-1.5">
           {selected.map((id) => {
-            const p = pickerProducts.find((x) => x.id === id) ?? products.find((x) => x.id === id);
+            const fromPicker = pickerHits.find((x) => x.id === id);
+            const fromBackend = backendProductRows.find((r) => String(r.productId ?? r.id) === id);
+            const p =
+              fromPicker ??
+              (fromBackend
+                ? {
+                    id,
+                    name: String(fromBackend.productName ?? fromBackend.name ?? id),
+                    code: String(fromBackend.productCode ?? ""),
+                  }
+                : null);
             if (!p) return null;
             return (
               <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] bg-primary-soft text-primary rounded-full">
@@ -321,7 +355,7 @@ export default function AdminProfitReport() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Sản phẩm (catalog)</span>
-                <span className="font-medium">{products.length}</span>
+                <span className="font-medium">{new Set(backendProductRows.map((r) => String(r.productId ?? r.id))).size}</span>
               </div>
             </div>
           </div>

@@ -20,6 +20,7 @@ type RawProjection = {
 type RawBatch = {
   batchId?: number | string;
   batchCode?: string;
+  status?: string | null;
   qty?: number;
   costPrice?: string | number;
   expiryDate?: string | null;
@@ -45,6 +46,7 @@ function mapBatch(b: RawBatch): InventoryProjectionBatch {
     batchId: idString(b.batchId),
     lotCode: code,
     batchCode: code,
+    status: b.status != null && b.status !== "" ? String(b.status) : undefined,
     qty: Number(b.qty ?? 0),
     costPrice: moneyOpt(b.costPrice),
     expiryDate: b.expiryDate ?? undefined,

@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2, Search } from "lucide-react";
-import { useService } from "@/hooks/useService";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { products as productService } from "@/services";
 
 interface Item {
@@ -18,21 +18,50 @@ interface Props {
 }
 
 export function ProductQuantityList({ label, items, onChange, error, excludeProductIds = [] }: Props) {
-  const { data } = useService(() => productService.list({ page: 1, pageSize: 200, active: true }), []);
-  const products = data?.items ?? [];
-  const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 250);
+  const [loaded, setLoaded] = useState<{ id: string; name: string; code: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const queryArg = useMemo(() => {
+    const t = debouncedSearch.trim();
+    return t.length >= 2 ? t : undefined;
+  }, [debouncedSearch]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    void (async () => {
+      try {
+        const page = await productService.list({
+          page: 1,
+          pageSize: 20,
+          query: queryArg,
+          active: true,
+        });
+        if (!cancelled) {
+          setLoaded(page.items.map((p) => ({ id: p.id, name: p.name, code: p.code })));
+        }
+      } catch {
+        if (!cancelled) setLoaded([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, queryArg]);
 
   const usedIds = new Set(items.map((i) => i.productId));
   const excluded = new Set(excludeProductIds);
 
-  const candidates = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return products
-      .filter((p) => !usedIds.has(p.id) && !excluded.has(p.id))
-      .filter((p) => !q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q))
-      .slice(0, 50);
-  }, [products, search, usedIds, excluded]);
+  const candidates = useMemo(
+    () => loaded.filter((p) => !usedIds.has(p.id) && !excluded.has(p.id)),
+    [loaded, usedIds, excluded],
+  );
 
   const add = (id: string, name: string) => {
     onChange([...items, { productId: id, productName: name, quantity: 1 }]);
@@ -92,14 +121,18 @@ export function ProductQuantityList({ label, items, onChange, error, excludeProd
               />
             </div>
             <div className="max-h-48 overflow-y-auto divide-y">
-              {candidates.length === 0 ? (
+              {loading ? (
+                <p className="p-3 text-xs text-muted-foreground text-center">Đang tải…</p>
+              ) : candidates.length === 0 ? (
                 <p className="p-3 text-xs text-muted-foreground text-center">Không có sản phẩm phù hợp</p>
-              ) : candidates.map((p) => (
-                <button key={p.id} type="button" onClick={() => add(p.id, p.name)} className="w-full text-left px-2 py-1.5 hover:bg-muted text-xs">
-                  <div className="font-medium truncate">{p.name}</div>
-                  <div className="text-[10px] text-muted-foreground">{p.code}</div>
-                </button>
-              ))}
+              ) : (
+                candidates.map((p) => (
+                  <button key={p.id} type="button" onClick={() => add(p.id, p.name)} className="w-full text-left px-2 py-1.5 hover:bg-muted text-xs">
+                    <div className="font-medium truncate">{p.name}</div>
+                    <div className="text-[10px] text-muted-foreground">{p.code}</div>
+                  </button>
+                ))
+              )}
             </div>
           </div>
         )}

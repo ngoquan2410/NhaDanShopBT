@@ -286,6 +286,9 @@ export interface UserAccount {
   username: string;
   fullName: string;
   role: 'admin' | 'staff';
+  backendRoleName?: string;
+  roleDisplayLabel?: string;
+  assignableRole?: boolean;
   active: boolean;
   totpEnabled: boolean;
   lastLogin?: string;

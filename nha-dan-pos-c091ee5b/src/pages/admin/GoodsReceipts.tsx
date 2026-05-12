@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTableToolbar } from "@/components/shared/DataTableToolbar";
@@ -8,46 +8,98 @@ import { BlockedActionBanner } from "@/components/shared/BlockedActionBanner";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ReceiptImportPreviewDialog } from "@/components/shared/ReceiptImportPreviewDialog";
 import { GoodsReceiptDetailDrawer } from "@/components/shared/GoodsReceiptDetailDrawer";
+import { ReceiptDeleteBlockedDialog } from "@/components/shared/ReceiptDeleteBlockedDialog";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { SortableTh } from "@/components/shared/SortableTh";
-import { PeriodFilter, matchesPeriod, type PeriodValue } from "@/components/shared/PeriodFilter";
+import { PeriodFilter, type PeriodValue } from "@/components/shared/PeriodFilter";
 import { goodsReceipts as goodsReceiptsService } from "@/services";
 import { useService } from "@/hooks/useService";
 import type { GoodsReceipt } from "@/services/types";
 import { formatVND, formatDate } from "@/lib/format";
+import {
+  deriveReceiptUiState,
+  isDownstreamConsumptionConflict,
+  isReceiptVoided,
+  isVoidedDeleteConflict,
+} from "@/lib/receiptUiState";
+import { AdminApiError } from "@/services/auth/adminApi";
 import { useDrafts, draftActions } from "@/lib/drafts";
 import { useTableControls } from "@/hooks/useTableControls";
 import { Plus, FileInput, Eye, Trash2, Printer, ShieldAlert, Upload, FileText } from "lucide-react";
 import { toast } from "sonner";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { localToday, toLocalDateString } from "@/lib/localDate";
 
 type SortKey = "number" | "date" | "supplier" | "items" | "total" | "actual";
 
+function startOfWeekISO(): string {
+  const d = new Date();
+  const day = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - day);
+  return toLocalDateString(d);
+}
+
+function startOfMonthISO(): string {
+  const d = new Date();
+  d.setDate(1);
+  return toLocalDateString(d);
+}
+
+function periodToReceiptDateRange(period: PeriodValue): { from: string; to: string } | undefined {
+  if (period.preset === "all") return undefined;
+  const to = localToday();
+  let from: string;
+  if (period.preset === "today") {
+    from = to;
+  } else if (period.preset === "week") {
+    from = startOfWeekISO();
+  } else if (period.preset === "month") {
+    from = startOfMonthISO();
+  } else {
+    if (!period.from || !period.to) return undefined;
+    return { from: period.from, to: period.to };
+  }
+  return { from, to };
+}
+
 export default function AdminGoodsReceipts() {
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [period, setPeriod] = useState<PeriodValue>({ preset: "all" });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleteDraft, setDeleteDraft] = useState<string | null>(null);
   const [detail, setDetail] = useState<GoodsReceipt | null>(null);
+  const [deleteBlocked, setDeleteBlocked] = useState<GoodsReceipt | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const drafts = useDrafts();
 
+  const dateRange = useMemo(() => periodToReceiptDateRange(period), [period]);
+
   const { data, loading, error, isEmpty, reload } = useService(
-    () => goodsReceiptsService.list({ sort: [{ field: "date", direction: "desc" }] }),
-    [],
+    () =>
+      goodsReceiptsService.list({
+        page,
+        pageSize,
+        query: debouncedSearch || undefined,
+        dateRange,
+        sort: [{ field: "date", direction: "desc" }],
+      }),
+    [debouncedSearch, dateRange, page, pageSize],
   );
 
   const receipts: GoodsReceipt[] = data?.items ?? [];
 
-  const filtered = useMemo(() => receipts.filter(r => {
-    if (search && !r.number.toLowerCase().includes(search.toLowerCase()) && !r.supplierName.toLowerCase().includes(search.toLowerCase())) return false;
-    if (!matchesPeriod(r.date, period)) return false;
-    return true;
-  }), [receipts, search, period]);
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, period.preset, period.from, period.to]);
 
   const tc = useTableControls<GoodsReceipt, SortKey>({
-    data: filtered,
-    pageSize: 20,
+    data: receipts,
+    /** Must match server page size — never derive from receipts.length (first paint used 1 → only one row). */
+    pageSize,
     initialSort: { key: "date", dir: "desc" },
     sortAccessors: {
       number: (r) => r.number,
@@ -57,7 +109,7 @@ export default function AdminGoodsReceipts() {
       total: (r) => r.totalCost + r.shippingFee + r.vat,
       actual: (r) => r.subtotal + r.shippingFee + r.vat,
     },
-    resetToken: `${search}|${period.preset}|${period.from}|${period.to}`,
+    resetToken: `${debouncedSearch}|${page}|${period.preset}|${period.from}|${period.to}`,
   });
 
   const filteredDrafts = drafts.filter(d =>
@@ -66,10 +118,28 @@ export default function AdminGoodsReceipts() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    await goodsReceiptsService.remove(deleteTarget);
-    toast.success("Đã xóa phiếu nhập");
-    setDeleteTarget(null);
-    reload();
+    const targetRow = receipts.find((r) => r.id === deleteTarget);
+    try {
+      await goodsReceiptsService.remove(deleteTarget);
+      toast.success("Đã xóa phiếu nhập");
+      setDeleteTarget(null);
+      reload();
+    } catch (e) {
+      setDeleteTarget(null);
+      if (e instanceof AdminApiError && e.status === 409) {
+        if (isDownstreamConsumptionConflict(e)) {
+          if (targetRow) setDeleteBlocked(targetRow);
+          return;
+        }
+        if (isVoidedDeleteConflict(e)) {
+          toast.error("Phiếu đã void nên không thể xóa.");
+          return;
+        }
+        toast.error(e.message || "Không xóa được phiếu nhập");
+        return;
+      }
+      toast.error(e instanceof Error ? e.message : "Không xóa được phiếu nhập");
+    }
   };
 
   const handleDeleteDraft = () => {
@@ -83,7 +153,7 @@ export default function AdminGoodsReceipts() {
     <div className="space-y-4 admin-dense">
       <PageHeader
         title="Phiếu nhập"
-        description={`${data?.total ?? receipts.length} phiếu nhập${drafts.length ? ` · ${drafts.length} nháp` : ''}`}
+        description={`${data?.total ?? 0} phiếu nhập${drafts.length ? ` · ${drafts.length} nháp` : ''}`}
         actions={
           <div className="flex items-center gap-2">
             <button onClick={() => setImportOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-muted">
@@ -132,7 +202,7 @@ export default function AdminGoodsReceipts() {
       <AsyncBoundary
         loading={loading}
         error={error}
-        isEmpty={!loading && !error && (isEmpty || filtered.length === 0)}
+        isEmpty={!loading && !error && (isEmpty || receipts.length === 0)}
         data={tc.pageRows}
         onRetry={reload}
         emptyFallback={<EmptyState icon={FileInput} title="Chưa có phiếu nhập" description="Tạo phiếu nhập đầu tiên" />}
@@ -153,10 +223,27 @@ export default function AdminGoodsReceipts() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(r => (
-                  <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                {rows.map(r => {
+                  const ui = deriveReceiptUiState(r);
+                  return (
+                  <tr key={r.id} data-testid={`goods-receipt-row-${r.id}`} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                     <td className="px-3 py-2.5 font-mono text-xs font-medium">
-                      <button onClick={() => setDetail(r)} className="hover:text-primary hover:underline">{r.number}</button>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {isReceiptVoided(r) && (
+                          <span
+                            className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground whitespace-nowrap"
+                            data-testid={`goods-receipt-voided-badge-${r.id}`}
+                          >
+                            Đã void
+                          </span>
+                        )}
+                        <button onClick={() => setDetail(r)} className="hover:text-primary hover:underline">{r.number}</button>
+                        {isReceiptVoided(r) && r.voidReason && (
+                          <span className="text-[10px] text-muted-foreground font-sans max-w-[140px] truncate" title={r.voidReason}>
+                            {r.voidReason}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">{formatDate(r.date)}</td>
                     <td className="px-3 py-2.5">{r.supplierName}</td>
@@ -167,27 +254,41 @@ export default function AdminGoodsReceipts() {
                       <div className="inline-flex items-center justify-end gap-0.5 w-full">
                         <button onClick={() => setDetail(r)} className="p-1.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted" title="Xem chi tiết"><Eye className="h-3.5 w-3.5" /></button>
                         <button onClick={() => setDetail(r)} className="p-1.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted" title="In phiếu (mở chi tiết)"><Printer className="h-3.5 w-3.5" /></button>
-                        {r.canDelete ? (
-                          <button onClick={() => setDeleteTarget(r.id)} className="p-1.5 text-muted-foreground hover:text-danger rounded hover:bg-muted" title="Xóa"><Trash2 className="h-3.5 w-3.5" /></button>
+                        {ui === "CONFIRMED_DELETE_ALLOWED" ? (
+                          <button onClick={() => setDeleteTarget(r.id)} className="p-1.5 text-muted-foreground hover:text-danger rounded hover:bg-muted" title="Xóa" data-testid={`goods-receipt-delete-${r.id}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                        ) : ui === "CONFIRMED_DOWNSTREAM_BLOCKED" ? (
+                          <button type="button" data-testid={`goods-receipt-delete-hint-${r.id}`} onClick={() => setDeleteBlocked(r)} className="p-1.5 text-warning/80 hover:text-warning rounded hover:bg-warning-soft" title="Không thể xóa — xem hướng dẫn">
+                            <ShieldAlert className="h-3.5 w-3.5" />
+                          </button>
+                        ) : ui === "VOIDED" ? (
+                          <button type="button" disabled className="p-1.5 text-muted-foreground/50 rounded cursor-not-allowed" title="Phiếu đã void nên không thể xóa.">
+                            <ShieldAlert className="h-3.5 w-3.5" />
+                          </button>
                         ) : (
-                          <button onClick={() => toast.error("Không thể xóa — hàng từ phiếu này đã được bán")} className="p-1.5 text-muted-foreground/50 cursor-help" title="Không thể xóa — hàng đã bán">
+                          <button type="button" disabled className="p-1.5 text-muted-foreground/50 rounded cursor-not-allowed" title={r.deleteBlockReason ? `Không thể xóa (${r.deleteBlockReason})` : "Không thể xóa phiếu nhập"}>
                             <ShieldAlert className="h-3.5 w-3.5" />
                           </button>
                         )}
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
           <div className="md:hidden space-y-2">
-            {rows.map(r => (
+            {rows.map(r => {
+              const ui = deriveReceiptUiState(r);
+              return (
               <div key={r.id} className="bg-card rounded-lg border p-3" onClick={() => setDetail(r)}>
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div>
-                    <p className="font-mono text-xs font-medium">{r.number}</p>
+                    <p className="font-mono text-xs font-medium flex flex-wrap items-center gap-1.5">
+                      {isReceiptVoided(r) && <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Đã void</span>}
+                      {r.number}
+                    </p>
                     <p className="text-xs text-muted-foreground">{r.supplierName}</p>
                   </div>
                   <span className="text-xs text-muted-foreground">{formatDate(r.date)}</span>
@@ -196,17 +297,29 @@ export default function AdminGoodsReceipts() {
                   <span className="text-xs text-muted-foreground">{r.itemCount} mặt hàng</span>
                   <span className="font-bold">{formatVND(r.totalCost + r.shippingFee + r.vat)}</span>
                 </div>
-                {!r.canDelete && (
+                {ui === "CONFIRMED_DOWNSTREAM_BLOCKED" && (
                   <BlockedActionBanner message="Không thể xóa — hàng từ phiếu này đã được bán" className="mt-2" />
                 )}
+                {ui === "VOIDED" && (
+                  <BlockedActionBanner message="Phiếu đã void nên không thể xóa." className="mt-2" />
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <TablePagination
-            page={tc.page} totalPages={tc.totalPages} total={tc.total}
-            rangeStart={tc.rangeStart} rangeEnd={tc.rangeEnd}
-            pageSize={tc.pageSize} onPageChange={tc.setPage} onPageSizeChange={tc.setPageSize}
+            page={page}
+            totalPages={Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))}
+            total={data?.total ?? 0}
+            rangeStart={(data?.total ?? 0) === 0 ? 0 : (page - 1) * pageSize + 1}
+            rangeEnd={Math.min(data?.total ?? 0, page * pageSize)}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
           />
           </>
         )}
@@ -219,7 +332,24 @@ export default function AdminGoodsReceipts() {
         title="Xóa phiếu nháp?" description="Phiếu nháp sẽ bị xóa khỏi danh sách."
         confirmLabel="Xóa nháp" variant="danger" />
 
-      <GoodsReceiptDetailDrawer receipt={detail} onClose={() => setDetail(null)} onReceiptChanged={reload} />
+      <GoodsReceiptDetailDrawer
+        receipt={detail}
+        onClose={() => setDetail(null)}
+        onReceiptChanged={reload}
+        onReceiptUpdated={(r) => setDetail(r)}
+      />
+      <ReceiptDeleteBlockedDialog
+        open={!!deleteBlocked}
+        receiptNumber={deleteBlocked?.number}
+        deleteBlockReason={deleteBlocked?.deleteBlockReason ?? null}
+        onClose={() => setDeleteBlocked(null)}
+        onViewBatches={() => deleteBlocked && setDetail(deleteBlocked)}
+        onVoid={() => {
+          if (deleteBlocked) {
+            setDetail(deleteBlocked);
+          }
+        }}
+      />
       <ReceiptImportPreviewDialog open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );
