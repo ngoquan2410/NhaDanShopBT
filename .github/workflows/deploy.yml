@@ -219,6 +219,20 @@ jobs:
             "Environment=\"R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}\"" \
             "Environment=\"JWT_SECRET=${{ secrets.JWT_SECRET }}\"" \
             "Environment=\"CORS_ALLOWED_ORIGINS=http://${{ secrets.EC2_HOST }}\"" \
+            "Environment=\"MAIL_HOST=${{ secrets.MAIL_HOST }}\"" \
+            "Environment=\"MAIL_PORT=${{ secrets.MAIL_PORT }}\"" \
+            "Environment=\"MAIL_USERNAME=${{ secrets.MAIL_USERNAME }}\"" \
+            "Environment=\"MAIL_PASSWORD=${{ secrets.MAIL_PASSWORD }}\"" \
+            "Environment=\"MAIL_FROM=${{ secrets.MAIL_FROM }}\"" \
+            "Environment=\"APP_PUBLIC_BASE_URL=${{ secrets.APP_PUBLIC_BASE_URL }}\"" \
+            "Environment=\"MANAGEMENT_HEALTH_MAIL_ENABLED=${{ secrets.MANAGEMENT_HEALTH_MAIL_ENABLED }}\"" \
+            "Environment=\"GHN_TOKEN=${{ secrets.GHN_TOKEN }}\"" \
+            "Environment=\"GHN_SHOP_ID=${{ secrets.GHN_SHOP_ID }}\"" \
+            "Environment=\"GHN_FROM_DISTRICT_ID=${{ secrets.GHN_FROM_DISTRICT_ID }}\"" \
+            "Environment=\"CASSO_WEBHOOK_SECURE_TOKEN=${{ secrets.CASSO_WEBHOOK_SECURE_TOKEN }}\"" \
+            "Environment=\"CASSO_WEBHOOK_CHECKSUM_KEY=${{ secrets.CASSO_WEBHOOK_CHECKSUM_KEY }}\"" \
+            "Environment=\"GOONG_REST_API_KEY=${{ secrets.GOONG_REST_API_KEY }}\"" \
+            "Environment=\"VIETQR_IMAGE_BASE_URL=${{ secrets.VIETQR_IMAGE_BASE_URL }}\"" \
             'ExecStart=/usr/bin/java -Xmx512m -Xms256m -Duser.timezone=Asia/Ho_Chi_Minh -jar /app/nhadanshop/nhadanshop.jar' \
             'Restart=on-failure' \
             'RestartSec=10' \
@@ -231,9 +245,9 @@ jobs:
           > /tmp/nhadanshop.service
 
           echo "=== Service file content (secrets masked) ==="
-          grep -v "PASSWORD\|SECRET\|KEY" /tmp/nhadanshop.service || true
+          grep -v "PASSWORD\|SECRET\|KEY\|TOKEN\|GHN\|CASSO\|GOONG\|MAIL" /tmp/nhadanshop.service || true
           echo "=== Secrets lines exist ==="
-          grep -c "PASSWORD\|SECRET\|KEY" /tmp/nhadanshop.service
+          grep -c "PASSWORD\|SECRET\|KEY\|TOKEN\|GHN\|CASSO\|GOONG\|MAIL" /tmp/nhadanshop.service
 
           # Upload service file len EC2
           scp -o StrictHostKeyChecking=no \
