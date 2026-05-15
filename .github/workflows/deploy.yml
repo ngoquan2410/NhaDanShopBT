@@ -6,7 +6,7 @@ on:
     paths:
       # Chỉ trigger khi code thực sự thay đổi
       - 'NhaDanShop/**'
-      - 'NhaDanShopUi/**'
+      - 'nha-dan-pos-c091ee5b/**'
       - '.github/workflows/**'
       # Bỏ qua: docs, readme, sql scripts, shell scripts không liên quan
       - '!**/*.md'
@@ -45,7 +45,7 @@ jobs:
               - 'NhaDanShop/**'
               - '.github/workflows/**'
             frontend:
-              - 'NhaDanShopUi/**'
+              - 'nha-dan-pos-c091ee5b/**'
               - '.github/workflows/**'
 
   # ─────────────────────────────────────────────
@@ -123,14 +123,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: NhaDanShopUi/package-lock.json
+          cache-dependency-path: nha-dan-pos-c091ee5b/package-lock.json
 
       - name: 📦 Install dependencies
-        working-directory: NhaDanShopUi
+        working-directory: nha-dan-pos-c091ee5b
         run: npm ci
 
       - name: 🏗️ Build React app
-        working-directory: NhaDanShopUi
+        working-directory: nha-dan-pos-c091ee5b
         env:
           # Để trống = relative URL → Nginx proxy /api/ → localhost:8080
           # Không hardcode IP/domain → không bị lỗi khi EC2 thay đổi IP
@@ -141,7 +141,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: NhaDanShopUi/dist/
+          path: nha-dan-pos-c091ee5b/dist/
           retention-days: 1
 
   # ─────────────────────────────────────────────
