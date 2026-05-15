@@ -233,7 +233,7 @@ jobs:
             "Environment=\"CASSO_WEBHOOK_SECURE_TOKEN=${{ secrets.CASSO_WEBHOOK_SECURE_TOKEN }}\"" \
             "Environment=\"CASSO_WEBHOOK_CHECKSUM_KEY=${{ secrets.CASSO_WEBHOOK_CHECKSUM_KEY }}\"" \
             "Environment=\"GOONG_REST_API_KEY=${{ secrets.GOONG_REST_API_KEY }}\"" \
-            "Environment=\"VIETQR_IMAGE_BASE_URL=${{ secrets.VIETQR_IMAGE_BASE_URL }}\"" \
+            "Environment=\"VIETQR_IMAGE_BASE_URL=${{ secrets.VIETQR_IMAGE_BASE_URL || 'https://img.vietqr.io/image' }}\"" \
             'ExecStart=/usr/bin/java -Xmx512m -Xms256m -Duser.timezone=Asia/Ho_Chi_Minh -jar /app/nhadanshop/nhadanshop.jar' \
             'Restart=on-failure' \
             'RestartSec=10' \
