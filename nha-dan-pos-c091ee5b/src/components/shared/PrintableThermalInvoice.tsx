@@ -134,7 +134,7 @@ export function PrintableThermalInvoice({ invoice, lines, paper, rootId }: Props
             Nhã Đan Shop
           </div>
           <div style={{ fontSize: `${baseFont}px`, color: "#000", fontWeight: 500 }}>
-            123 Nguyễn Văn Linh, Q7, TP.HCM
+            235 ấp 5, xã Mỏ Cày, Vĩnh Long
           </div>
           <div style={{ fontSize: `${baseFont}px`, color: "#000", fontWeight: 500 }}>0901 234 567</div>
           <div style={{ fontWeight: 700, fontSize: `${titleFont}px`, marginTop: 3, color: "#000" }}>

@@ -29,7 +29,7 @@ const trustItems = [
   { icon: Truck, label: "Giao nhanh trong ngày", sub: "Nội thành 2 giờ" },
   { icon: ShieldCheck, label: "Hàng chính hãng", sub: "Bảo đảm nguồn gốc" },
   { icon: RotateCcw, label: "Đổi trả 7 ngày", sub: "Miễn phí kiểm tra" },
-  { icon: Headphones, label: "Hỗ trợ 24/7", sub: "Hotline 1900 1234" },
+  { icon: Headphones, label: "Hỗ trợ 24/7", sub: "Hotline 0975505074" },
 ];
 
 const HOME_CATALOG_PAGE_SIZE = 48;
