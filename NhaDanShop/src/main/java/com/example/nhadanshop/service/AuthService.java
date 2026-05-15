@@ -389,6 +389,26 @@ public class AuthService {
         refreshTokenRepo.revokeAllByUser(user);
     }
 
+    @Transactional
+    public void changePassword(String username, ChangePasswordRequest req) {
+        User user = userRepo.findByUsername(username)
+                .orElseThrow(() -> new BadCredentialsException("Không thể xác thực tài khoản"));
+        if (!passwordEncoder.matches(req.currentPassword(), user.getPassword())) {
+            throw new IllegalArgumentException("Mật khẩu hiện tại không đúng");
+        }
+        if (!req.newPassword().equals(req.confirmPassword())) {
+            throw new IllegalArgumentException("Xác nhận mật khẩu không khớp");
+        }
+        PasswordPolicy.validate(req.newPassword(), user.getUsername());
+        if (passwordEncoder.matches(req.newPassword(), user.getPassword())) {
+            throw new IllegalArgumentException("Mật khẩu mới phải khác mật khẩu cũ");
+        }
+        user.setPassword(passwordEncoder.encode(req.newPassword()));
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepo.save(user);
+        refreshTokenRepo.revokeAllByUser(user);
+    }
+
     // ── Helper: cấp đầy đủ access + refresh token ─────────────────────────────
     private LoginResponse issueFullTokens(User user, Set<String> roles, boolean duplicateCustomerPhoneMatch) {
         UserDetails userDetails = userDetailsService.loadUserByUsername(user.getUsername());

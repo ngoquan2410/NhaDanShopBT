@@ -8,6 +8,10 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+
+# Selenium / automation artifacts (screenshots, HTML dumps, browser logs)
+automation-output/
+
 dist
 dist-ssr
 *.local

@@ -4,7 +4,9 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { DataTableToolbar } from "@/components/shared/DataTableToolbar";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { AdminResetPasswordDialog } from "@/components/admin/AdminResetPasswordDialog";
 import { UserFormDrawer } from "@/components/shared/UserFormDrawer";
+import { useAuth } from "@/lib/admin-auth";
 import { RowActions } from "@/components/shared/RowActions";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { useTableControls } from "@/hooks/useTableControls";
@@ -17,6 +19,7 @@ import type { UserAccount } from "@/lib/mock-data";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 export default function AdminUsers() {
+  const auth = useAuth();
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 250);
   const [page, setPage] = useState(1);
@@ -24,6 +27,7 @@ export default function AdminUsers() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<UserAccount | null>(null);
   const [deleting, setDeleting] = useState<UserAccount | null>(null);
+  const [resetting, setResetting] = useState<UserAccount | null>(null);
   const { data, loading, error, reload } = useService(
     () =>
       adminUsers.list({
@@ -63,6 +67,27 @@ export default function AdminUsers() {
     setDrawerOpen(true);
   };
 
+  const rowActions = (u: UserAccount) => [
+    { label: "Sửa", icon: <Pencil className="h-3.5 w-3.5" />, onClick: () => openEdit(u) },
+    {
+      label: "Đặt lại mật khẩu",
+      icon: <KeyRound className="h-3.5 w-3.5" />,
+      onClick: () => setResetting(u),
+      disabled: u.username === auth.session?.username,
+      disabledReason: "Dùng mục Bảo mật để đổi mật khẩu tài khoản của bạn",
+    },
+    {
+      label: u.active ? "Khóa" : "Mở khóa",
+      icon: u.active ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />,
+      onClick: () => {
+        adminUsers.save({ ...u, active: !u.active })
+          .then(() => { toast.success(u.active ? "Đã khóa tài khoản" : "Đã mở khóa"); reload(); })
+          .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể đổi trạng thái"));
+      },
+    },
+    { separatorBefore: true, label: "Xóa", icon: <Trash2 className="h-3.5 w-3.5" />, danger: true, onClick: () => setDeleting(u) },
+  ];
+
   return (
     <div className="space-y-4 admin-dense">
       <PageHeader
@@ -80,8 +105,8 @@ export default function AdminUsers() {
         <EmptyState icon={UserCog} title="Không tìm thấy người dùng" />
       ) : !loading && (
         <>
-          <div className="hidden md:block bg-card rounded-lg border overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="hidden md:block bg-card rounded-lg border overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="text-left px-3 py-2 font-medium text-muted-foreground">Người dùng</th>
@@ -97,9 +122,9 @@ export default function AdminUsers() {
                 {tc.pageRows.map(u => (
                   <tr key={u.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                     <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
                         <div className="h-8 w-8 bg-primary-soft rounded-full flex items-center justify-center text-xs font-bold text-primary shrink-0">{u.fullName.charAt(0)}</div>
-                        <span className="font-medium">{u.fullName}</span>
+                        <span className="font-medium truncate">{u.fullName}</span>
                       </div>
                     </td>
                     <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">{u.username}</td>
@@ -114,22 +139,7 @@ export default function AdminUsers() {
                     <td className="px-3 py-2.5 text-xs text-muted-foreground hidden lg:table-cell">{u.lastLogin ? formatDateTime(u.lastLogin) : '—'}</td>
                     <td className="px-3 py-2.5 text-right">
                       <div className="inline-flex items-center justify-end">
-                        <RowActions
-                          actions={[
-                            { label: "Sửa", icon: <Pencil className="h-3.5 w-3.5" />, onClick: () => openEdit(u) },
-                            { label: "Đổi mật khẩu", icon: <KeyRound className="h-3.5 w-3.5" />, onClick: () => { setEditing(u); setDrawerOpen(true); } },
-                            {
-                              label: u.active ? "Khóa" : "Mở khóa",
-                              icon: u.active ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />,
-                              onClick: () => {
-                                adminUsers.save({ ...u, active: !u.active })
-                                  .then(() => { toast.success(u.active ? "Đã khóa tài khoản" : "Đã mở khóa"); reload(); })
-                                  .catch((err) => toast.error(err instanceof Error ? err.message : "Không thể đổi trạng thái"));
-                              },
-                            },
-                            { separatorBefore: true, label: "Xóa", icon: <Trash2 className="h-3.5 w-3.5" />, danger: true, onClick: () => setDeleting(u) },
-                          ]}
-                        />
+                        <RowActions actions={rowActions(u)} />
                       </div>
                     </td>
                   </tr>
@@ -140,16 +150,19 @@ export default function AdminUsers() {
 
           <div className="md:hidden space-y-2">
             {tc.pageRows.map(u => (
-              <div key={u.id} className="bg-card rounded-lg border p-3" onClick={() => openEdit(u)}>
+              <div key={u.id} className="bg-card rounded-lg border p-3">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
+                  <button type="button" className="flex items-center gap-2 min-w-0 flex-1 text-left" onClick={() => openEdit(u)}>
                     <div className="h-9 w-9 bg-primary-soft rounded-full flex items-center justify-center text-xs font-bold text-primary shrink-0">{u.fullName.charAt(0)}</div>
-                    <div>
-                      <h3 className="font-medium text-sm">{u.fullName}</h3>
-                      <p className="text-xs text-muted-foreground">{u.username}</p>
+                    <div className="min-w-0">
+                      <h3 className="font-medium text-sm truncate">{u.fullName}</h3>
+                      <p className="text-xs text-muted-foreground truncate">{u.username}</p>
                     </div>
+                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <StatusBadge status={u.active ? 'active' : 'inactive'} />
+                    <RowActions actions={rowActions(u)} />
                   </div>
-                  <StatusBadge status={u.active ? 'active' : 'inactive'} />
                 </div>
               </div>
             ))}
@@ -171,6 +184,12 @@ export default function AdminUsers() {
       )}
 
       <UserFormDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} user={editing} onSave={async (input) => { await adminUsers.save(input); reload(); }} />
+      <AdminResetPasswordDialog
+        user={resetting}
+        open={!!resetting}
+        onClose={() => setResetting(null)}
+        onSuccess={() => reload()}
+      />
       <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} onConfirm={() => {
         if (deleting) {
           adminUsers.remove(deleting.id)

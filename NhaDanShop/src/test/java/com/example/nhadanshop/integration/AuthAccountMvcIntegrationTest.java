@@ -170,6 +170,168 @@ class AuthAccountMvcIntegrationTest {
     }
 
     @Test
+    void change_password_success_revokes_refresh_and_old_password_fails() throws Exception {
+        String u = "chgpw_" + System.nanoTime();
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"%s","password":"Secret12!ab"}
+                                """.formatted(u)))
+                .andExpect(status().isCreated());
+
+        Login first = login(u, "Secret12!ab");
+
+        mockMvc.perform(post("/api/auth/change-password")
+                        .header("Authorization", "Bearer " + first.access)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"Secret12!ab","newPassword":"NewSecret9!xy","confirmPassword":"NewSecret9!xy"}
+                                """))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"" + u + "\",\"password\":\"Secret12!ab\"}"))
+                .andExpect(status().isUnauthorized());
+
+        Login after = login(u, "NewSecret9!xy");
+
+        mockMvc.perform(post("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + first.refresh + "\"}"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + after.access))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value(u));
+    }
+
+    @Test
+    void change_password_wrong_current_returns_400() throws Exception {
+        String u = "chgpw_bad_" + System.nanoTime();
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"%s","password":"Secret12!ab"}
+                                """.formatted(u)))
+                .andExpect(status().isCreated());
+        Login login = login(u, "Secret12!ab");
+
+        mockMvc.perform(post("/api/auth/change-password")
+                        .header("Authorization", "Bearer " + login.access)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"wrong","newPassword":"NewSecret9!xy","confirmPassword":"NewSecret9!xy"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("Mật khẩu hiện tại không đúng"));
+    }
+
+    @Test
+    void login_wrong_password_still_returns_401() throws Exception {
+        String u = "login_bad_" + System.nanoTime();
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"%s","password":"Secret12!ab"}
+                                """.formatted(u)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"" + u + "\",\"password\":\"wrong-password\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void change_password_mismatch_and_same_as_old_return_400() throws Exception {
+        String u = "chgpw_val_" + System.nanoTime();
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"%s","password":"Secret12!ab"}
+                                """.formatted(u)))
+                .andExpect(status().isCreated());
+        Login login = login(u, "Secret12!ab");
+
+        mockMvc.perform(post("/api/auth/change-password")
+                        .header("Authorization", "Bearer " + login.access)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"Secret12!ab","newPassword":"NewSecret9!xy","confirmPassword":"Mismatch9!xy"}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/auth/change-password")
+                        .header("Authorization", "Bearer " + login.access)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"Secret12!ab","newPassword":"Secret12!ab","confirmPassword":"Secret12!ab"}
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void admin_reset_password_other_user_revokes_refresh_self_reset_forbidden() throws Exception {
+        Role roleStaff = roleRepository.findByName("ROLE_STAFF").orElseGet(() -> {
+            Role r = newRole("ROLE_STAFF");
+            return roleRepository.save(r);
+        });
+
+        String adminName = "adm_pw_" + System.nanoTime();
+        User admin = new User();
+        admin.setUsername(adminName);
+        admin.setPassword(passwordEncoder.encode("Adminpwd1!"));
+        admin.setFullName("Admin PW");
+        admin.setActive(true);
+        admin.getRoles().add(roleAdmin);
+        userRepository.save(admin);
+
+        String staffName = "staff_pw_" + System.nanoTime();
+        User staff = new User();
+        staff.setUsername(staffName);
+        staff.setPassword(passwordEncoder.encode("Staffpwd1!"));
+        staff.setFullName("Staff PW");
+        staff.setActive(true);
+        staff.getRoles().add(roleStaff);
+        userRepository.save(staff);
+
+        Login adminLogin = login(adminName, "Adminpwd1!");
+        Login staffLogin = login(staffName, "Staffpwd1!");
+
+        mockMvc.perform(post("/api/admin/users/" + staff.getId() + "/reset-password")
+                        .header("Authorization", "Bearer " + adminLogin.access)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newPassword":"ResetStaff9!z","confirmPassword":"ResetStaff9!z"}
+                                """))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(post("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + staffLogin.refresh + "\"}"))
+                .andExpect(status().isUnauthorized());
+
+        Login staffAfterReset = login(staffName, "ResetStaff9!z");
+
+        mockMvc.perform(post("/api/admin/users/" + admin.getId() + "/reset-password")
+                        .header("Authorization", "Bearer " + adminLogin.access)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newPassword":"NewAdmin9!z","confirmPassword":"NewAdmin9!z"}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/admin/users/" + admin.getId() + "/reset-password")
+                        .header("Authorization", "Bearer " + staffAfterReset.access)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newPassword":"HackerStaff9!z","confirmPassword":"HackerStaff9!z"}
+                                """))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void role_admin_may_hit_customers_endpoint() throws Exception {
         User u = new User();
         String name = "adm_" + System.nanoTime();

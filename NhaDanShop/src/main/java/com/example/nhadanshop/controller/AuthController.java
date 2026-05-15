@@ -96,6 +96,18 @@ public class AuthController {
     }
 
     /**
+     * POST /api/auth/change-password
+     * Đổi mật khẩu khi đã đăng nhập (yêu cầu mật khẩu hiện tại). Revoke mọi refresh token.
+     */
+    @PostMapping("/change-password")
+    public ResponseEntity<Void> changePassword(
+            Authentication auth,
+            @Valid @RequestBody ChangePasswordRequest req) {
+        authService.changePassword(auth.getName(), req);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * POST /api/auth/logout-all
      * Revoke tất cả refresh tokens của user (đăng xuất mọi thiết bị).
      */

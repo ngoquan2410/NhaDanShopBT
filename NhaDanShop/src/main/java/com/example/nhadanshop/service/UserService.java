@@ -1,10 +1,12 @@
 package com.example.nhadanshop.service;
 
+import com.example.nhadanshop.dto.AdminResetPasswordRequest;
 import com.example.nhadanshop.dto.UserRequest;
 import com.example.nhadanshop.dto.UserResponse;
 import com.example.nhadanshop.dto.UserUpdateRequest;
 import com.example.nhadanshop.entity.Role;
 import com.example.nhadanshop.entity.User;
+import com.example.nhadanshop.repository.RefreshTokenRepository;
 import com.example.nhadanshop.repository.RoleRepository;
 import com.example.nhadanshop.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -27,6 +29,7 @@ public class UserService {
 
     private final UserRepository userRepo;
     private final RoleRepository roleRepo;
+    private final RefreshTokenRepository refreshTokenRepo;
     private final PasswordEncoder passwordEncoder;
 
     public Page<UserResponse> listUsers(Pageable pageable) {
@@ -71,17 +74,44 @@ public class UserService {
         User user = findById(id);
 
         if (req.fullName() != null) user.setFullName(req.fullName());
+        boolean passwordChanged = false;
         if (req.password() != null && !req.password().isBlank()) {
             PasswordPolicy.validate(req.password(), user.getUsername());
-            user.setPassword(passwordEncoder.encode(req.password()));
+            if (!passwordEncoder.matches(req.password(), user.getPassword())) {
+                user.setPassword(passwordEncoder.encode(req.password()));
+                passwordChanged = true;
+            }
         }
         if (req.isActive() != null) user.setActive(req.isActive());
         if (req.roles() != null && !req.roles().isEmpty()) {
             user.setRoles(resolveRoles(req.roles()));
         }
         user.setUpdatedAt(LocalDateTime.now());
+        User saved = userRepo.save(user);
+        if (passwordChanged) {
+            refreshTokenRepo.revokeAllByUser(saved);
+        }
+        return DtoMapper.toResponse(saved);
+    }
 
-        return DtoMapper.toResponse(userRepo.save(user));
+    @Transactional
+    public void resetPasswordByAdmin(Long targetId, AdminResetPasswordRequest req, String actingUsername) {
+        User target = findById(targetId);
+        if (target.getUsername().equalsIgnoreCase(actingUsername)) {
+            throw new IllegalArgumentException(
+                    "Không thể đặt lại mật khẩu cho chính bạn. Vui lòng dùng mục đổi mật khẩu trong Bảo mật.");
+        }
+        if (!req.newPassword().equals(req.confirmPassword())) {
+            throw new IllegalArgumentException("Xác nhận mật khẩu không khớp");
+        }
+        PasswordPolicy.validate(req.newPassword(), target.getUsername());
+        if (passwordEncoder.matches(req.newPassword(), target.getPassword())) {
+            throw new IllegalArgumentException("Mật khẩu mới phải khác mật khẩu cũ");
+        }
+        target.setPassword(passwordEncoder.encode(req.newPassword()));
+        target.setUpdatedAt(LocalDateTime.now());
+        userRepo.save(target);
+        refreshTokenRepo.revokeAllByUser(target);
     }
 
     @Transactional

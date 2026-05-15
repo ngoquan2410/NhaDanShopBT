@@ -1,5 +1,6 @@
 package com.example.nhadanshop.controller;
 
+import com.example.nhadanshop.dto.AdminResetPasswordRequest;
 import com.example.nhadanshop.dto.UserRequest;
 import com.example.nhadanshop.dto.UserResponse;
 import com.example.nhadanshop.dto.UserUpdateRequest;
@@ -10,6 +11,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -51,5 +54,15 @@ public class UserController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deactivate(@PathVariable Long id) {
         userService.deactivateUser(id);
+    }
+
+    /** POST /api/admin/users/{id}/reset-password – Admin đặt lại mật khẩu user khác */
+    @PostMapping("/{id}/reset-password")
+    public ResponseEntity<Void> resetPassword(
+            @PathVariable Long id,
+            Authentication auth,
+            @Valid @RequestBody AdminResetPasswordRequest req) {
+        userService.resetPasswordByAdmin(id, req, auth.getName());
+        return ResponseEntity.noContent().build();
     }
 }

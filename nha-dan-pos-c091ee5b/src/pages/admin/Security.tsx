@@ -6,6 +6,7 @@ import { Shield, Lock, LogOut, Monitor, Smartphone as Phone } from "lucide-react
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/admin-auth";
+import { ChangePasswordPanel } from "@/components/auth/ChangePasswordPanel";
 import { TotpSettingsPanel } from "@/components/auth/TotpSettingsPanel";
 
 interface Session {
@@ -66,9 +67,11 @@ export default function AdminSecurity() {
         </div>
       </div>
 
+      <ChangePasswordPanel layout="compact" />
+
       <TotpSettingsPanel layout="compact" />
 
-      <div className="rounded-md border border-dashed bg-muted/20 p-3 text-[11px] text-muted-foreground">
+      <div className="rounded-md border border-dashed bg-muted/20 p-3 text-[11px] text-muted-foreground break-words">
         <strong className="text-foreground">Phiên đăng nhập:</strong> Backend chưa có API liệt kê thiết bị theo refresh
         token. Khối bên dưới là <em>minh hoạ UI</em>; đăng xuất thật dùng nút trên góc hoặc{" "}
         <code className="text-xs">POST /api/auth/logout</code>.

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { formatVND, formatDateTime } from "@/lib/format";
 import { LogOut, Save, Loader2, User as UserIcon, Coins, Clock } from "lucide-react";
+import { ChangePasswordPanel } from "@/components/auth/ChangePasswordPanel";
 import { TotpSettingsPanel } from "@/components/auth/TotpSettingsPanel";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/admin-auth";
@@ -110,6 +111,8 @@ export default function AccountPage() {
           </button>
         </div>
       </div>
+
+      <ChangePasswordPanel layout="comfortable" />
 
       <TotpSettingsPanel layout="comfortable" />
 
