@@ -197,6 +197,7 @@ jobs:
         run: |
           # Dung printf de tranh leading whitespace tu YAML indent
           # Secrets duoc GitHub Actions expand truoc khi chay shell
+          # Runtime secrets are injected from GitHub Actions repository secrets.
           printf '%s\n' \
             '[Unit]' \
             'Description=NhaDanShop Spring Boot Application' \
