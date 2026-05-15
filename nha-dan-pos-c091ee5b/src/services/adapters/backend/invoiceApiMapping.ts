@@ -198,6 +198,10 @@ export function mapSalesInvoiceApiJsonToInvoice(raw: BackendSalesInvoiceJson): I
     note: typeof raw.note === "string" ? raw.note : undefined,
     sourceType: mapSource(raw),
     pendingOrderId: raw.pendingOrderId != null ? String(raw.pendingOrderId) : undefined,
+    pendingOrderCode:
+      typeof raw.pendingOrderCode === "string" && raw.pendingOrderCode.trim()
+        ? raw.pendingOrderCode.trim()
+        : undefined,
     itemGrossProfit,
     totalProfit,
     allowPhysicalDelete: false,

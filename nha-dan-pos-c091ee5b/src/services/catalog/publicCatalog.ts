@@ -14,6 +14,14 @@ export interface StorefrontVariant {
   isDefault?: boolean;
   isSellable?: boolean;
   image?: string;
+  /** Aggregate sellable units from public API (`availableQty`); never raw batch/stockQty. */
+  availableQty?: number;
+  availabilityStatus?: "IN_STOCK" | "LOW_STOCK" | "OUT_OF_STOCK";
+  /**
+   * Legacy explicit booleans from API (`available` / `inStock`) when present.
+   * Do not derive from raw stockQty / remainingQty.
+   */
+  available?: boolean;
 }
 
 export interface StorefrontProduct {
@@ -51,6 +59,15 @@ interface PublicVariantDto {
   isDefault?: boolean | null;
   active?: boolean | null;
   isSellable?: boolean | null;
+  /** Backend aggregate; never map stockQty / remainingQty onto the storefront model. */
+  availableQty?: number | string | null;
+  availabilityStatus?: string | null;
+  /** Public-safe flags only — do not map numeric stock from DTO. */
+  available?: boolean | null;
+  inStock?: boolean | null;
+  /** Must never be copied onto StorefrontVariant (audit / forward-compat). */
+  stockQty?: number | null;
+  remainingQty?: number | null;
 }
 
 interface PublicProductDto {
@@ -133,7 +150,32 @@ async function fetchJson<T>(path: string): Promise<T> {
   return data as T;
 }
 
+/** Map explicit public availability booleans only — never infer from stockQty/remainingQty. */
+function mapPublicAvailability(v: PublicVariantDto): boolean | undefined {
+  if (v.available === false || v.inStock === false) return false;
+  if (v.available === true || v.inStock === true) return true;
+  return undefined;
+}
+
+function parseAvailabilityStatus(raw: string | null | undefined): StorefrontVariant["availabilityStatus"] | undefined {
+  const s = String(raw ?? "").trim().toUpperCase();
+  if (s === "IN_STOCK" || s === "LOW_STOCK" || s === "OUT_OF_STOCK") return s;
+  return undefined;
+}
+
 function mapVariant(v: PublicVariantDto): StorefrontVariant {
+  const availability = mapPublicAvailability(v);
+  const rawQty = v.availableQty;
+  let availableQty: number | undefined;
+  if (rawQty != null && rawQty !== "") {
+    const n = Number(rawQty);
+    if (Number.isFinite(n)) availableQty = Math.max(0, Math.floor(n));
+  }
+  const availabilityStatus = parseAvailabilityStatus(v.availabilityStatus);
+  let mergedAvailable = availability;
+  if (availableQty !== undefined) {
+    mergedAvailable = availableQty > 0;
+  }
   return {
     id: String(v.id),
     code: String(v.variantCode ?? v.code ?? v.id),
@@ -144,6 +186,9 @@ function mapVariant(v: PublicVariantDto): StorefrontVariant {
     isDefault: Boolean(v.isDefault),
     isSellable: v.isSellable !== false,
     image: (v.imageUrl as string) ?? (v.image as string) ?? undefined,
+    ...(availableQty !== undefined ? { availableQty } : {}),
+    ...(availabilityStatus ? { availabilityStatus } : {}),
+    ...(mergedAvailable !== undefined ? { available: mergedAvailable } : {}),
   };
 }
 
@@ -194,6 +239,26 @@ export async function listPublicProductsPage(query: PublicCatalogQuery = {}): Pr
     page: Number(data.number ?? query.page ?? 0),
     size: Number(data.size ?? query.size ?? 20),
   };
+}
+
+export type PublicVariantAvailabilityDto = {
+  variantId: number;
+  availableQty: number;
+  availabilityStatus: string;
+  sellUnit: string;
+};
+
+/**
+ * Batch public availability for storefront cart reconciliation (single request, max 100 ids).
+ */
+export async function fetchPublicVariantAvailability(variantIds: string[]): Promise<PublicVariantAvailabilityDto[]> {
+  const uniq = [...new Set(variantIds.map((x) => String(x).trim()).filter((x) => /^\d+$/.test(x)))];
+  if (uniq.length === 0) return [];
+  const q = uniq.slice(0, 100).join(",");
+  const data = await fetchJson<PublicVariantAvailabilityDto[]>(
+    `/api/products/variants/availability?variantIds=${encodeURIComponent(q)}`,
+  );
+  return Array.isArray(data) ? data : [];
 }
 
 export async function listPublicProducts(): Promise<StorefrontProduct[]> {

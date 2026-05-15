@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { cartActions } from "@/lib/cart";
+import { storefrontAvailabilityUi, storefrontVariantOutOfStock } from "@/lib/storefrontAvailability";
 import type { StorefrontProduct } from "@/services/catalog/publicCatalog";
 
 type Product = StorefrontProduct;
@@ -104,6 +105,8 @@ export function HeroSlider({ items }: { items: Product[] }) {
           <div className="flex items-center">
             {slides.map((p, idx) => {
               const dv = p.variants.find((v) => v.isDefault) || p.variants[0];
+              const availability = storefrontAvailabilityUi(dv);
+              const explicitlyUnavailable = storefrontVariantOutOfStock(dv);
               const hasMulti = p.variants.length > 1;
               const minPrice = Math.min(...p.variants.map((v) => v.sellPrice));
               const price = hasMulti ? `Từ ${formatVND(minPrice)}` : formatVND(dv.sellPrice);
@@ -178,31 +181,25 @@ export function HeroSlider({ items }: { items: Product[] }) {
                             <p className={cn("font-bold", isActive ? "text-xl md:text-2xl" : "text-lg")}>{price}</p>
                             <p className="text-[10px] opacity-60 mt-0.5">/ {dv.sellUnit}</p>
                             <p
+                              data-testid="storefront-hero-availability"
                               className={cn(
-                                "text-[11px] font-medium mt-1.5",
-                                dv.stock === 0
-                                  ? "text-red-300"
-                                  : dv.stock <= dv.minStock
-                                  ? "text-amber-300"
-                                  : "text-emerald-300/90"
+                                "text-[11px] mt-1.5",
+                                availability.textClassName,
                               )}
                             >
-                              {dv.stock === 0
-                                ? "Hết hàng"
-                                : dv.stock <= dv.minStock
-                                ? `Sắp hết · còn ${dv.stock} ${dv.sellUnit}`
-                                : `Còn ${dv.stock} ${dv.sellUnit}`}
+                              {availability.text}
                             </p>
                           </div>
                           {isActive && (
                             <div className="flex flex-col gap-2 animate-fade-in">
                               <button
                                 type="button"
-                                disabled={dv.stock === 0}
+                                data-testid="storefront-hero-add-cart"
+                                disabled={explicitlyUnavailable}
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
-                                  if (dv.stock === 0) {
+                                  if (explicitlyUnavailable) {
                                     toast.error("Sản phẩm đã hết hàng");
                                     return;
                                   }
@@ -217,7 +214,9 @@ export function HeroSlider({ items }: { items: Product[] }) {
                                     categoryName: p.categoryName,
                                     qty: 1,
                                     unitPrice: dv.sellPrice,
-                                    stock: dv.stock,
+                                    sellUnit: dv.sellUnit,
+                                    availableQty: dv.availableQty,
+                                    availabilityStatus: dv.availabilityStatus,
                                     catalogSource: "backend",
                                     schemaVersion: 2,
                                   });
@@ -225,13 +224,13 @@ export function HeroSlider({ items }: { items: Product[] }) {
                                 }}
                                 className={cn(
                                   "inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full text-xs md:text-sm font-semibold transition-all shadow-lg whitespace-nowrap",
-                                  dv.stock === 0
+                                  explicitlyUnavailable
                                     ? "bg-white/30 text-white/60 cursor-not-allowed"
                                     : "bg-white text-foreground hover:bg-white/90 active:scale-[0.97] cursor-pointer"
                                 )}
                               >
                                 <ShoppingCart className="h-3.5 w-3.5" />
-                                {dv.stock === 0 ? "Hết hàng" : "Thêm vào giỏ"}
+                                {explicitlyUnavailable ? "Hết hàng" : "Thêm vào giỏ"}
                               </button>
                               <Link
                                 to={`/products/${p.id}`}

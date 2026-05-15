@@ -23,6 +23,7 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -528,7 +529,7 @@ public class PendingOrderService {
                         "Đơn hàng " + order.getOrderNo() + " đã xác nhận nhưng chưa liên kết hóa đơn");
             }
             PendingOrderResponse pendingOrder = toResponse(order);
-            return new PendingOrderConfirmResponse(pendingOrder, DtoMapper.toResponse(existingInvoice));
+            return new PendingOrderConfirmResponse(pendingOrder, DtoMapper.toResponse(existingInvoice, order.getOrderNo()));
         }
 
         if (order.getStatus() != PendingOrder.Status.PENDING_PAYMENT
@@ -536,6 +537,21 @@ public class PendingOrderService {
                 && order.getStatus() != PendingOrder.Status.PAID_AUTO) {
             throw new IllegalStateException(
                     "Đơn hàng " + order.getOrderNo() + " không ở trạng thái có thể xác nhận");
+        }
+
+        if (isBankTransfer(order)) {
+            LinkedAggregate aggregate = aggregateLinkedPaymentForOrder(order.getId());
+            BigDecimal total = order.getTotalAmount() != null ? order.getTotalAmount() : BigDecimal.ZERO;
+            BigDecimal sumLinked = aggregate.sum() != null ? aggregate.sum() : BigDecimal.ZERO;
+            if (aggregate.count() < 1L) {
+                throw new IllegalStateException(
+                        "Đơn " + order.getOrderNo() + " chưa có giao dịch ngân hàng đã gắn — chưa thể xác nhận");
+            }
+            if (sumLinked.compareTo(total) < 0) {
+                throw new IllegalStateException(
+                        "Tổng giao dịch đã gắn (" + sumLinked + ") nhỏ hơn tổng đơn (" + total
+                                + ") — chưa đủ điều kiện xác nhận");
+            }
         }
 
         order.setNote(appendNote(order.getNote(), note));
@@ -547,7 +563,7 @@ public class PendingOrderService {
         pendingOrderRepo.save(order);
 
         PendingOrderResponse pendingOrder = toResponse(order);
-        return new PendingOrderConfirmResponse(pendingOrder, DtoMapper.toResponse(invoice));
+        return new PendingOrderConfirmResponse(pendingOrder, DtoMapper.toResponse(invoice, order.getOrderNo()));
     }
 
     @Transactional
@@ -604,11 +620,13 @@ public class PendingOrderService {
         List<PendingOrder> hydrated = pendingOrderRepo.findAllByIdInForListHydrate(ids);
         Map<Long, PendingOrder> byId = hydrated.stream().collect(Collectors.toMap(PendingOrder::getId, Function.identity()));
         Map<Long, PaymentEvent> linkedByOrder = pickLatestLinkedPaymentEventPerOrder(ids);
+        Map<Long, LinkedAggregate> aggregateByOrder = aggregateLinkedPaymentByOrder(ids);
         return orderedLightRows.stream()
                 .map(po -> mapToPendingOrderResponse(
                         Objects.requireNonNull(byId.get(po.getId()), "missing pending id " + po.getId()),
                         false,
-                        linkedByOrder.get(po.getId())))
+                        linkedByOrder.get(po.getId()),
+                        aggregateByOrder.getOrDefault(po.getId(), LinkedAggregate.zero())))
                 .toList();
     }
 
@@ -638,6 +656,35 @@ public class PendingOrderService {
         return best;
     }
 
+    private Map<Long, LinkedAggregate> aggregateLinkedPaymentByOrder(Collection<Long> orderIds) {
+        if (orderIds == null || orderIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Object[]> rows = paymentEventRepository.aggregateLinkedByOrderIds(orderIds);
+        Map<Long, LinkedAggregate> result = new HashMap<>();
+        for (Object[] row : rows) {
+            if (row == null || row[0] == null) {
+                continue;
+            }
+            Long oid = ((Number) row[0]).longValue();
+            BigDecimal sum = row[1] != null ? (BigDecimal) row[1] : BigDecimal.ZERO;
+            long count = row[2] != null ? ((Number) row[2]).longValue() : 0L;
+            result.put(oid, new LinkedAggregate(sum, count));
+        }
+        return result;
+    }
+
+    /**
+     * Single-order aggregate; only call on confirm/detail paths where one extra query is cheap. List paths
+     * MUST use {@link #aggregateLinkedPaymentByOrder(Collection)} to keep query count bounded.
+     */
+    private LinkedAggregate aggregateLinkedPaymentForOrder(Long orderId) {
+        if (orderId == null) {
+            return LinkedAggregate.zero();
+        }
+        return aggregateLinkedPaymentByOrder(List.of(orderId)).getOrDefault(orderId, LinkedAggregate.zero());
+    }
+
     private PendingOrderResponse toResponse(PendingOrder order) {
         return toResponse(order, true);
     }
@@ -646,34 +693,58 @@ public class PendingOrderService {
         PaymentEvent linked = paymentEventRepository
                 .findFirstByLinkedPendingOrder_IdOrderByLinkedAtDesc(order.getId())
                 .orElse(null);
-        return mapToPendingOrderResponse(order, includeFullInvoice, linked);
+        LinkedAggregate aggregate = aggregateLinkedPaymentForOrder(order.getId());
+        return mapToPendingOrderResponse(order, includeFullInvoice, linked, aggregate);
     }
 
     private record PaymentLinkSlice(
             String paymentLinkStatus,
             BigDecimal paymentDelta,
             Long linkedPaymentEventId,
-            BigDecimal linkedPaymentAmount) {
+            BigDecimal linkedPaymentAmount,
+            BigDecimal linkedPaymentTotal,
+            long linkedPaymentCount) {
         static PaymentLinkSlice none() {
-            return new PaymentLinkSlice("NONE", null, null, null);
+            return new PaymentLinkSlice("NONE", null, null, null, null, 0L);
         }
     }
 
-    private PaymentLinkSlice derivePaymentLink(PendingOrder order, PaymentEvent linked) {
-        if (linked == null || linked.getStatus() != PaymentEvent.Status.LINKED) {
+    private record LinkedAggregate(BigDecimal sum, long count) {
+        static LinkedAggregate zero() {
+            return new LinkedAggregate(BigDecimal.ZERO, 0L);
+        }
+    }
+
+    private boolean isBankTransfer(PendingOrder order) {
+        return "bank_transfer".equalsIgnoreCase(order.getPaymentMethod());
+    }
+
+    private PaymentLinkSlice derivePaymentLink(PendingOrder order, PaymentEvent linkedOrNull, LinkedAggregate aggregate) {
+        if (!isBankTransfer(order)) {
+            // Non-bank: zero out link/aggregate semantics so FE never derives an evidence banner.
             return PaymentLinkSlice.none();
         }
-        if (order.getTotalAmount() == null || linked.getAmount() == null) {
-            return PaymentLinkSlice.none();
+        long count = aggregate != null ? aggregate.count() : 0L;
+        BigDecimal sum = aggregate != null && aggregate.sum() != null ? aggregate.sum() : BigDecimal.ZERO;
+        BigDecimal total = order.getTotalAmount() != null ? order.getTotalAmount() : BigDecimal.ZERO;
+        BigDecimal delta = sum.subtract(total);
+        String status;
+        if (count == 0L) {
+            status = "NONE";
+        } else if (sum.compareTo(total) == 0) {
+            status = "EXACT_PAID";
+        } else if (sum.compareTo(total) < 0) {
+            status = "UNDERPAID_LINKED";
+        } else {
+            status = "OVERPAID_LINKED";
         }
-        BigDecimal delta = linked.getAmount().subtract(order.getTotalAmount());
-        int cmp = delta.compareTo(BigDecimal.ZERO);
-        String st = cmp == 0 ? "EXACT_PAID" : (cmp < 0 ? "UNDERPAID_LINKED" : "OVERPAID_LINKED");
-        return new PaymentLinkSlice(st, delta, linked.getId(), linked.getAmount());
+        Long latestId = linkedOrNull != null ? linkedOrNull.getId() : null;
+        BigDecimal latestAmount = linkedOrNull != null ? linkedOrNull.getAmount() : null;
+        return new PaymentLinkSlice(status, delta, latestId, latestAmount, sum, count);
     }
 
     private PendingOrderResponse mapToPendingOrderResponse(
-            PendingOrder order, boolean includeFullInvoice, PaymentEvent linkedOrNull) {
+            PendingOrder order, boolean includeFullInvoice, PaymentEvent linkedOrNull, LinkedAggregate aggregate) {
         ShippingAddressDto shippingAddress = readJson(order.getShippingAddressJson(), new TypeReference<>() {});
         List<GiftLineSnapshotDto> giftLines = readJsonList(order.getGiftLinesSnapshotJson(), new TypeReference<>() {});
         PromotionSnapshotDto promotionSnapshot = readJson(order.getPromotionSnapshotJson(), new TypeReference<>() {});
@@ -701,11 +772,11 @@ public class PendingOrderService {
         if (includeFullInvoice) {
             SalesInvoice inv = order.getInvoice();
             if (inv != null) {
-                invoiceOut = DtoMapper.toResponse(inv);
+                invoiceOut = DtoMapper.toResponse(inv, order.getOrderNo());
             }
         }
 
-        PaymentLinkSlice pl = derivePaymentLink(order, linkedOrNull);
+        PaymentLinkSlice pl = derivePaymentLink(order, linkedOrNull, aggregate);
         return new PendingOrderResponse(
                 String.valueOf(order.getId()),
                 order.getOrderNo(),
@@ -733,7 +804,9 @@ public class PendingOrderService {
                 pl.paymentLinkStatus(),
                 pl.paymentDelta(),
                 pl.linkedPaymentEventId(),
-                pl.linkedPaymentAmount()
+                pl.linkedPaymentAmount(),
+                pl.linkedPaymentTotal(),
+                pl.linkedPaymentCount()
         );
     }
 

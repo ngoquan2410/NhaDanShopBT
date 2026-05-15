@@ -168,6 +168,9 @@ export default function StorefrontCombos() {
                           return;
                         }
                         try {
+                          const dq = Math.max(0, Math.floor(Number(combo.derivedStock) || 0));
+                          const availabilityStatus =
+                            dq <= 0 ? "OUT_OF_STOCK" : dq <= 5 ? "LOW_STOCK" : "IN_STOCK";
                           cartActions.add({
                             productId: combo.id,
                             variantId: combo.defaultVariantId,
@@ -176,7 +179,9 @@ export default function StorefrontCombos() {
                             categoryId: combo.categoryId,
                             qty: 1,
                             unitPrice: combo.price,
-                            stock: combo.derivedStock,
+                            sellUnit: "combo",
+                            availableQty: dq,
+                            availabilityStatus,
                             catalogSource: "backend",
                             schemaVersion: 2,
                           });

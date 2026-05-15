@@ -170,6 +170,11 @@ export interface Invoice {
   sourceType?: 'pos' | 'online_pending' | 'manual';
   /** Pending order this invoice was created from (if any). */
   pendingOrderId?: string;
+  /**
+   * Canonical pending order code ({@code orderNo}, e.g. {@code DH-20260512-014}) when backend has it.
+   * Falls back to {@code "PO #" + pendingOrderId} in the UI when this is missing but `pendingOrderId` is set.
+   */
+  pendingOrderCode?: string;
   /** Σ merchandise gross profit from backend allocation when present. */
   itemGrossProfit?: number | null;
   /** Full invoice profit from backend (`DtoMapper`): may include shipping net when modeled. */

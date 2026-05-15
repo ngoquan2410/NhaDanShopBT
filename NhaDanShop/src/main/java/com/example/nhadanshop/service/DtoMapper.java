@@ -114,7 +114,18 @@ public final class DtoMapper {
         );
     }
 
-    public static PublicVariantResponse toPublicResponse(ProductVariant v) {
+    public static PublicVariantResponse toPublicResponse(ProductVariant v, int availableQty) {
+        String status;
+        if (availableQty <= 0) {
+            status = "OUT_OF_STOCK";
+        } else {
+            Integer min = v.getMinStockQty();
+            if (min != null && min > 0 && availableQty <= min) {
+                status = "LOW_STOCK";
+            } else {
+                status = "IN_STOCK";
+            }
+        }
         return new PublicVariantResponse(
                 v.getId(),
                 v.getVariantCode(),
@@ -122,12 +133,22 @@ public final class DtoMapper {
                 v.getSellUnit(),
                 v.getSellPrice(),
                 v.getImageUrl(),
-                v.getIsDefault()
+                v.getIsDefault(),
+                availableQty,
+                status
         );
     }
 
     // ── SalesInvoice ──────────────────────────────────────────────────────────
     public static SalesInvoiceResponse toResponse(SalesInvoice inv) {
+        return toResponse(inv, null);
+    }
+
+    /**
+     * @param pendingOrderCode optional pending order canonical code, batch-resolved by the list path
+     *                         to avoid N+1 lookups. Pass {@code null} from single-fetch sites.
+     */
+    public static SalesInvoiceResponse toResponse(SalesInvoice inv, String pendingOrderCode) {
         BigDecimal discountAmount = inv.getDiscountAmount() != null ? inv.getDiscountAmount() : BigDecimal.ZERO;
         BigDecimal finalAmount    = nz(inv.getTotalAmount()).subtract(discountAmount);
         ShippingAddressDto shippingAddress = readJson(inv.getShippingAddressJson(), new TypeReference<>() {});
@@ -206,6 +227,7 @@ public final class DtoMapper {
                 inv.getCancelledAt(), inv.getCancelledBy(), inv.getCancelReason(),
                 mapSourceType(inv.getSourceType()),
                 inv.getPendingOrderId() != null ? String.valueOf(inv.getPendingOrderId()) : null,
+                pendingOrderCode,
                 giftLines,
                 promotionSnapshot,
                 voucherSnapshot,

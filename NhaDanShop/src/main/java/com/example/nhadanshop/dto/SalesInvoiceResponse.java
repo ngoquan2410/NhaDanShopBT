@@ -30,6 +30,12 @@ public record SalesInvoiceResponse(
         String cancelReason,
         String sourceType,
         String pendingOrderId,
+        /**
+         * Pending order canonical code ({@code orderNo}, e.g. {@code DH-20260512-014}) backfilled by list/batch
+         * lookups so admin can display {@code pendingOrderCode || "PO #" + pendingOrderId}. Null when the row was
+         * never linked to a pending order or the pending row no longer exists.
+         */
+        String pendingOrderCode,
         List<GiftLineSnapshotDto> giftLinesSnapshot,
         PromotionSnapshotDto promotionSnapshot,
         VoucherSnapshotDto voucherSnapshot,

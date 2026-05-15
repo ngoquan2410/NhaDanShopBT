@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { cartActions } from "@/lib/cart";
+import { storefrontAvailabilityUi, storefrontVariantOutOfStock } from "@/lib/storefrontAvailability";
 import { resolveProductImage } from "@/lib/product-image";
 import { getPublicProduct, listPublicProductsPage, type StorefrontProduct } from "@/services/catalog/publicCatalog";
 
@@ -59,6 +60,18 @@ export default function StorefrontProductDetail() {
     setImageBroken(false);
   }, [id, variantId]);
 
+  useEffect(() => {
+    if (!product) return;
+    const v = product.variants.find((x) => x.id === variantId) || product.variants[0];
+    if (!v) return;
+    const maxSel = storefrontVariantOutOfStock(v)
+      ? 1
+      : typeof v.availableQty === "number"
+        ? Math.max(1, v.availableQty)
+        : 20;
+    setQty((q) => Math.min(q, maxSel));
+  }, [product, variantId]);
+
   if (product === undefined) {
     return <div className="max-w-4xl mx-auto px-4 py-12 text-sm text-muted-foreground">Đang tải sản phẩm backend...</div>;
   }
@@ -85,11 +98,22 @@ export default function StorefrontProductDetail() {
 
   const variant = product.variants.find((v) => v.id === variantId) || product.variants[0];
   const imageUrl = resolveProductImage(product, variant);
+  const availability = storefrontAvailabilityUi(variant);
+  const outOfStock = storefrontVariantOutOfStock(variant);
+  const qtyMax = outOfStock
+    ? 1
+    : typeof variant.availableQty === "number"
+      ? Math.max(1, variant.availableQty)
+      : 20;
   const related = relatedProducts
     .filter((p) => p.id !== product.id && p.categoryId === product.categoryId && p.active)
     .slice(0, 5);
 
   const addToCart = () => {
+    if (outOfStock) {
+      toast.error("Sản phẩm đã hết hàng");
+      return;
+    }
     cartActions.add({
       productId: product.id,
       variantId: variant.id,
@@ -101,6 +125,9 @@ export default function StorefrontProductDetail() {
       categoryName: product.categoryName,
       qty,
       unitPrice: variant.sellPrice,
+      sellUnit: variant.sellUnit,
+      availableQty: variant.availableQty,
+      availabilityStatus: variant.availabilityStatus,
       catalogSource: "backend",
       schemaVersion: 2,
     });
@@ -201,9 +228,15 @@ export default function StorefrontProductDetail() {
                 </span>
                 <span className="text-sm text-muted-foreground">/ {variant.sellUnit}</span>
               </div>
-              <div className="mt-1.5 flex items-center gap-2 text-xs">
+              <div className="mt-1.5 flex flex-col gap-1 text-xs">
                 <span className="inline-flex items-center gap-1 text-success font-medium">
                   <Check className="h-3.5 w-3.5" /> Sản phẩm đang mở bán
+                </span>
+                <span
+                  data-testid="storefront-product-detail-availability"
+                  className={cn("text-xs", availability.textClassName)}
+                >
+                  {availability.text}
                 </span>
               </div>
             </div>
@@ -234,14 +267,24 @@ export default function StorefrontProductDetail() {
             )}
 
             {/* Quantity */}
-            <div className="mt-5">
-              <p className="text-sm font-semibold mb-2.5">Số lượng</p>
-              <div className="flex items-center gap-3">
+            <div className="mt-5" data-testid="storefront-product-quantity-section">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 mb-2.5">
+                <p className="text-sm font-semibold">Số lượng</p>
+                <span className="text-sm text-muted-foreground">
+                  Đang chọn:{" "}
+                  <span className="font-semibold text-foreground tabular-nums" data-testid="storefront-product-quantity-value">
+                    {qty}
+                  </span>
+                </span>
+              </div>
+              <div className={cn("flex items-center gap-3", outOfStock && "pointer-events-none opacity-45")}>
                 <QuantityStepper
                   value={qty}
                   onChange={setQty}
                   min={1}
-                  max={20}
+                  max={qtyMax}
+                  decrementTestId="storefront-product-quantity-decrement"
+                  incrementTestId="storefront-product-quantity-increment"
                 />
               </div>
             </div>
@@ -251,13 +294,25 @@ export default function StorefrontProductDetail() {
               <button
                 onClick={addToCart}
                 data-testid="storefront-add-cart"
-                className="inline-flex items-center justify-center gap-2 h-12 border-2 border-foreground text-foreground rounded-full text-sm font-semibold hover:bg-foreground hover:text-background transition-colors"
+                disabled={outOfStock}
+                className={cn(
+                  "inline-flex items-center justify-center gap-2 h-12 border-2 rounded-full text-sm font-semibold transition-colors",
+                  outOfStock
+                    ? "border-muted text-muted-foreground cursor-not-allowed opacity-60"
+                    : "border-foreground text-foreground hover:bg-foreground hover:text-background",
+                )}
               >
                 <ShoppingCart className="h-4 w-4" /> Thêm vào giỏ
               </button>
               <button
                 onClick={buyNow}
-                className="inline-flex items-center justify-center gap-2 h-12 bg-storefront-accent text-white rounded-full text-sm font-semibold hover:opacity-90 sf-shadow-cta"
+                disabled={outOfStock}
+                className={cn(
+                  "inline-flex items-center justify-center gap-2 h-12 rounded-full text-sm font-semibold sf-shadow-cta",
+                  outOfStock
+                    ? "bg-muted text-muted-foreground cursor-not-allowed opacity-60"
+                    : "bg-storefront-accent text-white hover:opacity-90",
+                )}
               >
                 Mua ngay
               </button>
@@ -316,13 +371,23 @@ export default function StorefrontProductDetail() {
         <button
           onClick={addToCart}
           data-testid="storefront-add-cart"
-          className="flex-1 inline-flex items-center justify-center gap-1.5 h-11 border-2 border-foreground text-foreground rounded-full text-sm font-semibold"
+          disabled={outOfStock}
+          className={cn(
+            "flex-1 inline-flex items-center justify-center gap-1.5 h-11 border-2 rounded-full text-sm font-semibold",
+            outOfStock
+              ? "border-muted text-muted-foreground cursor-not-allowed opacity-60"
+              : "border-foreground text-foreground",
+          )}
         >
           <ShoppingCart className="h-4 w-4" /> Thêm
         </button>
         <button
           onClick={buyNow}
-          className="flex-1 inline-flex items-center justify-center h-11 bg-storefront-accent text-white rounded-full text-sm font-semibold"
+          disabled={outOfStock}
+          className={cn(
+            "flex-1 inline-flex items-center justify-center h-11 rounded-full text-sm font-semibold",
+            outOfStock ? "bg-muted text-muted-foreground cursor-not-allowed opacity-60" : "bg-storefront-accent text-white",
+          )}
         >
           Mua ngay
         </button>

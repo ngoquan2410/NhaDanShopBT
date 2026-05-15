@@ -96,6 +96,15 @@ public class ProductController {
         return productService.findByCategory(categoryId, pageable, false);
     }
 
+    /**
+     * GET /api/products/variants/availability?variantIds=1,2,3
+     * Storefront batch: public-safe aggregate availability (max 100 ids, one sellable-sum query).
+     */
+    @GetMapping("/variants/availability")
+    public List<PublicVariantAvailabilityRow> variantAvailability(@RequestParam(name = "variantIds") String variantIds) {
+        return productService.publicVariantAvailabilityBatch(variantIds);
+    }
+
     @GetMapping("/{id}")
     public Object one(@PathVariable Long id) {
         if (!hasAdminOrStaffRole()) {

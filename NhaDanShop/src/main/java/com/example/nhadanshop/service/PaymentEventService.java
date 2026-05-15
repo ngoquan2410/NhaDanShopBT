@@ -129,22 +129,23 @@ public class PaymentEventService {
         ensureManualLinkAllowed(order, event);
         attachEventToOrder(event, order, normalizeManualLinkedBy(linkedBy));
 
-        paymentEventRepository.save(event);
-        maybeMarkPaidAutoAfterManualLink(order.getId(), event.getAmount());
+        paymentEventRepository.saveAndFlush(event);
+        maybeMarkPaidAutoAfterAggregateLink(order.getId());
         PendingOrderResponse pendingOrder = pendingOrderService.getById(order.getId());
         return new PaymentEventLinkResponse(toResponse(event), pendingOrder, false);
     }
 
     /**
-     * Manual link never confirms or creates an invoice. When the transfer amount matches the pending
-     * total exactly and the order is still awaiting payment/review, move to {@link PendingOrder.Status#PAID_AUTO}.
+     * Manual link never confirms or creates an invoice. After persisting this event LINKED, re-aggregate all
+     * LINKED bank events for the order; if {@code SUM == totalAmount} (exact), move pending → {@link PendingOrder.Status#PAID_AUTO}.
+     * Under or over aggregate must NOT change status (admin still has to confirm or fix).
      */
-    private void maybeMarkPaidAutoAfterManualLink(Long orderId, BigDecimal paidAmount) {
-        if (paidAmount == null || orderId == null) {
+    private void maybeMarkPaidAutoAfterAggregateLink(Long orderId) {
+        if (orderId == null) {
             return;
         }
         pendingOrderRepository.findById(orderId).ifPresent(o -> {
-            if (o.getTotalAmount() == null || paidAmount.compareTo(o.getTotalAmount()) != 0) {
+            if (!"bank_transfer".equalsIgnoreCase(o.getPaymentMethod())) {
                 return;
             }
             if (o.getInvoice() != null) {
@@ -154,9 +155,29 @@ public class PaymentEventService {
                     && o.getStatus() != PendingOrder.Status.WAITING_CONFIRM) {
                 return;
             }
+            BigDecimal total = o.getTotalAmount();
+            if (total == null) {
+                return;
+            }
+            BigDecimal aggregate = sumLinkedForOrder(o.getId());
+            if (aggregate.compareTo(total) != 0) {
+                return;
+            }
             o.setStatus(PendingOrder.Status.PAID_AUTO);
             pendingOrderRepository.save(o);
         });
+    }
+
+    private BigDecimal sumLinkedForOrder(Long orderId) {
+        List<Object[]> rows = paymentEventRepository.aggregateLinkedByOrderIds(List.of(orderId));
+        if (rows.isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+        Object[] row = rows.get(0);
+        if (row == null || row[1] == null) {
+            return BigDecimal.ZERO;
+        }
+        return (BigDecimal) row[1];
     }
 
     @Transactional
@@ -317,11 +338,14 @@ public class PaymentEventService {
             }
             return false;
         }
-        boolean confirmed = maybeMarkOrderPaidAuto(order, event.getAmount());
+        // Attach + save + flush BEFORE confirmOrder so the bank guard's aggregate sees this LINKED row in the
+        // same transaction. Without this ordering, confirmOrder would reject the exact webhook with NO_LINK.
+        PendingOrder fresh = pendingOrderRepository.findById(order.getId()).orElse(order);
+        attachEventToOrder(event, fresh, "casso:webhook");
+        paymentEventRepository.saveAndFlush(event);
+        boolean confirmed = maybeMarkOrderPaidAuto(fresh, event.getAmount());
         if (confirmed) {
             log.debug("casso.autoConfirm reason=AUTO_CONFIRMED order={}", order.getOrderNo());
-            PendingOrder fresh = pendingOrderRepository.findById(order.getId()).orElse(order);
-            attachEventToOrder(event, fresh, "casso:webhook");
         } else {
             log.debug("casso.autoConfirm reason=CONFIRM_FAILED order={}", order.getOrderNo());
         }

@@ -267,7 +267,8 @@ class PaymentEventIntegrationTest {
         mkBatch(v, LocalDate.now().plusDays(30), 50);
         stockMutationService.syncVariantStockWithBatches(v.getId());
         var quote = quoteStorefront(v, 1, null);
-        var po = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "bank_transfer", "Y", "1"));
+        // cod path skips the new bank-link confirm guard so the test focuses solely on idempotency
+        var po = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "cod", "Y", "1"));
         pendingOrderService.confirmOrder(Long.parseLong(po.id()), null, "admin");
         PendingOrder o = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
         long invoiceBefore = salesInvoiceRepository.count();
@@ -446,7 +447,8 @@ class PaymentEventIntegrationTest {
         stockMutationService.syncVariantStockWithBatches(v.getId());
 
         var quoteConfirmed = quoteStorefront(v, 1, null);
-        var poConfirmed = pendingOrderService.createOrder(poFromQuote(quoteConfirmed.quoteId(), "bank_transfer", "C", "090"));
+        // cod sidesteps the bank-link confirm guard; this test only cares about post-terminal manual-link rejection
+        var poConfirmed = pendingOrderService.createOrder(poFromQuote(quoteConfirmed.quoteId(), "cod", "C", "090"));
         pendingOrderService.confirmOrder(Long.parseLong(poConfirmed.id()), null, "test");
 
         var quoteCancelled = quoteStorefront(v, 1, null);
@@ -529,7 +531,8 @@ class PaymentEventIntegrationTest {
         pendingOrderService.markWaitingConfirm(Long.parseLong(waiting.id()), null);
         var cancelled = pendingOrderService.createOrder(poFromQuote(quoteStorefront(v, 1, null).quoteId(), "bank_transfer", "HOTFIX-CAND", "102"));
         pendingOrderService.cancelOrder(Long.parseLong(cancelled.id()), "cancel");
-        var confirmed = pendingOrderService.createOrder(poFromQuote(quoteStorefront(v, 1, null).quoteId(), "bank_transfer", "HOTFIX-CAND", "103"));
+        // cod sidesteps the bank-link guard; this test only verifies linkable filtering by status, not confirm pathway
+        var confirmed = pendingOrderService.createOrder(poFromQuote(quoteStorefront(v, 1, null).quoteId(), "cod", "HOTFIX-CAND", "103"));
         pendingOrderService.confirmOrder(Long.parseLong(confirmed.id()), null, "admin");
 
         var page = pendingOrderService.listLinkableCandidates(0, 20, "HOTFIX-CAND", PageRequest.of(0, 20));

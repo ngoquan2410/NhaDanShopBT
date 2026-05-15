@@ -50,6 +50,7 @@ import java.util.stream.Stream;
 public class InvoiceService {
 
     private final SalesInvoiceRepository invoiceRepo;
+    private final PendingOrderRepository pendingOrderRepo;
     private final ProductRepository productRepo;
     private final UserRepository userRepo;
     private final InvoiceNumberGenerator numberGen;
@@ -917,8 +918,19 @@ public class InvoiceService {
     }
 
     public SalesInvoiceResponse getInvoice(Long id) {
-        return DtoMapper.toResponse(invoiceRepo.findByIdForResponse(id)
-                .orElseThrow(() -> new EntityNotFoundException("Khong tim thay hoa don ID: " + id)));
+        SalesInvoice inv = invoiceRepo.findByIdForResponse(id)
+                .orElseThrow(() -> new EntityNotFoundException("Khong tim thay hoa don ID: " + id));
+        return DtoMapper.toResponse(inv, resolvePendingOrderCode(inv.getPendingOrderId()));
+    }
+
+    private String resolvePendingOrderCode(Long pendingOrderId) {
+        if (pendingOrderId == null) {
+            return null;
+        }
+        return pendingOrderRepo.findById(pendingOrderId)
+                .map(PendingOrder::getOrderNo)
+                .filter(code -> code != null && !code.isBlank())
+                .orElse(null);
     }
 
     public Page<SalesInvoiceResponse> listInvoices(Pageable pageable) {
@@ -966,10 +978,28 @@ public class InvoiceService {
                 .sorted(java.util.Comparator.comparingInt(inv -> orderIndex.getOrDefault(inv.getId(), Integer.MAX_VALUE)))
                 .collect(Collectors.toMap(SalesInvoice::getId, inv -> inv, (left, right) -> left, LinkedHashMap::new));
 
+        // Batch-resolve pending order codes for ONLINE_PENDING invoices with one query — never N+1 by row.
+        Set<Long> pendingOrderIds = invoiceById.values().stream()
+                .map(SalesInvoice::getPendingOrderId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, String> codeByPendingOrderId = pendingOrderIds.isEmpty()
+                ? Map.of()
+                : pendingOrderRepo.findAllById(pendingOrderIds).stream()
+                        .collect(Collectors.toMap(
+                                PendingOrder::getId,
+                                po -> po.getOrderNo() != null ? po.getOrderNo() : "",
+                                (left, right) -> left));
+
         List<SalesInvoiceResponse> responses = invoiceIds.stream()
                 .map(invoiceById::get)
                 .filter(Objects::nonNull)
-                .map(DtoMapper::toResponse)
+                .map(inv -> {
+                    String code = inv.getPendingOrderId() != null
+                            ? codeByPendingOrderId.get(inv.getPendingOrderId())
+                            : null;
+                    return DtoMapper.toResponse(inv, code != null && code.isBlank() ? null : code);
+                })
                 .toList();
 
         return new PageImpl<>(responses, safePageable, invoiceIdPage.getTotalElements());
@@ -1005,7 +1035,27 @@ public class InvoiceService {
 
     /** Sprint 2: lịch sử HĐ theo khách hàng */
     public Page<SalesInvoiceResponse> listInvoicesByCustomer(Long customerId, Pageable pageable) {
-        return invoiceRepo.findByCustomerIdOrderByInvoiceDateDesc(customerId, pageable).map(DtoMapper::toResponse);
+        Page<SalesInvoice> page = invoiceRepo.findByCustomerIdOrderByInvoiceDateDesc(customerId, pageable);
+        if (page.getContent().isEmpty()) {
+            return page.map(inv -> DtoMapper.toResponse(inv, null));
+        }
+        Set<Long> pendingOrderIds = page.getContent().stream()
+                .map(SalesInvoice::getPendingOrderId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, String> codeByPendingOrderId = pendingOrderIds.isEmpty()
+                ? Map.of()
+                : pendingOrderRepo.findAllById(pendingOrderIds).stream()
+                        .collect(Collectors.toMap(
+                                PendingOrder::getId,
+                                po -> po.getOrderNo() != null ? po.getOrderNo() : "",
+                                (left, right) -> left));
+        return page.map(inv -> {
+            String code = inv.getPendingOrderId() != null
+                    ? codeByPendingOrderId.get(inv.getPendingOrderId())
+                    : null;
+            return DtoMapper.toResponse(inv, code != null && code.isBlank() ? null : code);
+        });
     }
 
     /**
@@ -1074,7 +1124,7 @@ public class InvoiceService {
         invoiceRepo.save(inv);
         loyaltyService.reverseForInvoice(inv, reason);
         affectedProductIds.forEach(comboService::refreshCombosContaining);
-        return DtoMapper.toResponse(inv);
+        return DtoMapper.toResponse(inv, resolvePendingOrderCode(inv.getPendingOrderId()));
     }
 
     private void appendBatchAllocations(SalesInvoiceItem item, List<ProductBatchService.BatchDeduction> deductions) {

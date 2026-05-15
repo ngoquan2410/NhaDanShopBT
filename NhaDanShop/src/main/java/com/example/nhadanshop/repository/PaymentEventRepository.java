@@ -53,4 +53,20 @@ public interface PaymentEventRepository extends JpaRepository<PaymentEvent, Long
     List<PaymentEvent> findByLinkedPendingOrder_IdInAndStatus(
             Collection<Long> orderIds,
             PaymentEvent.Status status);
+
+    /**
+     * One-query aggregate of LINKED bank evidence per pending order: returns
+     * {@code Object[]{ orderId(Long), sumAmount(BigDecimal), count(Long) }} grouped by order.
+     * Orders without any LINKED row simply do not appear — callers must default to (0, 0).
+     */
+    @Query("""
+            SELECT e.linkedPendingOrder.id,
+                   COALESCE(SUM(e.amount), 0),
+                   COUNT(e)
+            FROM PaymentEvent e
+            WHERE e.linkedPendingOrder.id IN :orderIds
+              AND e.status = com.example.nhadanshop.entity.PaymentEvent.Status.LINKED
+            GROUP BY e.linkedPendingOrder.id
+            """)
+    List<Object[]> aggregateLinkedByOrderIds(@Param("orderIds") Collection<Long> orderIds);
 }

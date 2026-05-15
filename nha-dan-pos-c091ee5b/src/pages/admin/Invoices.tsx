@@ -16,6 +16,7 @@ import { formatVND, formatDateTime } from "@/lib/format";
 import type { SortState } from "@/hooks/useTableControls";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Receipt, Printer, XCircle, Trash2, Eye, ShieldAlert, TrendingUp } from "lucide-react";
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { localToday, toLocalDateString } from "@/lib/localDate";
@@ -189,7 +190,12 @@ export default function AdminInvoices() {
                   <SortableTh label="Tổng" sortKey="total" sort={sort} onSort={toggleSort} align="right" />
                   <SortableTh label="Lợi nhuận" sortKey="profit" sort={sort} onSort={toggleSort} align="right" />
                   <SortableTh label="Trạng thái" sortKey="status" sort={sort} onSort={toggleSort} align="center" />
-                  <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden lg:table-cell">Người tạo</th>
+                  <th
+                    className="text-left px-3 py-2 font-medium text-muted-foreground hidden lg:table-cell"
+                    data-testid="invoices-col-pending-order"
+                  >
+                    Pending Order
+                  </th>
                   <th className="text-right px-3 py-2 font-medium text-muted-foreground w-[120px]">Thao tác</th>
                 </tr>
               </thead>
@@ -219,7 +225,9 @@ export default function AdminInvoices() {
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-center"><StatusBadge status={inv.status === 'cancelled' ? 'cancelled' : 'active'} /></td>
-                    <td className="px-3 py-2.5 text-muted-foreground text-xs hidden lg:table-cell">{inv.createdBy}</td>
+                    <td className="px-3 py-2.5 text-xs hidden lg:table-cell" data-testid={`invoices-pending-order-${inv.id}`}>
+                      <PendingOrderCell inv={inv} />
+                    </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
                         <button onClick={() => setDetailInvoice(inv)} className="p-1 text-muted-foreground hover:text-foreground rounded hover:bg-muted" title="Xem chi tiết"><Eye className="h-3.5 w-3.5" /></button>
@@ -316,4 +324,46 @@ export default function AdminInvoices() {
       <InvoiceDetailDrawer invoice={detailInvoice} onClose={() => setDetailInvoice(null)} />
     </div>
   );
+}
+
+/**
+ * Pending-Order column cell.
+ * Visibility rules (matches plan's "Hóa đơn" acceptance):
+ *   - ONLINE_PENDING with code  → render code as a deep link to /admin/pending-orders?q=code.
+ *   - ONLINE_PENDING with id only → render {@code PO #id} fallback link by id.
+ *   - ONLINE_PENDING without id or code → em-dash placeholder.
+ *   - POS source → literal label {@code POS}.
+ *   - MANUAL / unknown → em-dash placeholder. Never invents a code.
+ */
+function PendingOrderCell({ inv }: { inv: Invoice }) {
+  const source = inv.sourceType;
+  if (source === "pos") {
+    return <span className="text-muted-foreground font-mono">POS</span>;
+  }
+  if (source !== "online_pending") {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const code = inv.pendingOrderCode?.trim() || null;
+  if (code) {
+    return (
+      <Link
+        to={`/admin/pending-orders?q=${encodeURIComponent(code)}`}
+        className="font-mono text-primary hover:underline"
+      >
+        {code}
+      </Link>
+    );
+  }
+  if (inv.pendingOrderId) {
+    const fallback = `PO #${inv.pendingOrderId}`;
+    return (
+      <Link
+        to={`/admin/pending-orders?q=${encodeURIComponent(inv.pendingOrderId)}`}
+        className="font-mono text-primary hover:underline"
+      >
+        {fallback}
+      </Link>
+    );
+  }
+  return <span className="text-muted-foreground">—</span>;
 }

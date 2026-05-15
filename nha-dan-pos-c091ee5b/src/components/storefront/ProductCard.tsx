@@ -2,15 +2,19 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Package, ShoppingCart, Heart } from "lucide-react";
 import { formatVND } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { resolveProductImage } from "@/lib/product-image";
 import { cartActions } from "@/lib/cart";
+import { storefrontAvailabilityUi, storefrontVariantOutOfStock } from "@/lib/storefrontAvailability";
 import type { StorefrontProduct } from "@/services/catalog/publicCatalog";
 
 type Product = StorefrontProduct;
 
 export function ProductCard({ product, compact = false }: { product: Product; compact?: boolean }) {
   const dv = product.variants.find((v) => v.isDefault) || product.variants[0];
+  const availability = storefrontAvailabilityUi(dv);
+  const outOfStock = storefrontVariantOutOfStock(dv);
   const [imageBroken, setImageBroken] = useState(false);
   const hasMulti = product.variants.length > 1;
   const minPrice = Math.min(...product.variants.map((v) => v.sellPrice));
@@ -25,6 +29,10 @@ export function ProductCard({ product, compact = false }: { product: Product; co
   const handleAdd = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (outOfStock) {
+      toast.error("Sản phẩm đã hết hàng");
+      return;
+    }
     cartActions.add({
       productId: product.id,
       variantId: dv.id,
@@ -36,6 +44,9 @@ export function ProductCard({ product, compact = false }: { product: Product; co
       categoryName: product.categoryName,
       qty: 1,
       unitPrice: dv.sellPrice,
+      sellUnit: dv.sellUnit,
+      availableQty: dv.availableQty,
+      availabilityStatus: dv.availabilityStatus,
       catalogSource: "backend",
       schemaVersion: 2,
     });
@@ -90,11 +101,13 @@ export function ProductCard({ product, compact = false }: { product: Product; co
           type="button"
           data-testid="storefront-add-cart"
           onClick={handleAdd}
-          disabled={false}
-          aria-disabled={false}
+          disabled={outOfStock}
+          aria-disabled={outOfStock}
           className={
             "absolute bottom-0 inset-x-0 h-9 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all duration-200 " +
-            "bg-foreground text-background cursor-pointer hover:bg-storefront-accent hover:brightness-110 active:scale-[0.98] active:brightness-95"
+            (outOfStock
+              ? "bg-muted text-muted-foreground cursor-not-allowed opacity-70"
+              : "bg-foreground text-background cursor-pointer hover:bg-storefront-accent hover:brightness-110 active:scale-[0.98] active:brightness-95")
           }
         >
           <ShoppingCart className="h-3.5 w-3.5" />
@@ -114,6 +127,15 @@ export function ProductCard({ product, compact = false }: { product: Product; co
               {hasMulti ? `Từ ${formatVND(minPrice)}` : formatVND(dv.sellPrice)}
             </p>
             <p className="text-[10px] text-muted-foreground mt-1">/ {dv.sellUnit}</p>
+            <p
+              data-testid="storefront-product-card-availability"
+              className={cn(
+                "text-[11px] mt-1",
+                availability.textClassName,
+              )}
+            >
+              {availability.text}
+            </p>
           </div>
           {hasMulti && (
             <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">

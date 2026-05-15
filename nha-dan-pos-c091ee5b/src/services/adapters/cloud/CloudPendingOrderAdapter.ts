@@ -44,6 +44,9 @@ type BackendPendingOrder = {
   paymentDelta?: number | string | null;
   linkedPaymentEventId?: string | number | null;
   linkedPaymentAmount?: number | string | null;
+  linkedPaymentTotal?: number | string | null;
+  linkedPaymentCount?: number | string | null;
+  totalAmount?: number | string | null;
 };
 
 type BackendPendingOrderConfirmResponse = {
@@ -149,6 +152,18 @@ function backendToOrder(
     linkedPaymentAmount:
       raw.linkedPaymentAmount != null && raw.linkedPaymentAmount !== ""
         ? Number(raw.linkedPaymentAmount)
+        : undefined,
+    linkedPaymentTotal:
+      raw.linkedPaymentTotal != null && raw.linkedPaymentTotal !== ""
+        ? Number(raw.linkedPaymentTotal)
+        : undefined,
+    linkedPaymentCount:
+      raw.linkedPaymentCount != null && raw.linkedPaymentCount !== ""
+        ? Number(raw.linkedPaymentCount)
+        : 0,
+    totalAmount:
+      raw.totalAmount != null && raw.totalAmount !== ""
+        ? Number(raw.totalAmount)
         : undefined,
   };
 }

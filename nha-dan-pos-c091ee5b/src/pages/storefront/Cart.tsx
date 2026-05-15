@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { formatVND } from "@/lib/format";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -15,9 +15,22 @@ import {
   Gift,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useCart, useSelectedPromotionId, useSelectedPromotionMode, cartActions, hasKnownCartStock, type CartItem } from "@/lib/cart";
+import {
+  useCart,
+  useSelectedPromotionId,
+  useSelectedPromotionMode,
+  cartActions,
+  getCartStepperMax,
+  getCartQuantityCap,
+  hasKnownCartStock,
+  CART_QTY_ADJUSTED_SESSION_KEY,
+  type CartItem,
+} from "@/lib/cart";
+import { storefrontAvailabilityUi, storefrontVariantFromCartItem } from "@/lib/storefrontAvailability";
+import { cn } from "@/lib/utils";
 import { promotions } from "@/services";
 import type { CartContext, EvaluatedPromotion } from "@/services/types";
+import { fetchPublicVariantAvailability, type StorefrontVariant } from "@/services/catalog/publicCatalog";
 import { PROMOTION_TYPE_LABEL, parseProgressFromReason } from "@/components/promotions/PromotionLabels";
 
 const PROGRESS_BASIS_LABEL: Record<string, string> = {
@@ -36,6 +49,12 @@ export default function CartPage() {
   const items = useCart();
   const persistedPromoId = useSelectedPromotionId();
   const persistedPromoMode = useSelectedPromotionMode();
+  const availabilityReconciledKeyRef = useRef<string | null>(null);
+
+  const variantIdsKey = useMemo(
+    () => [...new Set(items.map((i) => i.variantId))].sort().join(","),
+    [items],
+  );
 
   const subtotal = useMemo(
     () => items.reduce((s, i) => s + i.lineSubtotal, 0),
@@ -115,12 +134,55 @@ export default function CartPage() {
     }
   }, [promotionEvaluationStatus, persistedPromoId, allPromos]);
 
+  useEffect(() => {
+    try {
+      if (window.sessionStorage?.getItem(CART_QTY_ADJUSTED_SESSION_KEY) === "1") {
+        window.sessionStorage.removeItem(CART_QTY_ADJUSTED_SESSION_KEY);
+        toast.info("Số lượng đã được điều chỉnh theo tồn kho hiện tại.");
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!variantIdsKey) {
+      availabilityReconciledKeyRef.current = null;
+      return;
+    }
+    if (availabilityReconciledKeyRef.current === variantIdsKey) return;
+    let cancel = false;
+    void (async () => {
+      try {
+        const ids = variantIdsKey.split(",").filter(Boolean);
+        const rows = await fetchPublicVariantAvailability(ids);
+        if (cancel) return;
+        const clamped = cartActions.mergePublicAvailabilityFromBatch(rows);
+        if (clamped) {
+          toast.info("Số lượng đã được điều chỉnh theo tồn kho hiện tại.");
+        }
+      } catch {
+        /* quote/checkout vẫn là chốt chặn; không crash cart */
+      } finally {
+        if (!cancel) {
+          availabilityReconciledKeyRef.current = variantIdsKey;
+        }
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [variantIdsKey]);
+
   const promoDiscount = appliedPromo?.type !== "free_shipping" ? (appliedPromo?.discountAmount ?? 0) : 0;
   const promoGiftLines = appliedPromo?.giftLines ?? [];
   const promoIsGift = isGiftPromotionType(appliedPromo?.type);
   const promoShipFree = appliedPromo?.type === "free_shipping";
   const total = Math.max(0, subtotal - promoDiscount);
-  const hasStockIssue = items.some((i) => hasKnownCartStock(i) && i.qty > i.stock);
+  const hasStockIssue = items.some((i) => {
+    const cap = getCartQuantityCap(i);
+    return cap !== Number.MAX_SAFE_INTEGER && i.qty > cap;
+  });
   const hasInvalidBackendLine = items.some((i) => i.catalogSource !== "backend" || i.schemaVersion !== 2 || !/^\d+$/.test(String(i.productId)) || !/^\d+$/.test(String(i.variantId)));
   const ineligiblePromos = useMemo(
     () => allPromos.filter((p) => !p.eligible && p.reasonIfIneligible && !pendingAddressFreeShippingPromos.some((x) => x.promotionId === p.promotionId)),
@@ -431,11 +493,22 @@ export default function CartPage() {
 }
 
 function CartRow({ item, onRemove }: { item: CartItem; onRemove: (id: string, name: string) => void }) {
-  const knownStock = hasKnownCartStock(item);
-  const overStock = knownStock && item.qty > item.stock;
-  const lowStock = knownStock && item.stock <= 5;
+  const cap = getCartQuantityCap(item);
+  const finiteCap = cap !== Number.MAX_SAFE_INTEGER;
+  const overStock = finiteCap && item.qty > cap;
+  const variantForUi: StorefrontVariant =
+    item.stockSource === "trusted" && item.availableQty === undefined && hasKnownCartStock(item)
+      ? storefrontVariantFromCartItem({ ...item, availableQty: item.stock })
+      : storefrontVariantFromCartItem(item);
+  const availUi = storefrontAvailabilityUi(variantForUi);
+  const showAvailLine =
+    typeof item.availableQty === "number" || !!item.availabilityStatus || (item.stockSource === "trusted" && hasKnownCartStock(item));
+  const lowTrusted = item.stockSource === "trusted" && hasKnownCartStock(item) && item.availableQty === undefined && item.stock <= 5;
   return (
     <div
+      data-testid="storefront-cart-line"
+      data-product-id={item.productId}
+      data-variant-id={item.variantId}
       className={`bg-storefront-surface rounded-2xl border p-4 flex gap-3.5 sf-shadow ${
         overStock ? "border-danger/50" : ""
       }`}
@@ -463,10 +536,20 @@ function CartRow({ item, onRemove }: { item: CartItem; onRemove: (id: string, na
         {overStock && (
           <div className="flex items-center gap-1 mt-1.5 text-xs text-danger">
             <AlertTriangle className="h-3 w-3" />
-            Chỉ còn {item.stock} sản phẩm trong kho
+            {typeof item.availableQty === "number"
+              ? `Số lượng vượt quá tồn cho phép. Tối đa ${cap} ${item.sellUnit ?? "cái"}.`
+              : `Chỉ còn ${item.stock} sản phẩm trong kho`}
           </div>
         )}
-        {!overStock && lowStock && (
+        {showAvailLine && (
+          <p
+            data-testid="storefront-cart-line-availability"
+            className={cn("text-[11px] mt-1.5", availUi.textClassName)}
+          >
+            {availUi.text}
+          </p>
+        )}
+        {!overStock && lowTrusted && (
           <div className="mt-1.5">
             <StatusBadge status="low-stock" label={`Còn ${item.stock}`} />
           </div>
@@ -475,8 +558,11 @@ function CartRow({ item, onRemove }: { item: CartItem; onRemove: (id: string, na
           <QuantityStepper
             value={item.qty}
             onChange={(v) => cartActions.setQty(item.id, v)}
-            max={knownStock ? item.stock : 20}
+            max={getCartStepperMax(item)}
             size="sm"
+            inputTestId={`storefront-cart-line-qty-${item.productId}-${item.variantId}`}
+            incrementTestId={`storefront-cart-line-qty-plus-${item.productId}-${item.variantId}`}
+            decrementTestId={`storefront-cart-line-qty-minus-${item.productId}-${item.variantId}`}
           />
           <p className="font-bold text-base text-foreground">{formatVND(item.lineSubtotal)}</p>
         </div>

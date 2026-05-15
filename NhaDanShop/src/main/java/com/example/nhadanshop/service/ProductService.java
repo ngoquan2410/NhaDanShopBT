@@ -4,6 +4,7 @@ import com.example.nhadanshop.dto.ProductPatchRequest;
 import com.example.nhadanshop.dto.ProductRequest;
 import com.example.nhadanshop.dto.ProductResponse;
 import com.example.nhadanshop.dto.PublicProductResponse;
+import com.example.nhadanshop.dto.PublicVariantAvailabilityRow;
 import com.example.nhadanshop.dto.PublicVariantResponse;
 import com.example.nhadanshop.dto.ProductVariantSearchResponse;
 import com.example.nhadanshop.dto.ProductVariantResponse;
@@ -31,9 +32,12 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
+
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -182,8 +186,11 @@ public class ProductService {
         if (vv.isEmpty()) {
             throw new EntityNotFoundException("Không tìm thấy sản phẩm ID: " + id);
         }
+        LocalDate today = LocalDate.now(businessClock);
+        List<Long> variantIds = vv.stream().map(ProductVariant::getId).toList();
+        java.util.Map<Long, Integer> availableByVid = buildSellableStockMap(variantIds, today);
         List<PublicVariantResponse> variantRows = vv.stream()
-                .map(DtoMapper::toPublicResponse)
+                .map(v -> DtoMapper.toPublicResponse(v, availableByVid.getOrDefault(v.getId(), 0)))
                 .toList();
         return DtoMapper.toPublicResponse(p, variantRows);
     }
@@ -530,13 +537,22 @@ public class ProductService {
         for (List<ProductVariant> list : byProductId.values()) {
             list.sort(variantOrder);
         }
+        LocalDate today = LocalDate.now(businessClock);
+        List<Long> publicVariantIds = products.stream()
+                .filter(p -> Boolean.TRUE.equals(p.getActive()))
+                .flatMap(p -> byProductId.getOrDefault(p.getId(), List.of()).stream())
+                .filter(this::isPublicVisibleVariant)
+                .map(ProductVariant::getId)
+                .distinct()
+                .toList();
+        java.util.Map<Long, Integer> availableByVid = buildSellableStockMap(publicVariantIds, today);
         return products.stream().map(p -> {
             if (!Boolean.TRUE.equals(p.getActive())) {
                 return null;
             }
             List<PublicVariantResponse> variantRows = byProductId.getOrDefault(p.getId(), List.of()).stream()
                     .filter(this::isPublicVisibleVariant)
-                    .map(DtoMapper::toPublicResponse)
+                    .map(v -> DtoMapper.toPublicResponse(v, availableByVid.getOrDefault(v.getId(), 0)))
                     .toList();
             if (variantRows.isEmpty()) {
                 return null;
@@ -547,6 +563,61 @@ public class ProductService {
 
     private boolean isPublicVisibleVariant(ProductVariant v) {
         return Boolean.TRUE.equals(v.getActive()) && !Boolean.FALSE.equals(v.getIsSellable());
+    }
+
+    /**
+     * Batch public availability for storefront cart reconciliation.
+     * Omits inactive products, inactive variants, and non-sellable variants (no row returned).
+     * At most 100 ids processed; one aggregate batch query for sellable remaining qty.
+     */
+    public List<PublicVariantAvailabilityRow> publicVariantAvailabilityBatch(String variantIdsCsv) {
+        if (variantIdsCsv == null || variantIdsCsv.isBlank()) {
+            return List.of();
+        }
+        LinkedHashSet<Long> requested = new LinkedHashSet<>();
+        for (String part : variantIdsCsv.split(",")) {
+            String t = part == null ? "" : part.trim();
+            if (t.isEmpty()) {
+                continue;
+            }
+            try {
+                long id = Long.parseLong(t);
+                if (requested.size() < 100) {
+                    requested.add(id);
+                }
+            } catch (NumberFormatException ignored) {
+                /* skip */
+            }
+        }
+        if (requested.isEmpty()) {
+            return List.of();
+        }
+        List<ProductVariant> loaded = variantRepository.findAllById(requested);
+        Map<Long, ProductVariant> byId = loaded.stream().collect(Collectors.toMap(ProductVariant::getId, v -> v, (a, b) -> a));
+        List<Long> visibleForStock = requested.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .filter(this::isPublicVisibleVariant)
+                .filter(v -> Boolean.TRUE.equals(v.getProduct().getActive()))
+                .map(ProductVariant::getId)
+                .toList();
+        LocalDate today = LocalDate.now(businessClock);
+        Map<Long, Integer> stockMap = buildSellableStockMap(visibleForStock, today);
+        List<PublicVariantAvailabilityRow> out = new ArrayList<>();
+        for (Long rid : requested) {
+            ProductVariant v = byId.get(rid);
+            if (v == null || !isPublicVisibleVariant(v) || !Boolean.TRUE.equals(v.getProduct().getActive())) {
+                continue;
+            }
+            int avail = stockMap.getOrDefault(v.getId(), 0);
+            PublicVariantResponse row = DtoMapper.toPublicResponse(v, avail);
+            out.add(new PublicVariantAvailabilityRow(
+                    v.getId(),
+                    row.availableQty(),
+                    row.availabilityStatus(),
+                    v.getSellUnit() != null ? v.getSellUnit() : "cái"));
+        }
+        return out;
     }
 
     private java.util.Map<Long, Integer> buildSellableStockMap(List<Long> variantIds, LocalDate asOf) {

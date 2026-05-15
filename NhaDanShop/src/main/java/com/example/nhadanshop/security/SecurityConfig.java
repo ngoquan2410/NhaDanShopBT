@@ -98,6 +98,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/products/expiry-warnings").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/products/expired").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/products/low-stock-variants").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/products/variants/availability").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/products/*/variants")
                         .hasAnyAuthority("ROLE_ADMIN", "ROLE_STAFF")
                         .requestMatchers(HttpMethod.GET, "/api/products/variants/search")

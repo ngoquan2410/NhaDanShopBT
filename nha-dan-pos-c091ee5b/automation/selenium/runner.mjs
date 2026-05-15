@@ -264,6 +264,63 @@ export async function runAutomationSuite(config) {
             );
             console.log(`  Hotfix case matrix: ${sidecar}`);
           }
+          if (slug === "pending-payment-invoice-followup" && Array.isArray(ret.caseResults)) {
+            const sidecar = path.join(
+              config.artifactDir,
+              "pending-payment-invoice-followup-case-results.json",
+            );
+            fs.writeFileSync(
+              sidecar,
+              `${JSON.stringify({ generatedAt: new Date().toISOString(), outcome, reason: skipReason, caseResults: ret.caseResults }, null, 2)}\n`,
+              "utf8",
+            );
+            console.log(`  Pending-payment-invoice-followup case matrix: ${sidecar}`);
+          }
+          if (slug === "storefront-product-quantity" && Array.isArray(ret.caseResults)) {
+            const sidecar = path.join(config.artifactDir, "storefront-product-quantity-case-results.json");
+            fs.writeFileSync(
+              sidecar,
+              `${JSON.stringify({ generatedAt: new Date().toISOString(), outcome, reason: skipReason, caseResults: ret.caseResults }, null, 2)}\n`,
+              "utf8",
+            );
+            console.log(`  Storefront product quantity case matrix: ${sidecar}`);
+          }
+          if (slug === "storefront-public-stock-display" && Array.isArray(ret.caseResults)) {
+            const sidecar = path.join(config.artifactDir, "storefront-public-stock-display-case-results.json");
+            fs.writeFileSync(
+              sidecar,
+              `${JSON.stringify({ generatedAt: new Date().toISOString(), outcome, reason: skipReason, caseResults: ret.caseResults }, null, 2)}\n`,
+              "utf8",
+            );
+            console.log(`  Storefront public stock display case matrix: ${sidecar}`);
+          }
+          if (slug === "storefront-public-available-qty" && Array.isArray(ret.caseResults)) {
+            const sidecar = path.join(config.artifactDir, "storefront-public-available-qty-case-results.json");
+            fs.writeFileSync(
+              sidecar,
+              `${JSON.stringify({ generatedAt: new Date().toISOString(), outcome, reason: skipReason, caseResults: ret.caseResults }, null, 2)}\n`,
+              "utf8",
+            );
+            console.log(`  Storefront public available-qty case matrix: ${sidecar}`);
+          }
+          if (slug === "storefront-cart-available-qty-cap" && Array.isArray(ret.caseResults)) {
+            const sidecar = path.join(config.artifactDir, "storefront-cart-available-qty-cap-case-results.json");
+            fs.writeFileSync(
+              sidecar,
+              `${JSON.stringify({ generatedAt: new Date().toISOString(), outcome, reason: skipReason, caseResults: ret.caseResults }, null, 2)}\n`,
+              "utf8",
+            );
+            console.log(`  Storefront cart available-qty cap case matrix: ${sidecar}`);
+          }
+          if (slug === "storefront-availability-color" && Array.isArray(ret.caseResults)) {
+            const sidecar = path.join(config.artifactDir, "storefront-availability-color-case-results.json");
+            fs.writeFileSync(
+              sidecar,
+              `${JSON.stringify({ generatedAt: new Date().toISOString(), outcome, reason: skipReason, caseResults: ret.caseResults }, null, 2)}\n`,
+              "utf8",
+            );
+            console.log(`  Storefront availability-color case matrix: ${sidecar}`);
+          }
         }
       } catch (w) {
         console.warn("  Could not write B2 case-results sidecar:", w?.message || w);

@@ -454,6 +454,12 @@ export interface PendingOrder {
   paymentDelta?: Money;
   linkedPaymentEventId?: ID;
   linkedPaymentAmount?: Money;
+  /** SUM(amount) over all LINKED bank events bound to this order (bank only; null/0 for non-bank). */
+  linkedPaymentTotal?: Money;
+  /** COUNT(*) over all LINKED bank events bound to this order. 0 for non-bank / no link. */
+  linkedPaymentCount?: number;
+  /** Authoritative pending total from backend (`PendingOrderResponse.totalAmount`). Used for bank guard math. */
+  totalAmount?: Money;
 }
 
 export interface CreatePendingOrderInput {

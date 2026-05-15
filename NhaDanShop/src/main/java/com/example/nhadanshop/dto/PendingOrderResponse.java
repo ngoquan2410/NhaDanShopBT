@@ -30,10 +30,22 @@ public record PendingOrderResponse(
         BigDecimal totalAmount,
         SalesInvoiceResponse invoice,
         /**
-         * Derived from manually/webhook-linked bank {@code PaymentEvent}: NONE, EXACT_PAID, UNDERPAID_LINKED, OVERPAID_LINKED.
+         * Derived from aggregate LINKED bank {@code PaymentEvent}s for bank pending only:
+         * {@code NONE | EXACT_PAID | UNDERPAID_LINKED | OVERPAID_LINKED}. Non-bank pending always returns {@code NONE}.
          */
         String paymentLinkStatus,
+        /**
+         * Delta between {@link #linkedPaymentTotal} and {@link #totalAmount} for bank pending; {@code null} for non-bank.
+         */
         BigDecimal paymentDelta,
         Long linkedPaymentEventId,
-        BigDecimal linkedPaymentAmount
+        BigDecimal linkedPaymentAmount,
+        /**
+         * Sum of {@code PaymentEvent.amount} for status LINKED bound to this order (bank only). {@code null} for non-bank.
+         */
+        BigDecimal linkedPaymentTotal,
+        /**
+         * Count of LINKED bank events bound to this order. {@code 0} for bank without link / non-bank.
+         */
+        long linkedPaymentCount
 ) {}

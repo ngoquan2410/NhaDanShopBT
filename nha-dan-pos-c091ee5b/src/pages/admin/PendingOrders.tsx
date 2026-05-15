@@ -7,9 +7,14 @@ import { AsyncBoundary } from "@/components/shared/AsyncBoundary";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useService } from "@/hooks/useService";
 import { pendingOrders as pendingOrdersService } from "@/services";
-import type { PendingOrder, PendingOrderStatus, PaymentMethod, PaymentLinkStatus } from "@/services/types";
+import type { PendingOrder, PendingOrderStatus, PaymentMethod } from "@/services/types";
 import { formatVND, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import {
+  bankPaymentLinkBanner,
+  canConfirmPendingOrder,
+  isPendingLikeStatus,
+} from "@/lib/pendingOrderConfirm";
 import {
   Clock, Eye, Check, X, AlertTriangle, CreditCard, User, Calendar,
   MapPin, Gift, Tag, Truck, Receipt,
@@ -53,14 +58,7 @@ function paymentBadge(method: PaymentMethod) {
 }
 
 function paymentLinkHint(order: PendingOrder): string | null {
-  const st = (order.paymentLinkStatus ?? "NONE") as PaymentLinkStatus;
-  if (st === "NONE") return null;
-  const d = Number(order.paymentDelta ?? 0);
-  const abs = Math.abs(Math.round(d));
-  if (st === "EXACT_PAID") return "Đã gắn giao dịch — khớp đúng số tiền";
-  if (st === "UNDERPAID_LINKED") return `Đã gắn giao dịch — thiếu ${formatVND(abs)} cần đối soát`;
-  if (st === "OVERPAID_LINKED") return `Đã gắn giao dịch — dư ${formatVND(abs)} cần đối soát`;
-  return null;
+  return bankPaymentLinkBanner(order);
 }
 
 function timeRemaining(expiresAt?: string) {
@@ -194,8 +192,7 @@ export default function AdminPendingOrders() {
     dispatchAdminBadgesRefresh();
   };
 
-  const isPendingLike = (s: PendingOrderStatus) =>
-    s === "pending_payment" || s === "waiting_confirm" || s === "paid_auto";
+  const isPendingLike = (s: PendingOrderStatus) => isPendingLikeStatus(s);
 
   return (
     <div className="space-y-4 admin-dense">
@@ -339,16 +336,30 @@ export default function AdminPendingOrders() {
                       </td>
                       <td className="px-3 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          {isAdmin && isPendingLike(order.status) && (
-                            <>
-                              <button data-testid={`pending-confirm-${order.id}`} onClick={() => setConfirmTarget(order.id)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-success text-success-foreground rounded hover:opacity-90">
-                                <Check className="h-3 w-3" /> Xác nhận
-                              </button>
-                              <button data-testid={`pending-cancel-${order.id}`} onClick={() => setCancelTarget(order.id)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-danger text-danger-foreground rounded hover:opacity-90">
-                                <X className="h-3 w-3" /> Hủy
-                              </button>
-                            </>
-                          )}
+                          {isAdmin && isPendingLike(order.status) && (() => {
+                            const decision = canConfirmPendingOrder(order);
+                            return (
+                              <>
+                                <button
+                                  data-testid={`pending-confirm-${order.id}`}
+                                  onClick={() => decision.canConfirm && setConfirmTarget(order.id)}
+                                  disabled={!decision.canConfirm}
+                                  title={decision.reason ?? "Xác nhận đơn"}
+                                  className={cn(
+                                    "inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded",
+                                    decision.canConfirm
+                                      ? "bg-success text-success-foreground hover:opacity-90"
+                                      : "bg-muted text-muted-foreground cursor-not-allowed",
+                                  )}
+                                >
+                                  <Check className="h-3 w-3" /> Xác nhận
+                                </button>
+                                <button data-testid={`pending-cancel-${order.id}`} onClick={() => setCancelTarget(order.id)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-danger text-danger-foreground rounded hover:opacity-90">
+                                  <X className="h-3 w-3" /> Hủy
+                                </button>
+                              </>
+                            );
+                          })()}
                           <button onClick={() => setDetailOrder(order)} className="p-1 text-muted-foreground hover:text-foreground rounded hover:bg-muted" title="Xem chi tiết">
                             <Eye className="h-3.5 w-3.5" />
                           </button>
@@ -390,16 +401,29 @@ export default function AdminPendingOrders() {
                       <span className="font-bold">{formatVND(order.pricingBreakdownSnapshot.total)}</span>
                     </div>
                   </button>
-                  {isAdmin && isPendingLike(order.status) && (
-                    <div className="flex gap-2 mt-2 pt-2 border-t">
-                      <button onClick={() => setConfirmTarget(order.id)} className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs font-medium bg-success text-success-foreground rounded">
-                        <Check className="h-3 w-3" /> Xác nhận
-                      </button>
-                      <button onClick={() => setCancelTarget(order.id)} className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs font-medium bg-danger text-danger-foreground rounded">
-                        <X className="h-3 w-3" /> Hủy
-                      </button>
-                    </div>
-                  )}
+                  {isAdmin && isPendingLike(order.status) && (() => {
+                    const decision = canConfirmPendingOrder(order);
+                    return (
+                      <div className="flex gap-2 mt-2 pt-2 border-t">
+                        <button
+                          onClick={() => decision.canConfirm && setConfirmTarget(order.id)}
+                          disabled={!decision.canConfirm}
+                          title={decision.reason ?? "Xác nhận đơn"}
+                          className={cn(
+                            "flex-1 flex items-center justify-center gap-1 py-1.5 text-xs font-medium rounded",
+                            decision.canConfirm
+                              ? "bg-success text-success-foreground"
+                              : "bg-muted text-muted-foreground cursor-not-allowed",
+                          )}
+                        >
+                          <Check className="h-3 w-3" /> Xác nhận
+                        </button>
+                        <button onClick={() => setCancelTarget(order.id)} className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs font-medium bg-danger text-danger-foreground rounded">
+                          <X className="h-3 w-3" /> Hủy
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               ))}
             </div>
@@ -471,7 +495,8 @@ function PendingOrderDetail({ order, onClose, onConfirm, onCancel, canManage }: 
   onCancel: () => void;
   canManage: boolean;
 }) {
-  const isPendingLike = order.status === "pending_payment" || order.status === "waiting_confirm";
+  const isPendingLike = isPendingLikeStatus(order.status);
+  const confirmDecision = canConfirmPendingOrder(order);
   const pb = order.pricingBreakdownSnapshot ?? {
     subtotal: 0, manualDiscount: 0, promotionDiscount: 0, voucherDiscount: 0,
     shippingFee: 0, shippingDiscount: 0, vatBase: 0, vatPercent: 0, vatAmount: 0, vat: 0, total: 0,
@@ -707,7 +732,18 @@ function PendingOrderDetail({ order, onClose, onConfirm, onCancel, canManage }: 
             <button onClick={onCancel} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium bg-danger text-danger-foreground rounded-md hover:opacity-90">
               <X className="h-4 w-4" /> Hủy đơn
             </button>
-            <button onClick={onConfirm} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium bg-success text-success-foreground rounded-md hover:opacity-90">
+            <button
+              onClick={() => confirmDecision.canConfirm && onConfirm()}
+              disabled={!confirmDecision.canConfirm}
+              title={confirmDecision.reason ?? "Xác nhận đơn"}
+              data-testid="pending-detail-confirm-btn"
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md",
+                confirmDecision.canConfirm
+                  ? "bg-success text-success-foreground hover:opacity-90"
+                  : "bg-muted text-muted-foreground cursor-not-allowed",
+              )}
+            >
               <Check className="h-4 w-4" /> Xác nhận
             </button>
           </div>
