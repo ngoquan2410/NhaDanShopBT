@@ -5,19 +5,24 @@ import { FilterChip } from "@/components/shared/DataTableToolbar";
 import { DateInput } from "@/components/shared/DateInput";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { useService } from "@/hooks/useService";
-import { adminReports, products as productService } from "@/services";
+import { adminReports, products as productService, categories as categoryService } from "@/services";
+import type { CategoryRevenueSeriesRow } from "@/services/adminBackend";
 import { formatVND, formatNumber } from "@/lib/format";
 import { TrendingUp, Download, ShoppingCart, BarChart3, Search, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { localToday } from "@/lib/localDate";
 import { cn } from "@/lib/utils";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, CartesianGrid, Legend, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartContainer } from "@/components/ui/chart";
 
 type Group = "daily" | "weekly" | "monthly" | "yearly";
-const CATEGORY_COLORS = ["#2563eb", "#16a34a", "#f97316", "#dc2626", "#7c3aed", "#0891b2", "#ca8a04", "#be123c"];
+const CATEGORY_COLORS = ["#2563eb", "#16a34a", "#f97316", "#dc2626", "#7c3aed", "#0891b2", "#ca8a04", "#be123c", "#0f766e", "#9333ea", "#64748b"];
 
 const groupLabel: Record<Group, string> = { daily: "Ngày", weekly: "Tuần", monthly: "Tháng", yearly: "Năm" };
+
+function categorySeriesKey(row: Pick<CategoryRevenueSeriesRow, "categoryId" | "categoryName">): string {
+  return `cat_${row.categoryId}_${row.categoryName.replace(/[^\p{L}\p{N}]+/gu, "_")}`;
+}
 
 export default function AdminRevenueReport() {
   const [groupBy, setGroupBy] = useState<Group>("daily");
@@ -28,6 +33,12 @@ export default function AdminRevenueReport() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const pickerRef = useRef<HTMLDivElement>(null);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  const [categoryPickerSearch, setCategoryPickerSearch] = useState("");
+  const categoryPickerRef = useRef<HTMLDivElement>(null);
+  const [categoryOptions, setCategoryOptions] = useState<{ id: string; name: string; active?: boolean }[]>([]);
+  const [categoryOptionsLoading, setCategoryOptionsLoading] = useState(false);
   const [productPage, setProductPage] = useState(1);
   const [productPageSize, setProductPageSize] = useState(20);
   const PRODUCT_PAGE_SIZE_OPTIONS = [20, 50, 100];
@@ -35,6 +46,7 @@ export default function AdminRevenueReport() {
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setPickerOpen(false);
+      if (categoryPickerRef.current && !categoryPickerRef.current.contains(e.target as Node)) setCategoryPickerOpen(false);
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
@@ -42,18 +54,20 @@ export default function AdminRevenueReport() {
 
   const productIdsArg = selected.length > 0 ? selected : undefined;
   const selectedKey = selected.length ? [...selected].sort().join(",") : "";
+  const categoryIdsArg = selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined;
+  const selectedCategoryKey = selectedCategoryIds.length ? [...selectedCategoryIds].sort().join(",") : "";
 
   const { data: reportData, loading, error } = useService(async () => {
-    const [rows, productRows, categoryRows] = await Promise.all([
+    const [rows, productRows, categorySeries] = await Promise.all([
       adminReports.revenue(from, to, groupBy, productIdsArg),
       adminReports.revenueByProduct(from, to, groupBy, productIdsArg),
-      adminReports.revenueByCategory(from, to, groupBy),
+      adminReports.revenueByCategorySeries(from, to, groupBy, categoryIdsArg),
     ]);
-    return { rows, productRows, categoryRows };
-  }, [from, to, groupBy, selectedKey]);
+    return { rows, productRows, categorySeries };
+  }, [from, to, groupBy, selectedKey, selectedCategoryKey]);
 
   const backendProductRows = reportData?.productRows ?? [];
-  const backendCategoryRows = reportData?.categoryRows ?? [];
+  const backendCategorySeries = reportData?.categorySeries ?? [];
 
   // Debounced backend product search for the picker. Admin/staff JWT: /api/products?search
   // matches product name/code and any variant code/name (incl. inactive/non-sellable variant rows).
@@ -87,31 +101,59 @@ export default function AdminRevenueReport() {
     return () => { cancelled = true; clearTimeout(handle); };
   }, [pickerOpen, pickerSearch]);
 
-  const filteredProductSlices = useMemo(
-    () =>
-      backendProductRows.map((r) => ({
-        name: String(r.productName ?? r.name ?? "—"),
-        revenue: Number(r.merchandiseNetRevenue ?? r.revenue ?? r.totalRevenue ?? r.totalAmount ?? 0),
-        qty: Number(r.totalQty ?? r.qty ?? r.quantitySold ?? 0),
-      })),
-    [backendProductRows],
-  );
+  useEffect(() => {
+    if (!categoryPickerOpen) return;
+    let cancelled = false;
+    setCategoryOptionsLoading(true);
+    categoryService.list({ includeInactive: true })
+      .then((page) => {
+        if (cancelled) return;
+        setCategoryOptions(page.items.map((c) => ({ id: String(c.id), name: c.name, active: c.active })));
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setCategoryOptions([]);
+          toast.error(e instanceof Error ? e.message : "Không tải danh sách danh mục");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCategoryOptionsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [categoryPickerOpen]);
 
-  const unfilteredCategorySlices = useMemo(
-    () =>
-      backendCategoryRows.map((r) => ({
-        name: String(r.categoryName ?? r.name ?? "Không phân loại"),
-        revenue: Number(r.revenue ?? r.totalRevenue ?? r.merchandiseNetRevenue ?? 0),
-      })),
-    [backendCategoryRows],
-  );
+  const visibleCategoryOptions = useMemo(() => {
+    const q = categoryPickerSearch.trim().toLowerCase();
+    if (!q) return categoryOptions;
+    return categoryOptions.filter((c) => c.name.toLowerCase().includes(q) || c.id.includes(q));
+  }, [categoryOptions, categoryPickerSearch]);
 
-  const pieCategorySlices = useMemo(() => {
-    const categoryRows = [...unfilteredCategorySlices].sort((a, b) => b.revenue - a.revenue);
-    if (categoryRows.length <= 7) return categoryRows;
-    const rest = categoryRows.slice(7).reduce((s, r) => s + r.revenue, 0);
-    return rest > 0 ? [...categoryRows.slice(0, 7), { name: "Khác", revenue: rest }] : categoryRows.slice(0, 7);
-  }, [unfilteredCategorySlices]);
+  const categorySeriesMeta = useMemo(() => {
+    const map = new Map<string, { key: string; id: string; name: string }>();
+    for (const row of backendCategorySeries) {
+      const key = categorySeriesKey(row);
+      if (!map.has(key)) map.set(key, { key, id: row.categoryId, name: row.categoryName });
+    }
+    return [...map.values()];
+  }, [backendCategorySeries]);
+
+  const categoryChartRows = useMemo(() => {
+    const byPeriod = new Map<string, Record<string, string | number>>();
+    for (const row of backendCategorySeries) {
+      const existing = byPeriod.get(row.periodKey) ?? {
+        periodKey: row.periodKey,
+        periodLabel: row.periodLabel,
+      };
+      existing[categorySeriesKey(row)] = row.revenue;
+      byPeriod.set(row.periodKey, existing);
+    }
+    return [...byPeriod.values()];
+  }, [backendCategorySeries]);
+
+  const categoryChartHasRevenue = useMemo(
+    () => backendCategorySeries.some((row) => row.revenue > 0),
+    [backendCategorySeries],
+  );
 
   const productTableRows = useMemo(
     () =>
@@ -147,6 +189,7 @@ export default function AdminRevenueReport() {
   const totalItems = rows.reduce((s, r) => s + r.itemsSold, 0);
 
   const toggle = (id: string) => setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const toggleCategory = (id: string) => setSelectedCategoryIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const handleExportExcel = async () => {
     try {
@@ -267,6 +310,70 @@ export default function AdminRevenueReport() {
               </div>
             )}
           </div>
+
+          <div className="relative" ref={categoryPickerRef}>
+            <button
+              type="button"
+              onClick={() => setCategoryPickerOpen((o) => !o)}
+              className={cn(
+                "flex items-center gap-1.5 h-8 px-3 text-xs font-medium border rounded-md hover:bg-muted",
+                selectedCategoryIds.length > 0 && "border-success text-success bg-success-soft",
+              )}
+            >
+              <Search className="h-3.5 w-3.5" />
+              {selectedCategoryIds.length ? `${selectedCategoryIds.length} danh mục` : "Lọc danh mục"}
+            </button>
+            {categoryPickerOpen && (
+              <div className="absolute right-0 top-full mt-1 w-80 bg-popover border rounded-lg shadow-lg z-30 animate-fade-in">
+                <div className="p-2 border-b">
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <input
+                      autoFocus
+                      value={categoryPickerSearch}
+                      onChange={(e) => setCategoryPickerSearch(e.target.value)}
+                      placeholder="Tìm danh mục"
+                      className="w-full h-8 pl-8 pr-2 text-xs border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                </div>
+                <div className="max-h-72 overflow-y-auto scrollbar-thin">
+                  {categoryOptionsLoading ? (
+                    <p className="p-4 text-center text-xs text-muted-foreground">Đang tải danh mục...</p>
+                  ) : visibleCategoryOptions.length === 0 ? (
+                    <p className="p-4 text-center text-xs text-muted-foreground">Không có danh mục phù hợp</p>
+                  ) : (
+                    visibleCategoryOptions.map((cat) => {
+                      const checked = selectedCategoryIds.includes(cat.id);
+                      return (
+                        <button
+                          type="button"
+                          key={cat.id}
+                          onClick={() => toggleCategory(cat.id)}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted text-left"
+                        >
+                          <span className={cn("h-4 w-4 rounded border flex items-center justify-center shrink-0", checked ? "bg-success border-success" : "border-input")}>
+                            {checked && <Check className="h-3 w-3 text-primary-foreground" />}
+                          </span>
+                          <span className="flex-1 truncate">
+                            {cat.name}{cat.active === false ? " (ngưng hoạt động)" : ""}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-2 p-2 border-t bg-muted/30">
+                  <button type="button" onClick={() => setSelectedCategoryIds([])} className="text-[11px] text-muted-foreground hover:text-foreground">
+                    Xóa lọc
+                  </button>
+                  <button type="button" onClick={() => setCategoryPickerOpen(false)} className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded-md">
+                    Xong
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -290,9 +397,28 @@ export default function AdminRevenueReport() {
         </div>
       )}
 
+      {selectedCategoryIds.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selectedCategoryIds.map((id) => {
+            const option = categoryOptions.find((x) => x.id === id);
+            const fromSeries = categorySeriesMeta.find((x) => x.id === id);
+            const name = option ? `${option.name}${option.active === false ? " (ngưng hoạt động)" : ""}` : fromSeries?.name ?? `Danh mục #${id}`;
+            return (
+              <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] bg-success-soft text-success rounded-full">
+                {name}
+                <button type="button" onClick={() => toggleCategory(id)} className="hover:text-foreground">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       <div className="rounded-md border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
         Biểu đồ theo kỳ dùng dữ liệu từ <code className="text-foreground">/api/revenue/total</code>
         {isFiltered ? " với query productIds." : "."} Không có phép nhân theo tỷ trọng ở client.
+        {' '}Biểu đồ danh mục dùng <code className="text-foreground">/api/revenue/by-category-series</code> và backend quyết định Top 10 + Khác.
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -345,76 +471,65 @@ export default function AdminRevenueReport() {
         </div>
 
         <div className="bg-card rounded-lg border p-4">
-          <h3 className="font-semibold text-sm mb-3">{isFiltered ? "Doanh thu theo sản phẩm đã chọn" : "Doanh thu theo danh mục"}</h3>
-          <ChartContainer config={{ revenue: { label: "Doanh thu", color: "hsl(var(--success))" } }} className="h-72 w-full">
-            {isFiltered ? (
-            <BarChart data={filteredProductSlices.slice(0, 10)} layout="vertical" margin={{ left: 8, right: 24, top: 8, bottom: 8 }}>
-              <defs>
-                <linearGradient id="prodBarFill" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stopColor="hsl(var(--success))" stopOpacity={0.7} />
-                  <stop offset="100%" stopColor="hsl(var(--success))" stopOpacity={1} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis type="number" tickLine={false} axisLine={false} tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-              <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} width={120} tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }} />
-              <Tooltip
-                cursor={{ fill: "hsl(var(--muted) / 0.5)" }}
-                content={({ active, payload, label }) => {
-                  if (!active || !payload?.length) return null;
-                  const row = payload[0].payload as { name: string; revenue: number; qty?: number };
-                  return (
-                    <div className="rounded-lg border bg-background px-3 py-2 text-xs shadow-xl">
-                      <p className="font-semibold">{row.name || label}</p>
-                      <p>Doanh thu hàng hóa: <b>{formatVND(row.revenue)}</b></p>
-                      {row.qty != null && <p>SL bán: <b>{formatNumber(row.qty)}</b></p>}
-                    </div>
-                  );
-                }}
-              />
-              <Bar dataKey="revenue" fill="url(#prodBarFill)" radius={[0, 6, 6, 0]} />
-            </BarChart>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h3 className="font-semibold text-sm">Doanh thu theo danh mục</h3>
+            <span className="text-[11px] text-muted-foreground">
+              {selectedCategoryIds.length > 0 ? "Danh mục đã chọn" : "Top 10 + Khác từ backend"}
+            </span>
+          </div>
+          <ChartContainer config={{}} className="h-72 w-full">
+            {categoryChartRows.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-xs text-muted-foreground border border-dashed rounded-md">
+                Không có dữ liệu doanh thu danh mục trong khoảng đã chọn
+              </div>
             ) : (
-            <PieChart margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const row = payload[0].payload as { name: string; revenue: number };
+              <AreaChart data={categoryChartRows} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="periodLabel" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+                <YAxis tickLine={false} axisLine={false} tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`} width={48} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+                <Tooltip
+                  cursor={{ stroke: "hsl(var(--success))", strokeWidth: 1, strokeDasharray: "3 3" }}
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null;
+                    return (
+                      <div className="rounded-lg border bg-background px-3 py-2 text-xs shadow-xl max-w-xs">
+                        <p className="font-semibold mb-1">{label}</p>
+                        <div className="space-y-0.5">
+                          {payload.map((item) => (
+                            <p key={String(item.dataKey)} className="flex items-center justify-between gap-3">
+                              <span className="truncate" style={{ color: item.color }}>{item.name}</span>
+                              <b>{formatVND(Number(item.value ?? 0))}</b>
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }}
+                />
+                <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: 11 }} iconType="circle" />
+                {categorySeriesMeta.map((series, index) => {
+                  const color = CATEGORY_COLORS[index % CATEGORY_COLORS.length];
                   return (
-                    <div className="rounded-lg border bg-background px-3 py-2 text-xs shadow-xl">
-                      <p className="font-semibold">{row.name}</p>
-                      <p>Doanh thu hàng hóa: <b>{formatVND(row.revenue)}</b></p>
-                    </div>
+                    <Area
+                      key={series.key}
+                      type="monotone"
+                      dataKey={series.key}
+                      name={series.name}
+                      stroke={color}
+                      fill={color}
+                      fillOpacity={0.12}
+                      strokeWidth={2}
+                      connectNulls
+                      activeDot={{ r: 4, strokeWidth: 1, stroke: "hsl(var(--background))" }}
+                    />
                   );
-                }}
-              />
-              <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: 11 }} iconType="circle" />
-              <Pie data={pieCategorySlices} dataKey="revenue" nameKey="name" innerRadius={58} outerRadius={96} paddingAngle={3} stroke="hsl(var(--background))" strokeWidth={2}>
-                {pieCategorySlices.map((entry, index) => (
-                  <Cell key={entry.name} fill={CATEGORY_COLORS[index % CATEGORY_COLORS.length]} />
-                ))}
-              </Pie>
-            </PieChart>
+                })}
+              </AreaChart>
             )}
           </ChartContainer>
-          <div className="hidden">
-            {(isFiltered ? filteredProductSlices : unfilteredCategorySlices).map((r, i) => {
-              const list = isFiltered
-                ? filteredProductSlices
-                : unfilteredCategorySlices;
-              const maxRev = Math.max(...list.map((x) => x.revenue), 1);
-              const barPct = (r.revenue / maxRev) * 100;
-              return (
-                <div key={i} className="flex items-center gap-3">
-                  <span className="text-xs w-32 shrink-0 truncate">{r.name}</span>
-                  <div className="flex-1 h-5 bg-muted rounded-full overflow-hidden">
-                    <div className="h-full bg-success rounded-full" style={{ width: `${barPct}%` }} />
-                  </div>
-                  <span className="text-xs font-medium w-24 text-right shrink-0">{formatVND(r.revenue)}</span>
-                </div>
-              );
-            })}
-          </div>
+          {!categoryChartHasRevenue && categoryChartRows.length > 0 && (
+            <p className="mt-2 text-[11px] text-muted-foreground">Danh mục đã chọn không có doanh thu trong khoảng này.</p>
+          )}
         </div>
       </div>
 

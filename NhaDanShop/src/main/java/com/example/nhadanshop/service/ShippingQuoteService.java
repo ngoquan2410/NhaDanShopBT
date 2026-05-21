@@ -11,8 +11,10 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.text.Normalizer;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 
 @Slf4j
 @Service
@@ -43,6 +45,25 @@ public class ShippingQuoteService {
                     Instant.now().toString()
             );
         } else {
+            ShippingSettingsService.ResolvedLocalRule localRule = pickLocalRule(address, cfg.localRules());
+            if (localRule != null) {
+                result = new ShippingQuoteResponse(
+                        "quoted",
+                        "local_rule",
+                        localRule.zoneCode(),
+                        BigDecimal.valueOf(localRule.fee()).setScale(0, RoundingMode.HALF_UP),
+                        new ShippingQuoteResponse.EtaDaysDto(localRule.etaDays().min(), localRule.etaDays().max()),
+                        null,
+                        false,
+                        false,
+                        null,
+                        0L,
+                        Instant.now().toString()
+                );
+                persistGhnQuoteLog(request, result, wallStartNs);
+                return result;
+            }
+
             int weight = request.weightGrams() != null ? request.weightGrams() : cfg.parcelDefaults().weightGrams();
             int length = request.parcel() != null && request.parcel().length() != null
                     ? request.parcel().length()
@@ -224,6 +245,52 @@ public class ShippingQuoteService {
                 .filter(rule -> rule.provinceCodes().contains("*"))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private ShippingSettingsService.ResolvedLocalRule pickLocalRule(
+            ShippingAddressDto address,
+            List<ShippingSettingsService.ResolvedLocalRule> localRules
+    ) {
+        if (localRules == null || localRules.isEmpty()) {
+            return null;
+        }
+        return localRules.stream()
+                .filter(ShippingSettingsService.ResolvedLocalRule::enabled)
+                .filter(rule -> matchesDimension(address.provinceCode(), address.provinceName(), rule.provinceCodes(), rule.provinceNames()))
+                .filter(rule -> matchesDimension(address.districtCode(), address.districtName(), rule.districtCodes(), rule.districtNames()))
+                .filter(rule -> matchesDimension(address.wardCode(), address.wardName(), rule.wardCodes(), rule.wardNames()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean matchesDimension(String code, String name, List<String> ruleCodes, List<String> ruleNames) {
+        boolean hasCodes = ruleCodes != null && !ruleCodes.isEmpty();
+        boolean hasNames = ruleNames != null && !ruleNames.isEmpty();
+        if (hasCodes && !isBlank(code) && ruleCodes.stream().anyMatch(c -> c.equalsIgnoreCase(code.trim()))) {
+            return true;
+        }
+        if (hasNames && !isBlank(name)) {
+            String normalizedName = normalizeVietnamese(name);
+            if (ruleNames.stream().map(this::normalizeVietnamese).anyMatch(normalizedName::equals)) {
+                return true;
+            }
+        }
+        return !hasCodes && !hasNames;
+    }
+
+    private String normalizeVietnamese(String value) {
+        if (value == null) {
+            return "";
+        }
+        String noAccent = Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replace('Đ', 'D')
+                .replace('đ', 'd');
+        return noAccent.toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ")
+                .replaceFirst("^(tinh|thanh pho|tp|quan|huyen|thi xa|phuong|xa|thi tran)\\s+", "")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private boolean isBlank(String value) {

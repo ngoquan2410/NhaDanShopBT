@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -93,6 +94,15 @@ public class RevenueController {
         return revenueService.getRevenueByCategory(from, to, period);
     }
 
+    @GetMapping("/by-category-series")
+    public List<CategoryRevenueSeriesDto> revenueByCategorySeries(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "daily") String period,
+            @RequestParam(required = false) String categoryIds) {
+        return revenueService.getRevenueByCategorySeries(from, to, period, parseCategoryIds(categoryIds));
+    }
+
     @GetMapping("/by-category/export")
     public ResponseEntity<byte[]> exportByCategory(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -114,6 +124,18 @@ public class RevenueController {
                 ContentDisposition.attachment().filename(filename + ".xlsx").build());
         headers.setContentLength(bytes.length);
         return ResponseEntity.ok().headers(headers).body(bytes);
+    }
+
+    private List<Long> parseCategoryIds(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .map(Long::valueOf)
+                .distinct()
+                .toList();
     }
 
     // ════════════════════════════════════════════════════════════════

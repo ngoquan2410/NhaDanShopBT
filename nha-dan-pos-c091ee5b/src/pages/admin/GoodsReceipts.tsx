@@ -46,6 +46,20 @@ function startOfMonthISO(): string {
   return toLocalDateString(d);
 }
 
+function clampReceiptFilterDate(value: string | undefined, today: string): string | undefined {
+  if (!value) return undefined;
+  return value > today ? today : value;
+}
+
+function normalizeReceiptCustomRange(period: PeriodValue, today = localToday()): PeriodValue {
+  if (period.preset !== "custom") return period;
+  const from = clampReceiptFilterDate(period.from, today);
+  const to = clampReceiptFilterDate(period.to, today);
+  if (!from || !to) return { ...period, from, to };
+  if (from > to) return { ...period, from: to, to };
+  return { ...period, from, to };
+}
+
 function periodToReceiptDateRange(period: PeriodValue): { from: string; to: string } | undefined {
   if (period.preset === "all") return undefined;
   const to = localToday();
@@ -57,8 +71,9 @@ function periodToReceiptDateRange(period: PeriodValue): { from: string; to: stri
   } else if (period.preset === "month") {
     from = startOfMonthISO();
   } else {
-    if (!period.from || !period.to) return undefined;
-    return { from: period.from, to: period.to };
+    const normalized = normalizeReceiptCustomRange(period, to);
+    if (!normalized.from || !normalized.to) return undefined;
+    return { from: normalized.from, to: normalized.to };
   }
   return { from, to };
 }
@@ -149,6 +164,10 @@ export default function AdminGoodsReceipts() {
     setDeleteDraft(null);
   };
 
+  const handlePeriodChange = (next: PeriodValue) => {
+    setPeriod(normalizeReceiptCustomRange(next));
+  };
+
   return (
     <div className="space-y-4 admin-dense">
       <PageHeader
@@ -167,7 +186,7 @@ export default function AdminGoodsReceipts() {
       />
 
       <DataTableToolbar search={search} onSearchChange={setSearch} searchPlaceholder="Tìm số phiếu, NCC..." />
-      <PeriodFilter value={period} onChange={setPeriod} disableFutureDates />
+      <PeriodFilter value={period} onChange={handlePeriodChange} disableFutureDates />
 
       {filteredDrafts.length > 0 && (
         <div className="bg-info-soft/40 border border-info/20 rounded-lg p-3">

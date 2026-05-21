@@ -1,6 +1,7 @@
 package com.example.nhadanshop.service;
 
 import com.example.nhadanshop.dto.ShippingParcelDefaultsDto;
+import com.example.nhadanshop.dto.ShippingLocalRuleDto;
 import com.example.nhadanshop.dto.ShippingSettingsDto;
 import com.example.nhadanshop.dto.ShippingZoneRuleDto;
 import com.example.nhadanshop.entity.ShippingSettingsRecord;
@@ -43,12 +44,14 @@ public class ShippingSettingsService {
                             List.of("*")
                     )
             ),
+            List.of(defaultMoCayLocalRule()),
             new ShippingParcelDefaultsDto(10, 10, 10, 500, "none", null)
     );
 
     /** Same structure ShippingQuoteService used to hardcode; public for quote path. */
     public record ResolvedShippingQuoteConfig(
             List<ResolvedZoneRule> zoneRules,
+            List<ResolvedLocalRule> localRules,
             ResolvedParcelDefaults parcelDefaults
     ) {
         public static ResolvedShippingQuoteConfig fromHardcoded() {
@@ -69,6 +72,21 @@ public class ShippingSettingsService {
             BigDecimal fixed = p.declaredValueFixed();
             return new ResolvedShippingQuoteConfig(
                     rules,
+                    dto.localRules() == null ? List.of() : dto.localRules().stream()
+                            .map(r -> new ResolvedLocalRule(
+                                    r.enabled(),
+                                    r.zoneCode(),
+                                    r.label(),
+                                    r.fee(),
+                                    new EtaDays(r.etaDays().min(), r.etaDays().max()),
+                                    safeList(r.provinceCodes()),
+                                    safeList(r.provinceNames()),
+                                    safeList(r.districtCodes()),
+                                    safeList(r.districtNames()),
+                                    safeList(r.wardCodes()),
+                                    safeList(r.wardNames())
+                            ))
+                            .toList(),
                     new ResolvedParcelDefaults(
                             p.length(), p.width(), p.height(), p.weightGrams(),
                             p.declaredValueMode(), fixed
@@ -83,6 +101,21 @@ public class ShippingSettingsService {
             Integer freeShipThreshold,
             EtaDays etaDays,
             List<String> provinceCodes
+    ) {
+    }
+
+    public record ResolvedLocalRule(
+            boolean enabled,
+            String zoneCode,
+            String label,
+            int fee,
+            EtaDays etaDays,
+            List<String> provinceCodes,
+            List<String> provinceNames,
+            List<String> districtCodes,
+            List<String> districtNames,
+            List<String> wardCodes,
+            List<String> wardNames
     ) {
     }
 
@@ -116,6 +149,7 @@ public class ShippingSettingsService {
                 });
         try {
             record.setZoneRulesJson(objectMapper.writeValueAsString(normalized.zoneRules()));
+            record.setLocalRulesJson(objectMapper.writeValueAsString(normalized.localRules()));
             record.setParcelDefaultsJson(objectMapper.writeValueAsString(normalized.parcelDefaults()));
         } catch (Exception e) {
             throw new IllegalStateException("Failed to serialize shipping settings", e);
@@ -147,7 +181,46 @@ public class ShippingSettingsService {
                 p.declaredValueMode(),
                 "fixed".equals(p.declaredValueMode()) ? nullToZero(p.declaredValueFixed()) : null
         );
-        return new ShippingSettingsDto(input.zoneRules(), parcel);
+        List<ShippingLocalRuleDto> localRules = input.localRules() == null ? List.of() : input.localRules().stream()
+                .map(this::normalizeLocalRule)
+                .toList();
+        return new ShippingSettingsDto(input.zoneRules(), localRules, parcel);
+    }
+
+    private ShippingLocalRuleDto normalizeLocalRule(ShippingLocalRuleDto r) {
+        if (r.etaDays().min() > r.etaDays().max()) {
+            throw new IllegalArgumentException("Local rule " + r.zoneCode() + ": ETA min must be <= max");
+        }
+        List<String> provinceCodes = safeList(r.provinceCodes());
+        List<String> provinceNames = safeList(r.provinceNames());
+        List<String> districtCodes = safeList(r.districtCodes());
+        List<String> districtNames = safeList(r.districtNames());
+        List<String> wardCodes = safeList(r.wardCodes());
+        List<String> wardNames = safeList(r.wardNames());
+        if (r.enabled()) {
+            requireLocalMatcher(r.zoneCode(), "province", provinceCodes, provinceNames);
+            requireLocalMatcher(r.zoneCode(), "district", districtCodes, districtNames);
+            requireLocalMatcher(r.zoneCode(), "ward", wardCodes, wardNames);
+        }
+        return new ShippingLocalRuleDto(
+                r.enabled(),
+                r.zoneCode().trim(),
+                r.label().trim(),
+                r.fee(),
+                r.etaDays(),
+                provinceCodes,
+                provinceNames,
+                districtCodes,
+                districtNames,
+                wardCodes,
+                wardNames
+        );
+    }
+
+    private void requireLocalMatcher(String zoneCode, String dimension, List<String> codes, List<String> names) {
+        if (codes.isEmpty() && names.isEmpty()) {
+            throw new IllegalArgumentException("Local rule " + zoneCode + ": enabled rule must include " + dimension + " code or name matcher");
+        }
     }
 
     private static BigDecimal nullToZero(BigDecimal v) {
@@ -165,7 +238,10 @@ public class ShippingSettingsService {
                     record.getParcelDefaultsJson(),
                     ShippingParcelDefaultsDto.class
             );
-            return normalize(new ShippingSettingsDto(zones, parcel));
+            List<ShippingLocalRuleDto> localRules = record.getLocalRulesJson() == null || record.getLocalRulesJson().isBlank()
+                    ? List.of()
+                    : objectMapper.readValue(record.getLocalRulesJson(), new TypeReference<>() {});
+            return normalize(new ShippingSettingsDto(zones, localRules, parcel));
         } catch (Exception e) {
             throw new IllegalStateException("Invalid shipping_settings row", e);
         }
@@ -173,5 +249,32 @@ public class ShippingSettingsService {
 
     private ResolvedShippingQuoteConfig toResolved(ShippingSettingsRecord record) {
         return ResolvedShippingQuoteConfig.fromDto(toDto(record));
+    }
+
+    private static ShippingLocalRuleDto defaultMoCayLocalRule() {
+        return new ShippingLocalRuleDto(
+                true,
+                "LOCAL_MO_CAY",
+                "Mỏ Cày local delivery",
+                0,
+                new ShippingZoneRuleDto.EtaDaysDto(1, 1),
+                List.of("83", "86"),
+                List.of("Bến Tre", "Vĩnh Long"),
+                List.of(),
+                List.of("Mỏ Cày", "Mỏ Cày Nam", "Huyện Mỏ Cày Nam"),
+                List.of(),
+                List.of("Mỏ Cày", "Thị trấn Mỏ Cày")
+        );
+    }
+
+    private static List<String> safeList(List<String> input) {
+        if (input == null) {
+            return List.of();
+        }
+        return input.stream()
+                .filter(v -> v != null && !v.isBlank())
+                .map(String::trim)
+                .distinct()
+                .toList();
     }
 }

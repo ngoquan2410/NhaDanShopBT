@@ -28,6 +28,13 @@ describe("Slice8B honesty — báo cáo & storefront combo", () => {
     expect(t).not.toMatch(/\bscale\s*\*\s*r\./);
   });
 
+  it("RevenueReport category filter includes inactive admin-visible categories", () => {
+    const t = read("pages/admin/RevenueReport.tsx");
+    expect(t).toContain("categoryService.list({ includeInactive: true })");
+    expect(t).not.toContain("categoryService.list({ active: true");
+    expect(t).toContain("ngưng hoạt động");
+  });
+
   it("GoodsReceiptCreate không có nhánh offline/success PN giả sau khi bỏ JWT", () => {
     const t = read("pages/admin/GoodsReceiptCreate.tsx");
     expect(t).not.toMatch(/\boffline\b/i);

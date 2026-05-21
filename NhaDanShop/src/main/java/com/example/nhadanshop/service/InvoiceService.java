@@ -172,6 +172,7 @@ public class InvoiceService {
             SalesInvoiceItem item = new SalesInvoiceItem();
             item.setInvoice(invoice);
             item.setProduct(product);
+            item.captureCategorySnapshotFromProduct(product);
             item.setVariant(variant); // [Sprint 0]
             item.setQuantity(itemReq.quantity());
             item.setOriginalUnitPrice(variant.getSellPrice());
@@ -430,6 +431,7 @@ public class InvoiceService {
         SalesInvoiceItem item = new SalesInvoiceItem();
         item.setInvoice(invoice);
         item.setProduct(product);
+        item.captureCategorySnapshotFromProduct(product);
         item.setVariant(variant);
         item.setQuantity(cap.quantity());
         BigDecimal orig = cap.originalUnitPrice() != null ? cap.originalUnitPrice() : variant.getSellPrice();
@@ -511,6 +513,7 @@ public class InvoiceService {
         SalesInvoiceItem item = new SalesInvoiceItem();
         item.setInvoice(invoice);
         item.setProduct(product);
+        item.captureCategorySnapshotFromProduct(product);
         item.setVariant(variant);
         item.setQuantity(orderItem.getQuantity());
         BigDecimal lineUnit = nvl(orderItem.getUnitPrice());
@@ -862,6 +865,7 @@ public class InvoiceService {
             SalesInvoiceItem item = new SalesInvoiceItem();
             item.setInvoice(invoice);
             item.setProduct(component);
+            item.captureCategorySnapshotFromProduct(component);
             item.setVariant(compVariant);
             item.setQuantity(requiredQty);
             item.setOriginalUnitPrice(compVariant.getSellPrice());

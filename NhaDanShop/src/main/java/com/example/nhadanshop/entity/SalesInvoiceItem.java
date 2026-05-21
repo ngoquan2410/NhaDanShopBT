@@ -29,6 +29,18 @@ public class SalesInvoiceItem {
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;
 
+    /** Invoice-time category identity snapshot. Do not derive historical category reports from current product.category. */
+    @Column(name = "category_id_snapshot")
+    private Long categoryIdSnapshot;
+
+    /** Invoice-time category display snapshot. Null/blank historical rows must report as Unknown/Legacy Category. */
+    @Column(name = "category_name_snapshot", length = 150)
+    private String categoryNameSnapshot;
+
+    /** Reserved for future category-code support; current Category master has no code field. */
+    @Column(name = "category_code_snapshot", length = 50)
+    private String categoryCodeSnapshot;
+
     /**
      * Biến thể đóng gói bán cho dòng này (Sprint 0).
      * Nullable để backward compat — backfill từ V23.
@@ -112,6 +124,13 @@ public class SalesInvoiceItem {
 
     @OneToMany(mappedBy = "invoiceItem", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<SalesInvoiceItemBatchAllocation> batchAllocations = new ArrayList<>();
+
+    public void captureCategorySnapshotFromProduct(Product snapshotProduct) {
+        Category category = snapshotProduct != null ? snapshotProduct.getCategory() : null;
+        this.categoryIdSnapshot = category != null ? category.getId() : null;
+        this.categoryNameSnapshot = category != null ? category.getName() : null;
+        this.categoryCodeSnapshot = null;
+    }
 }
 
 

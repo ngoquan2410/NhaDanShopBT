@@ -10,6 +10,9 @@ public record SalesInvoiceItemResponse(
         Long productId,
         String productCode,
         String productName,
+        Long categoryIdSnapshot,
+        String categoryNameSnapshot,
+        String categoryCodeSnapshot,
         Integer quantity,
         BigDecimal originalUnitPrice,   // giá gốc trước CK dòng
         BigDecimal lineDiscountPercent, // % CK dòng
@@ -27,10 +30,10 @@ public record SalesInvoiceItemResponse(
         String comboSourceCode,
         String comboSourceName,
         BigDecimal comboUnitPrice,  // giá bán của combo tại thời điểm giao dịch
-        /** FEFO batch allocations; empty when none or not loaded. */
+        // FEFO batch allocations; empty when none or not loaded.
         List<SalesInvoiceItemAllocationResponse> allocations,
         boolean rewardLine,
-        /** Persisted quote/commercial allocation; null for legacy / non-allocated lines. */
+        // Persisted quote/commercial allocation; null for legacy / non-allocated lines.
         @JsonInclude(JsonInclude.Include.NON_NULL)
         CommercialLineSnapshotDto commercialSnapshot
 ) {}

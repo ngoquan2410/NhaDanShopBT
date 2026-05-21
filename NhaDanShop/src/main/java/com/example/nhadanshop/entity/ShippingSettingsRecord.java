@@ -26,6 +26,9 @@ public class ShippingSettingsRecord {
     @Column(name = "parcel_defaults_json", nullable = false, columnDefinition = "TEXT")
     private String parcelDefaultsJson;
 
+    @Column(name = "local_rules_json", nullable = false, columnDefinition = "TEXT")
+    private String localRulesJson = "[]";
+
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
 }

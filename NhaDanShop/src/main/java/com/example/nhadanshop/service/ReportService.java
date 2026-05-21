@@ -128,10 +128,11 @@ public class ReportService {
         LocalDate weekStart = from.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
         while (!weekStart.isAfter(to)) {
             LocalDate weekEnd = weekStart.plusDays(6);
-            if (weekEnd.isAfter(to)) weekEnd = to;
+            LocalDate effectiveStart = weekStart.isBefore(from) ? from : weekStart;
+            LocalDate effectiveEnd = weekEnd.isAfter(to) ? to : weekEnd;
             result.add(distinct.isEmpty()
-                    ? getProfitReport(weekStart, weekEnd)
-                    : getProfitReportForProducts(weekStart, weekEnd, distinct));
+                    ? getProfitReport(effectiveStart, effectiveEnd)
+                    : getProfitReportForProducts(effectiveStart, effectiveEnd, distinct));
             weekStart = weekStart.plusWeeks(1);
         }
         return result;
@@ -148,10 +149,11 @@ public class ReportService {
         LocalDate monthStart = from.with(TemporalAdjusters.firstDayOfMonth());
         while (!monthStart.isAfter(to)) {
             LocalDate monthEnd = monthStart.with(TemporalAdjusters.lastDayOfMonth());
-            if (monthEnd.isAfter(to)) monthEnd = to;
+            LocalDate effectiveStart = monthStart.isBefore(from) ? from : monthStart;
+            LocalDate effectiveEnd = monthEnd.isAfter(to) ? to : monthEnd;
             result.add(distinct.isEmpty()
-                    ? getProfitReport(monthStart, monthEnd)
-                    : getProfitReportForProducts(monthStart, monthEnd, distinct));
+                    ? getProfitReport(effectiveStart, effectiveEnd)
+                    : getProfitReportForProducts(effectiveStart, effectiveEnd, distinct));
             monthStart = monthStart.plusMonths(1);
         }
         return result;

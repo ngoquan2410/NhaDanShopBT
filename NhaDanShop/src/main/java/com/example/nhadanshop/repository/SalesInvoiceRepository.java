@@ -118,7 +118,7 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
 
     /**
      * Sum merchandise net allocated revenue (after invoice-level merchant discount allocation persisted per line).
-     * Legacy rows: {@link SalesInvoiceItem#lineNetRevenue} null → {@code quantity * unitPrice}.
+     * Legacy rows: {@code lineNetRevenue} null → {@code quantity * unitPrice}.
      */
     @Query("""
             SELECT COALESCE(SUM(
@@ -245,6 +245,40 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
     List<Object[]> revenueByCategory(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
+
+    /** Daily category revenue based only on persisted invoice-line category snapshots. */
+    @Query("""
+            SELECT CAST(item.invoice.invoiceDate AS date),
+                   item.categoryIdSnapshot,
+                   item.categoryNameSnapshot,
+                   COALESCE(SUM(COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
+            GROUP BY CAST(item.invoice.invoiceDate AS date), item.categoryIdSnapshot, item.categoryNameSnapshot
+            ORDER BY CAST(item.invoice.invoiceDate AS date)
+            """)
+    List<Object[]> dailyRevenueByCategorySnapshot(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
+
+    /** Daily category revenue for selected persisted category snapshot IDs. */
+    @Query("""
+            SELECT CAST(item.invoice.invoiceDate AS date),
+                   item.categoryIdSnapshot,
+                   item.categoryNameSnapshot,
+                   COALESCE(SUM(COALESCE(item.lineNetRevenue, item.quantity * item.unitPrice)), 0)
+            FROM SalesInvoiceItem item
+            WHERE item.invoice.invoiceDate BETWEEN :from AND :to
+              AND item.invoice.status = 'COMPLETED'
+              AND item.categoryIdSnapshot IN :categoryIds
+            GROUP BY CAST(item.invoice.invoiceDate AS date), item.categoryIdSnapshot, item.categoryNameSnapshot
+            ORDER BY CAST(item.invoice.invoiceDate AS date)
+            """)
+    List<Object[]> dailyRevenueByCategorySnapshotIds(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("categoryIds") Collection<Long> categoryIds);
 
     /**
      * Doanh thu ròng theo ngày (tổng total_amount − discount_amount), chỉ HĐ COMPLETED.

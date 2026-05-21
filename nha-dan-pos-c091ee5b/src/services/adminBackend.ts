@@ -19,6 +19,16 @@ type Page<T> = {
   number?: number;
 };
 
+export type CategoryRevenueSeriesRow = {
+  periodKey: string;
+  periodLabel: string;
+  periodStart: string;
+  periodEnd: string;
+  categoryId: string;
+  categoryName: string;
+  revenue: number;
+};
+
 /** Normalize Spring Data `Page` JSON to a content array. */
 export function toPageItems<T>(raw: Page<T> | T[] | null | undefined): T[] {
   if (raw == null) return [];
@@ -398,6 +408,24 @@ export const adminReports = {
   },
   async revenueByCategory(from: string, to: string, period = "daily") {
     return adminFetchJson<Record<string, unknown>[]>(`/api/revenue/by-category?from=${from}&to=${to}&period=${period}`);
+  },
+  async revenueByCategorySeries(from: string, to: string, period = "daily", categoryIds?: string[]): Promise<CategoryRevenueSeriesRow[]> {
+    const params = new URLSearchParams({ from, to, period });
+    const numericIds = (categoryIds ?? [])
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0)
+      .map((id) => String(Math.trunc(id)));
+    if (numericIds.length > 0) params.set("categoryIds", numericIds.join(","));
+    const raw = await adminFetchJson<Record<string, unknown>[]>(`/api/revenue/by-category-series?${params}`);
+    return raw.map((r) => ({
+      periodKey: asString(r.periodKey),
+      periodLabel: asString(r.periodLabel, asString(r.periodKey)),
+      periodStart: asString(r.periodStart),
+      periodEnd: asString(r.periodEnd),
+      categoryId: asString(r.categoryId),
+      categoryName: asString(r.categoryName, "Unknown/Legacy Category"),
+      revenue: asNumber(r.revenue),
+    }));
   },
   async profit(from: string, to: string, productIds?: string[]): Promise<ProfitRow[]> {
     const params = new URLSearchParams({ from, to });

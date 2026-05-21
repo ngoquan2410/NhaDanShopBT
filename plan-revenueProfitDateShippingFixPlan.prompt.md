@@ -1758,5 +1758,19 @@ Ensure created order/pending/invoice stores backend local shipping quote snapsho
 - [x] Task 3 planned with final local shipping settings/admin decision
 - [x] API contract reviewed for category snapshot-backed series
 - [x] Selenium plan reviewed with category snapshot and local shipping admin cases
-- [ ] Ready for implementation
+- [x] Ready for implementation
+
+### Implementation Progress — 2026-05-21
+
+- [x] Phase 1 implemented: Invoice and Goods Receipt custom date filters harden future-date input at page scope only.
+- [x] Phase 2 implemented: Profit weekly/monthly buckets clamp to selected `from/to`; Revenue total grouping verified without changing `totalAmount` semantics.
+- [x] Phase 3 implemented: invoice-line category snapshot fields, migration, capture paths, response mapping, and snapshot-survives-category-change test.
+- [x] Phase 4 implemented: snapshot-backed category revenue time-series API, backend Top 10 + `Khác`, zero-revenue category filter options from category API, and Revenue report multi-series area chart.
+- [x] Phase 5 implemented: Admin-editable local shipping rules, default `LOCAL_MO_CAY` fee `0đ` / ETA `1 day`, pre-GHN `local_rule` quote behavior, code-first plus normalized province/district/ward name fallback, and no raw/street matching.
+- [x] Phase 5 hardening completed: enabled local rules must include province, district, and ward matchers; normalized-name fallback avoids broad substring matching.
+- [x] Backend targeted regression passed for Profit/Revenue/Category/Shipping.
+- [x] Frontend production build passed.
+- [x] Frontend Vitest suite passed.
+- [x] Selenium `p5-settings` spec updated to verify `LOCAL_MO_CAY` settings persistence, `local_rule` quote, and admin local-rule UI rendering.
+- [!] Selenium runtime note: local backend/frontend warmup succeeded, but authenticated `p5-settings` execution skipped because the local DB did not have valid admin automation credentials available. Re-run with valid `ADMIN_USERNAME`/`ADMIN_PASSWORD` to execute the new Selenium assertions end-to-end.
 

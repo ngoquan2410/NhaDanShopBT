@@ -113,7 +113,7 @@ export interface ShippingAddress {
   note?: string;
 }
 
-export type ShippingQuoteSource = "zone_fallback" | "carrier_api" | "client_snapshot";
+export type ShippingQuoteSource = "zone_fallback" | "carrier_api" | "client_snapshot" | "local_rule";
 export type ShippingQuoteStatus = "incomplete" | "loading" | "quoted" | "unavailable";
 
 export interface ShippingQuote {
@@ -144,6 +144,20 @@ export interface ShippingZoneRule {
   provinceCodes: string[];
 }
 
+export interface ShippingLocalRule {
+  enabled: boolean;
+  zoneCode: string;
+  label: string;
+  fee: Money;
+  etaDays: { min: number; max: number };
+  provinceCodes: string[];
+  provinceNames: string[];
+  districtCodes: string[];
+  districtNames: string[];
+  wardCodes: string[];
+  wardNames: string[];
+}
+
 export type DeclaredValueMode = "none" | "subtotal" | "fixed";
 
 export interface ShippingParcelDefaults {
@@ -163,6 +177,7 @@ export interface ShippingParcelDefaults {
 
 export interface ShippingConfig {
   zoneRules: ShippingZoneRule[];
+  localRules?: ShippingLocalRule[];
   parcelDefaults?: ShippingParcelDefaults;
 }
 

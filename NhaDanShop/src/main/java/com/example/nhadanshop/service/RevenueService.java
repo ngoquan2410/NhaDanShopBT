@@ -1,7 +1,9 @@
 package com.example.nhadanshop.service;
 
 import com.example.nhadanshop.dto.*;
+import com.example.nhadanshop.entity.Category;
 import com.example.nhadanshop.entity.ProductVariant;
+import com.example.nhadanshop.repository.CategoryRepository;
 import com.example.nhadanshop.repository.ProductVariantRepository;
 import com.example.nhadanshop.repository.SalesInvoiceRepository;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +37,7 @@ public class RevenueService {
 
     private final SalesInvoiceRepository invoiceRepo;
     private final ProductVariantRepository variantRepo; // Sprint 2 — slow products
+    private final CategoryRepository categoryRepo;
     private final Clock businessClock;
 
     private static final DateTimeFormatter DAY_FMT   = DateTimeFormatter.ofPattern("dd/MM/yyyy");
@@ -180,6 +183,66 @@ public class RevenueService {
         }
         // Sort DESC
         result.sort((a, b) -> b.totalAmount().compareTo(a.totalAmount()));
+        return result;
+    }
+
+    public List<CategoryRevenueSeriesDto> getRevenueByCategorySeries(
+            LocalDate from,
+            LocalDate to,
+            String period,
+            List<Long> categoryIds) {
+        List<Long> selectedIds = categoryIds == null ? List.of() : categoryIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        LocalDateTime fromDt = from.atStartOfDay();
+        LocalDateTime toDt = to.atTime(LocalTime.MAX);
+        List<Object[]> raw = selectedIds.isEmpty()
+                ? invoiceRepo.dailyRevenueByCategorySnapshot(fromDt, toDt)
+                : invoiceRepo.dailyRevenueByCategorySnapshotIds(fromDt, toDt, selectedIds);
+
+        Map<CategorySnapshotKey, Map<LocalDate, BigDecimal>> revenueByCategoryDay = new LinkedHashMap<>();
+        for (Object[] row : raw) {
+            LocalDate day = parseRowLocalDate(row[0]);
+            CategorySnapshotKey key = new CategorySnapshotKey(
+                    row[1] instanceof Number n ? n.longValue() : null,
+                    normalizeSnapshotCategoryName(row[2]));
+            BigDecimal revenue = row[3] != null ? new BigDecimal(row[3].toString()) : BigDecimal.ZERO;
+            revenueByCategoryDay.computeIfAbsent(key, ignored -> new LinkedHashMap<>())
+                    .merge(day, revenue, BigDecimal::add);
+        }
+
+        List<CategorySnapshotKey> seriesKeys = selectedIds.isEmpty()
+                ? defaultTopTenPlusOtherKeys(revenueByCategoryDay)
+                : selectedCategoryKeys(selectedIds, revenueByCategoryDay);
+        List<PeriodBucket> buckets = buildPeriodBuckets(from, to, period);
+
+        List<CategoryRevenueSeriesDto> result = new ArrayList<>();
+        for (PeriodBucket bucket : buckets) {
+            for (CategorySnapshotKey key : seriesKeys) {
+                BigDecimal amount = BigDecimal.ZERO;
+                if (key.other()) {
+                    Set<CategorySnapshotKey> topKeys = new HashSet<>(seriesKeys.stream()
+                            .filter(k -> !k.other())
+                            .toList());
+                    for (Map.Entry<CategorySnapshotKey, Map<LocalDate, BigDecimal>> entry : revenueByCategoryDay.entrySet()) {
+                        if (!topKeys.contains(entry.getKey())) {
+                            amount = amount.add(sumRange(bucket.start(), bucket.end(), entry.getValue()));
+                        }
+                    }
+                } else {
+                    amount = sumRange(bucket.start(), bucket.end(), revenueByCategoryDay.getOrDefault(key, Map.of()));
+                }
+                result.add(new CategoryRevenueSeriesDto(
+                        bucket.key(),
+                        bucket.label(),
+                        bucket.start(),
+                        bucket.end(),
+                        key.id(),
+                        key.name(),
+                        amount));
+            }
+        }
         return result;
     }
 
@@ -664,6 +727,121 @@ public class RevenueService {
         return rows;
     }
 
+    private List<CategorySnapshotKey> defaultTopTenPlusOtherKeys(
+            Map<CategorySnapshotKey, Map<LocalDate, BigDecimal>> revenueByCategoryDay) {
+        List<CategorySnapshotKey> sorted = revenueByCategoryDay.entrySet().stream()
+                .sorted((a, b) -> sumAll(b.getValue()).compareTo(sumAll(a.getValue())))
+                .map(Map.Entry::getKey)
+                .toList();
+        if (sorted.size() <= 10) {
+            return sorted;
+        }
+        List<CategorySnapshotKey> result = new ArrayList<>(sorted.subList(0, 10));
+        BigDecimal otherTotal = sorted.subList(10, sorted.size()).stream()
+                .map(k -> sumAll(revenueByCategoryDay.getOrDefault(k, Map.of())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (otherTotal.compareTo(BigDecimal.ZERO) > 0) {
+            result.add(CategorySnapshotKey.otherKey());
+        }
+        return result;
+    }
+
+    private List<CategorySnapshotKey> selectedCategoryKeys(
+            List<Long> selectedIds,
+            Map<CategorySnapshotKey, Map<LocalDate, BigDecimal>> revenueByCategoryDay) {
+        Map<Long, String> currentNames = categoryRepo.findAllById(selectedIds).stream()
+                .collect(Collectors.toMap(Category::getId, Category::getName, (left, right) -> left));
+        List<CategorySnapshotKey> keys = new ArrayList<>();
+        for (Long id : selectedIds) {
+            List<CategorySnapshotKey> snapshotKeys = revenueByCategoryDay.keySet().stream()
+                    .filter(k -> Objects.equals(k.id(), id))
+                    .sorted(Comparator.comparing(CategorySnapshotKey::name))
+                    .toList();
+            if (snapshotKeys.isEmpty()) {
+                keys.add(new CategorySnapshotKey(id, currentNames.getOrDefault(id, "Danh mục #" + id), false));
+            } else {
+                keys.addAll(snapshotKeys);
+            }
+        }
+        return keys;
+    }
+
+    private List<PeriodBucket> buildPeriodBuckets(LocalDate from, LocalDate to, String period) {
+        return switch ((period == null ? "daily" : period).toLowerCase(Locale.ROOT)) {
+            case "weekly" -> buildWeeklyCategoryBuckets(from, to);
+            case "monthly" -> buildMonthlyCategoryBuckets(from, to);
+            case "yearly" -> buildYearlyCategoryBuckets(from, to);
+            default -> buildDailyCategoryBuckets(from, to);
+        };
+    }
+
+    private List<PeriodBucket> buildDailyCategoryBuckets(LocalDate from, LocalDate to) {
+        List<PeriodBucket> buckets = new ArrayList<>();
+        for (LocalDate day = from; !day.isAfter(to); day = day.plusDays(1)) {
+            buckets.add(new PeriodBucket(day.toString(), day.format(DAY_FMT), day, day));
+        }
+        return buckets;
+    }
+
+    private List<PeriodBucket> buildWeeklyCategoryBuckets(LocalDate from, LocalDate to) {
+        List<PeriodBucket> buckets = new ArrayList<>();
+        LocalDate weekStart = from.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        while (!weekStart.isAfter(to)) {
+            LocalDate weekEnd = weekStart.plusDays(6);
+            LocalDate effectiveStart = weekStart.isBefore(from) ? from : weekStart;
+            LocalDate effectiveEnd = weekEnd.isAfter(to) ? to : weekEnd;
+            String key = effectiveStart.getYear() + "-W" + String.format(Locale.ROOT, "%02d", effectiveStart.get(WeekFields.ISO.weekOfWeekBasedYear()))
+                    + ":" + effectiveStart;
+            String label = "Tuần (" + effectiveStart.format(DAY_FMT) + " - " + effectiveEnd.format(DAY_FMT) + ")";
+            buckets.add(new PeriodBucket(key, label, effectiveStart, effectiveEnd));
+            weekStart = weekStart.plusWeeks(1);
+        }
+        return buckets;
+    }
+
+    private List<PeriodBucket> buildMonthlyCategoryBuckets(LocalDate from, LocalDate to) {
+        List<PeriodBucket> buckets = new ArrayList<>();
+        LocalDate monthStart = from.withDayOfMonth(1);
+        while (!monthStart.isAfter(to)) {
+            LocalDate monthEnd = monthStart.with(TemporalAdjusters.lastDayOfMonth());
+            LocalDate effectiveStart = monthStart.isBefore(from) ? from : monthStart;
+            LocalDate effectiveEnd = monthEnd.isAfter(to) ? to : monthEnd;
+            buckets.add(new PeriodBucket(monthStart.format(DateTimeFormatter.ofPattern("yyyy-MM")),
+                    "Tháng " + monthStart.format(MONTH_FMT), effectiveStart, effectiveEnd));
+            monthStart = monthStart.plusMonths(1);
+        }
+        return buckets;
+    }
+
+    private List<PeriodBucket> buildYearlyCategoryBuckets(LocalDate from, LocalDate to) {
+        List<PeriodBucket> buckets = new ArrayList<>();
+        for (int y = from.getYear(); y <= to.getYear(); y++) {
+            LocalDate yearStart = LocalDate.of(y, 1, 1);
+            LocalDate yearEnd = LocalDate.of(y, 12, 31);
+            LocalDate effectiveStart = yearStart.isBefore(from) ? from : yearStart;
+            LocalDate effectiveEnd = yearEnd.isAfter(to) ? to : yearEnd;
+            buckets.add(new PeriodBucket(String.valueOf(y), "Năm " + y, effectiveStart, effectiveEnd));
+        }
+        return buckets;
+    }
+
+    private BigDecimal sumRange(LocalDate start, LocalDate end, Map<LocalDate, BigDecimal> byDay) {
+        BigDecimal sum = BigDecimal.ZERO;
+        for (LocalDate day = start; !day.isAfter(end); day = day.plusDays(1)) {
+            sum = sum.add(byDay.getOrDefault(day, BigDecimal.ZERO));
+        }
+        return sum;
+    }
+
+    private BigDecimal sumAll(Map<LocalDate, BigDecimal> byDay) {
+        return byDay.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private String normalizeSnapshotCategoryName(Object raw) {
+        String value = raw != null ? raw.toString().trim() : "";
+        return value.isEmpty() ? "Unknown/Legacy Category" : value;
+    }
+
     private LocalDate parseRowLocalDate(Object cell) {
         if (cell instanceof java.sql.Date sqlDate) {
             return sqlDate.toLocalDate();
@@ -676,6 +854,21 @@ public class RevenueService {
     }
 
     private record TripleSum(BigDecimal merch, long inv, long qty) {}
+
+    private record PeriodBucket(String key, String label, LocalDate start, LocalDate end) {}
+
+    private record CategorySnapshotKey(Long id, String name, boolean other) {
+        private static final Long UNKNOWN_ID = -1L;
+        private static final Long OTHER_ID = -999L;
+
+        private CategorySnapshotKey(Long id, String name) {
+            this(id != null ? id : UNKNOWN_ID, name, false);
+        }
+
+        private static CategorySnapshotKey otherKey() {
+            return new CategorySnapshotKey(OTHER_ID, "Khác", true);
+        }
+    }
 
     private String buildKyLabel(String period, LocalDate from, LocalDate to) {
         return switch (period.toLowerCase(Locale.ROOT)) {

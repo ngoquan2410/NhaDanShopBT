@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { shipping } from "@/services";
-import type { ShippingConfig, ShippingParcelDefaults, ShippingZoneRule, DeclaredValueMode } from "@/services/types";
+import type { ShippingConfig, ShippingLocalRule, ShippingParcelDefaults, ShippingZoneRule, DeclaredValueMode } from "@/services/types";
 import { formatVND } from "@/lib/format";
 import { Truck, Plus, Trash2, Save, Loader2, MapPin, Package } from "lucide-react";
 import { toast } from "sonner";
@@ -19,6 +19,20 @@ const emptyZone = (): ShippingZoneRule => ({
   provinceCodes: ["*"],
 });
 
+const defaultLocalRule = (): ShippingLocalRule => ({
+  enabled: true,
+  zoneCode: "LOCAL_MO_CAY",
+  label: "Mỏ Cày local delivery",
+  fee: 0,
+  etaDays: { min: 1, max: 1 },
+  provinceCodes: ["83", "86"],
+  provinceNames: ["Bến Tre", "Vĩnh Long"],
+  districtCodes: [],
+  districtNames: ["Mỏ Cày", "Mỏ Cày Nam", "Huyện Mỏ Cày Nam"],
+  wardCodes: [],
+  wardNames: ["Mỏ Cày", "Thị trấn Mỏ Cày"],
+});
+
 const DEFAULT_PARCEL: ShippingParcelDefaults = {
   length: 10,
   width: 10,
@@ -27,8 +41,11 @@ const DEFAULT_PARCEL: ShippingParcelDefaults = {
   declaredValueMode: "none",
 };
 
+const hasValues = (values: string[] | undefined) => (values ?? []).some((v) => v.trim().length > 0);
+
 export default function AdminShippingSettings() {
   const [zones, setZones] = useState<ShippingZoneRule[]>([]);
+  const [localRules, setLocalRules] = useState<ShippingLocalRule[]>([]);
   const [parcel, setParcel] = useState<ShippingParcelDefaults>(DEFAULT_PARCEL);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -36,6 +53,7 @@ export default function AdminShippingSettings() {
   useEffect(() => {
     shipping.getConfig().then((cfg) => {
       setZones(cfg.zoneRules);
+      setLocalRules(cfg.localRules?.length ? cfg.localRules : [defaultLocalRule()]);
       setParcel(cfg.parcelDefaults ?? DEFAULT_PARCEL);
       setLoading(false);
     });
@@ -57,6 +75,15 @@ export default function AdminShippingSettings() {
     updateZone(idx, { provinceCodes: codes.length ? codes : ["*"] });
   };
 
+  const updateLocalRule = (idx: number, patch: Partial<ShippingLocalRule>) => {
+    setLocalRules((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  };
+
+  const updateLocalList = (idx: number, field: keyof Pick<ShippingLocalRule, "provinceCodes" | "provinceNames" | "districtCodes" | "districtNames" | "wardCodes" | "wardNames">, raw: string) => {
+    const values = raw.split(",").map((v) => v.trim()).filter(Boolean);
+    updateLocalRule(idx, { [field]: values } as Partial<ShippingLocalRule>);
+  };
+
   const addZone = () => setZones((p) => [...p, emptyZone()]);
   const removeZone = (idx: number) => setZones((p) => p.filter((_, i) => i !== idx));
 
@@ -72,13 +99,37 @@ export default function AdminShippingSettings() {
         return;
       }
     }
+    for (const r of localRules) {
+      if (!r.zoneCode.trim() || !r.label.trim()) {
+        toast.error("Mỗi local rule cần có mã và tên");
+        return;
+      }
+      if (r.etaDays.min > r.etaDays.max) {
+        toast.error(`Local rule ${r.zoneCode}: ETA min phải ≤ max`);
+        return;
+      }
+      if (r.enabled) {
+        if (!hasValues(r.provinceCodes) && !hasValues(r.provinceNames)) {
+          toast.error(`Local rule ${r.zoneCode}: cần matcher tỉnh/thành`);
+          return;
+        }
+        if (!hasValues(r.districtCodes) && !hasValues(r.districtNames)) {
+          toast.error(`Local rule ${r.zoneCode}: cần matcher quận/huyện`);
+          return;
+        }
+        if (!hasValues(r.wardCodes) && !hasValues(r.wardNames)) {
+          toast.error(`Local rule ${r.zoneCode}: cần matcher phường/xã`);
+          return;
+        }
+      }
+    }
     if (parcel.length < 1 || parcel.width < 1 || parcel.height < 1 || parcel.weightGrams < 1) {
       toast.error("Kích thước & khối lượng gói hàng phải > 0");
       return;
     }
     setSaving(true);
     try {
-      const cfg: ShippingConfig = { zoneRules: zones, parcelDefaults: parcel };
+      const cfg: ShippingConfig = { zoneRules: zones, localRules, parcelDefaults: parcel };
       await shipping.saveConfig(cfg);
       toast.success("Đã lưu cấu hình giao hàng");
     } finally {
@@ -116,6 +167,96 @@ export default function AdminShippingSettings() {
         <span>
           <b>provinceCodes</b> là danh sách mã tỉnh (VD: <code>01,79,74</code>) ngăn cách bằng dấu phẩy. Dùng <code>*</code> làm zone mặc định cho mọi tỉnh chưa được gán.
         </span>
+      </div>
+
+      <div className="bg-card rounded-lg border p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <MapPin className="h-4 w-4 text-success" />
+            <h3 className="font-semibold text-sm">Local shipping rules</h3>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLocalRules((prev) => [...prev, defaultLocalRule()])}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs border rounded hover:bg-muted"
+          >
+            <Plus className="h-3 w-3" /> Thêm local rule
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Rule local được kiểm tra sau khi đủ tỉnh/quận/xã và trước GHN. Chỉ dùng mã/tên tỉnh-quận-xã; không dùng số nhà, đường hoặc rawAddress để tính phí.
+        </p>
+        {localRules.map((r, idx) => (
+          <div key={`${r.zoneCode}-${idx}`} className="rounded-lg border p-3 space-y-3 bg-muted/20">
+            <div className="flex items-center justify-between gap-2">
+              <label className="inline-flex items-center gap-2 text-xs font-semibold">
+                <input
+                  type="checkbox"
+                  checked={r.enabled}
+                  onChange={(e) => updateLocalRule(idx, { enabled: e.target.checked })}
+                />
+                Bật rule
+              </label>
+              <button
+                type="button"
+                onClick={() => setLocalRules((prev) => prev.filter((_, i) => i !== idx))}
+                className="p-1.5 text-muted-foreground hover:text-danger rounded hover:bg-muted"
+                title="Xóa local rule"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground">Mã rule / zoneCode</label>
+                <input className={inputCls} value={r.zoneCode} onChange={(e) => updateLocalRule(idx, { zoneCode: e.target.value })} />
+              </div>
+              <div className="lg:col-span-3">
+                <label className="text-[11px] font-semibold text-muted-foreground">Tên hiển thị</label>
+                <input className={inputCls} value={r.label} onChange={(e) => updateLocalRule(idx, { label: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground">Phí local (đ)</label>
+                <input type="number" min={0} step={1000} className={inputCls} value={r.fee} onChange={(e) => updateLocalRule(idx, { fee: Number(e.target.value) || 0 })} />
+                <p className="text-[10px] text-muted-foreground mt-0.5">{formatVND(r.fee)}</p>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground">ETA min</label>
+                <input type="number" min={1} className={inputCls} value={r.etaDays.min} onChange={(e) => updateLocalRule(idx, { etaDays: { ...r.etaDays, min: Number(e.target.value) || 1 } })} />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground">ETA max</label>
+                <input type="number" min={1} className={inputCls} value={r.etaDays.max} onChange={(e) => updateLocalRule(idx, { etaDays: { ...r.etaDays, max: Number(e.target.value) || 1 } })} />
+              </div>
+              <div className="md:col-span-2 lg:col-span-4 grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="text-[11px] font-semibold text-muted-foreground">Province codes</label>
+                  <input className={cn(inputCls, "font-mono")} value={r.provinceCodes.join(", ")} onChange={(e) => updateLocalList(idx, "provinceCodes", e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-muted-foreground">Province names</label>
+                  <input className={inputCls} value={r.provinceNames.join(", ")} onChange={(e) => updateLocalList(idx, "provinceNames", e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-muted-foreground">District codes</label>
+                  <input className={cn(inputCls, "font-mono")} value={r.districtCodes.join(", ")} onChange={(e) => updateLocalList(idx, "districtCodes", e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-muted-foreground">District names</label>
+                  <input className={inputCls} value={r.districtNames.join(", ")} onChange={(e) => updateLocalList(idx, "districtNames", e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-muted-foreground">Ward codes</label>
+                  <input className={cn(inputCls, "font-mono")} value={r.wardCodes.join(", ")} onChange={(e) => updateLocalList(idx, "wardCodes", e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-muted-foreground">Ward names</label>
+                  <input className={inputCls} value={r.wardNames.join(", ")} onChange={(e) => updateLocalList(idx, "wardNames", e.target.value)} />
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="bg-card rounded-lg border p-4 space-y-3">

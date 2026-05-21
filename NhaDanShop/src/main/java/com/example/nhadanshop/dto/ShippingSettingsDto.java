@@ -8,6 +8,7 @@ import java.util.List;
 
 public record ShippingSettingsDto(
         @NotEmpty @Valid List<ShippingZoneRuleDto> zoneRules,
+        @Valid List<ShippingLocalRuleDto> localRules,
         @NotNull @Valid ShippingParcelDefaultsDto parcelDefaults
 ) {
 }

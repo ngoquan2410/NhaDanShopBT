@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -110,6 +111,102 @@ class ProfitReportVatExclusionIntegrationTest {
         assertEquals(0, new BigDecimal("8000").compareTo(r.totalVatAmount()));
         assertEquals(0, new BigDecimal("40000").compareTo(r.totalCost()));
         assertEquals(0, new BigDecimal("60000").compareTo(r.totalProfit()));
+    }
+
+    @Test
+    void weekly_profit_bucket_clamps_to_selected_from_date() {
+        Product product = createProductFixture("CLAMP-WEEK");
+        ProductVariant variant = product.getVariants().getFirst();
+        seedInvoice("INV-WEEK-BEFORE", LocalDate.of(2026, 1, 5).atTime(10, 0), product, variant,
+                new BigDecimal("100000"), new BigDecimal("40000"));
+        seedInvoice("INV-WEEK-IN", LocalDate.of(2026, 1, 7).atTime(10, 0), product, variant,
+                new BigDecimal("200000"), new BigDecimal("80000"));
+
+        List<ProfitReportResponse> rows = reportService.getWeeklyReport(
+                LocalDate.of(2026, 1, 7), LocalDate.of(2026, 1, 11));
+
+        assertEquals(1, rows.size());
+        ProfitReportResponse first = rows.getFirst();
+        assertEquals(LocalDate.of(2026, 1, 7), first.fromDate());
+        assertEquals(LocalDate.of(2026, 1, 11), first.toDate());
+        assertEquals(0, new BigDecimal("200000").compareTo(first.totalRevenue()));
+        assertEquals(0, new BigDecimal("120000").compareTo(first.totalProfit()));
+    }
+
+    @Test
+    void monthly_profit_bucket_clamps_to_selected_from_date() {
+        Product product = createProductFixture("CLAMP-MONTH");
+        ProductVariant variant = product.getVariants().getFirst();
+        seedInvoice("INV-MONTH-BEFORE", LocalDate.of(2026, 2, 1).atTime(10, 0), product, variant,
+                new BigDecimal("100000"), new BigDecimal("40000"));
+        seedInvoice("INV-MONTH-IN", LocalDate.of(2026, 2, 15).atTime(10, 0), product, variant,
+                new BigDecimal("300000"), new BigDecimal("120000"));
+
+        List<ProfitReportResponse> rows = reportService.getMonthlyReport(
+                LocalDate.of(2026, 2, 10), LocalDate.of(2026, 2, 28));
+
+        assertEquals(1, rows.size());
+        ProfitReportResponse first = rows.getFirst();
+        assertEquals(LocalDate.of(2026, 2, 10), first.fromDate());
+        assertEquals(LocalDate.of(2026, 2, 28), first.toDate());
+        assertEquals(0, new BigDecimal("300000").compareTo(first.totalRevenue()));
+        assertEquals(0, new BigDecimal("180000").compareTo(first.totalProfit()));
+    }
+
+    private Product createProductFixture(String suffix) {
+        Category cat = new Category();
+        cat.setName("CAT-" + suffix);
+        cat.setActive(true);
+        cat = categoryRepository.save(cat);
+
+        Product product = new Product();
+        product.setCode("P-" + suffix);
+        product.setName("Product " + suffix);
+        product.setCategory(cat);
+        product.setActive(true);
+        product.setProductType(Product.ProductType.SINGLE);
+        product = productRepository.save(product);
+
+        ProductVariant variant = new ProductVariant();
+        variant.setProduct(product);
+        variant.setVariantCode("V-" + suffix);
+        variant.setVariantName("Variant " + suffix);
+        variant.setSellUnit("cai");
+        variant.setPiecesPerUnit(1);
+        variant.setSellPrice(new BigDecimal("100000"));
+        variant.setCostPrice(new BigDecimal("40000"));
+        variant.setStockQty(0);
+        variant.setMinStockQty(0);
+        variant.setActive(true);
+        variant.setIsDefault(true);
+        variant.setIsSellable(true);
+        variant = variantRepository.save(variant);
+        product.getVariants().add(variant);
+        return product;
+    }
+
+    private void seedInvoice(String invoiceNo, LocalDateTime invoiceDate, Product product, ProductVariant variant,
+                             BigDecimal lineNetRevenue, BigDecimal lineCost) {
+        SalesInvoice inv = new SalesInvoice();
+        inv.setInvoiceNo(invoiceNo);
+        inv.setInvoiceDate(invoiceDate);
+        inv.setStatus(SalesInvoice.Status.COMPLETED);
+        inv.setTotalAmount(lineNetRevenue);
+        inv.setDiscountAmount(BigDecimal.ZERO);
+
+        SalesInvoiceItem line = new SalesInvoiceItem();
+        line.setInvoice(inv);
+        line.setProduct(product);
+        line.setVariant(variant);
+        line.setQuantity(1);
+        line.setUnitPrice(lineNetRevenue);
+        line.setUnitCostSnapshot(lineCost);
+        line.setLineNetRevenue(lineNetRevenue);
+        line.setLineDiscountPercent(BigDecimal.ZERO);
+        line.setRewardLine(false);
+        inv.getItems().add(line);
+
+        salesInvoiceRepository.save(inv);
     }
 
     @TestConfiguration
