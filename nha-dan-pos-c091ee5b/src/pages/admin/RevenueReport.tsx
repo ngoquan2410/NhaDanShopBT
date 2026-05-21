@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { StatCard } from "@/components/shared/StatCard";
 import { FilterChip } from "@/components/shared/DataTableToolbar";
 import { DateInput } from "@/components/shared/DateInput";
+import { TablePagination } from "@/components/shared/TablePagination";
 import { useService } from "@/hooks/useService";
 import { adminReports, products as productService } from "@/services";
 import { formatVND, formatNumber } from "@/lib/format";
@@ -27,6 +28,9 @@ export default function AdminRevenueReport() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const pickerRef = useRef<HTMLDivElement>(null);
+  const [productPage, setProductPage] = useState(1);
+  const [productPageSize, setProductPageSize] = useState(20);
+  const PRODUCT_PAGE_SIZE_OPTIONS = [20, 50, 100];
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -121,6 +125,21 @@ export default function AdminRevenueReport() {
   );
 
   const isFiltered = selected.length > 0;
+
+  // Reset to first page when filters that affect the dataset change
+  useEffect(() => {
+    setProductPage(1);
+  }, [from, to, groupBy, selectedKey]);
+
+  const productTotal = productTableRows.length;
+  const productTotalPages = Math.max(1, Math.ceil(productTotal / productPageSize));
+  const currentProductPage = Math.min(productPage, productTotalPages);
+  const productRangeStart = productTotal === 0 ? 0 : (currentProductPage - 1) * productPageSize + 1;
+  const productRangeEnd = Math.min(productTotal, currentProductPage * productPageSize);
+  const pagedProductRows = useMemo(
+    () => productTableRows.slice((currentProductPage - 1) * productPageSize, currentProductPage * productPageSize),
+    [productTableRows, currentProductPage, productPageSize],
+  );
   const rows = useMemo(() => reportData?.rows ?? [], [reportData]);
 
   const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0);
@@ -441,7 +460,7 @@ export default function AdminRevenueReport() {
 
       <div className="bg-card rounded-lg border overflow-hidden">
         <div className="px-4 py-3 border-b">
-          <h3 className="font-semibold text-sm">{isFiltered ? "Sản phẩm đã chọn" : "Sản phẩm bán chạy"}</h3>
+          <h3 className="font-semibold text-sm">{isFiltered ? "Doanh thu theo sản phẩm đã chọn" : "Doanh thu theo sản phẩm"}</h3>
         </div>
         <table className="w-full text-sm">
           <thead>
@@ -453,9 +472,9 @@ export default function AdminRevenueReport() {
             </tr>
           </thead>
           <tbody>
-            {productTableRows.map((r, i) => (
+            {pagedProductRows.map((r, i) => (
               <tr key={r.key} className="border-b last:border-0 hover:bg-muted/30">
-                <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
+                <td className="px-3 py-2 text-muted-foreground">{productRangeStart + i}</td>
                 <td className="px-3 py-2 font-medium">{r.name}</td>
                 <td className="px-3 py-2 text-right">{formatNumber(r.qty)}</td>
                 <td className="px-3 py-2 text-right font-medium text-primary">{formatVND(r.revenue)}</td>
@@ -463,6 +482,21 @@ export default function AdminRevenueReport() {
             ))}
           </tbody>
         </table>
+        {productTotal > 0 && (
+          <div className="px-4 py-2 border-t">
+            <TablePagination
+              page={currentProductPage}
+              totalPages={productTotalPages}
+              total={productTotal}
+              rangeStart={productRangeStart}
+              rangeEnd={productRangeEnd}
+              pageSize={productPageSize}
+              onPageChange={setProductPage}
+              onPageSizeChange={(n) => { setProductPageSize(n); setProductPage(1); }}
+              pageSizeOptions={PRODUCT_PAGE_SIZE_OPTIONS}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

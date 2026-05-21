@@ -167,7 +167,7 @@ export default function AdminInvoices() {
         </>}
       />
 
-      <PeriodFilter value={period} onChange={setPeriod} />
+      <PeriodFilter value={period} onChange={setPeriod} disableFutureDates />
 
       <AsyncBoundary
         loading={loading}

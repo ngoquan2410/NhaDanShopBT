@@ -11,18 +11,81 @@ import { QuickCreateProductModal, type QuickCreateMode } from "@/components/prod
 import { VariantSearchPicker } from "@/components/shared/VariantSearchPicker";
 import type { VariantTransactionSearchHit } from "@/services/catalog/variantTransactionSearch";
 
+type PickMeta = {
+  stock: number;
+  sellUnit: string;
+  importUnit: string;
+  piecesPerImportUnit: number;
+  productName?: string;
+  variantName?: string;
+  productCode?: string;
+  variantCode?: string;
+  categoryName?: string;
+};
+
 type RecipeRow = {
   productId: string;
   variantId: string;
   qty: number;
   unit: string;
-  pickMeta?: {
-    stock: number;
-    sellUnit: string;
-    importUnit: string;
-    piecesPerImportUnit: number;
-  };
+  pickMeta?: PickMeta;
 };
+
+/** Display-only summary card for a picked variant. Does not affect submit payload. */
+function VariantSummaryCard({
+  productId,
+  variantId,
+  meta,
+  fallbackProductCode,
+  fallbackProductName,
+  fallbackVariantName,
+}: {
+  productId: string;
+  variantId: string;
+  meta?: PickMeta;
+  fallbackProductCode?: string;
+  fallbackProductName?: string;
+  fallbackVariantName?: string;
+}) {
+  const productName = meta?.productName ?? fallbackProductName ?? "";
+  const variantName = meta?.variantName ?? fallbackVariantName ?? "";
+  const productCode = meta?.productCode ?? fallbackProductCode ?? "";
+  const variantCode = meta?.variantCode ?? "";
+  const chips: string[] = [];
+  if (productCode) chips.push(productCode);
+  if (variantCode) chips.push(variantCode);
+  if (meta?.categoryName) chips.push(meta.categoryName);
+  return (
+    <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs space-y-1">
+      <div className="font-medium text-sm text-foreground truncate">
+        <span className="truncate">{productName || "—"}</span>
+        {variantName ? (
+          <span className="text-muted-foreground font-normal"> · {variantName}</span>
+        ) : null}
+      </div>
+      {chips.length > 0 ? (
+        <div className="font-mono text-[11px] text-muted-foreground flex flex-wrap gap-x-2 gap-y-0.5">
+          {chips.map((c, i) => (
+            <span key={i} className="truncate">{c}</span>
+          ))}
+        </div>
+      ) : null}
+      {meta ? (
+        <div className="text-[11px] text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5">
+          <span>Tồn: <b className="text-foreground tabular-nums">{meta.stock}</b></span>
+          {meta.sellUnit ? <span>Đ.vị tồn: <b className="text-foreground">{meta.sellUnit}</b></span> : null}
+          {meta.importUnit ? <span>Đ.vị nhập: <b className="text-foreground">{meta.importUnit}</b></span> : null}
+          {meta.importUnit && meta.sellUnit ? (
+            <span>Quy đổi: 1 {meta.importUnit} = {meta.piecesPerImportUnit} {meta.sellUnit}</span>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="text-[10px] text-muted-foreground/70 font-mono">
+        id {productId}/{variantId}
+      </div>
+    </div>
+  );
+}
 
 /** Full-page recipe create — breadcrumb, metadata card, và bảng dòng NL giống phiếu điều chỉnh tồn kho. */
 export default function ProductionRecipeFormPage() {
@@ -111,6 +174,11 @@ export default function ProductionRecipeFormPage() {
       sellUnit: hit.sellUnit,
       importUnit: hit.importUnit,
       piecesPerImportUnit: hit.piecesPerUnit,
+      productName: hit.productName,
+      variantName: hit.variantName,
+      productCode: hit.productCode,
+      variantCode: hit.variantCode,
+      categoryName: hit.categoryName,
     });
     mergeProductIntoState(hit.productId);
   };
@@ -130,6 +198,11 @@ export default function ProductionRecipeFormPage() {
         sellUnit: hit.sellUnit,
         importUnit: hit.importUnit,
         piecesPerImportUnit: hit.piecesPerUnit,
+        productName: hit.productName,
+        variantName: hit.variantName,
+        productCode: hit.productCode,
+        variantCode: hit.variantCode,
+        categoryName: hit.categoryName,
       },
     };
     setRows(next);
@@ -277,19 +350,31 @@ export default function ProductionRecipeFormPage() {
                   )}
                 </div>
                 {isEditMode ? (
-                  <p className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-xs font-mono text-muted-foreground">
-                    product #{outPid} · variant #{outVid}
-                  </p>
+                  <div className="mt-1">
+                    <VariantSummaryCard
+                      productId={outPid}
+                      variantId={outVid}
+                      meta={outputPickMeta}
+                      fallbackProductCode={outputProduct?.code}
+                      fallbackProductName={outputProduct?.name}
+                    />
+                  </div>
                 ) : (
                   <>
                     {outVid ? (
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        Đã chọn: {outputProduct?.code ?? "…"} — {outputProduct?.name ?? ""} · variant id {outVid}
-                      </p>
+                      <div className="mt-1">
+                        <VariantSummaryCard
+                          productId={outPid}
+                          variantId={outVid}
+                          meta={outputPickMeta}
+                          fallbackProductCode={outputProduct?.code}
+                          fallbackProductName={outputProduct?.name}
+                        />
+                      </div>
                     ) : null}
                     <VariantSearchPicker
                       context="recipe"
-                      className="mt-1"
+                      className="mt-2"
                       inputTestId="recipe-output-variant-search"
                       listTestId="recipe-output-variant-search-hits"
                       placeholder="Tìm output theo mã/tên SP hoặc variant…"
@@ -334,7 +419,8 @@ export default function ProductionRecipeFormPage() {
           </div>
 
           {/* Line items */}
-          <div className="bg-card rounded-lg border overflow-hidden">
+          <div className="bg-card rounded-lg border">
+
             <div className="flex items-center justify-between gap-2 p-4 border-b">
               <div>
                 <p className="text-sm font-semibold">Nguyên liệu</p>
@@ -353,23 +439,25 @@ export default function ProductionRecipeFormPage() {
               </button>
             </div>
 
-            {/* Desktop: table */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-sm min-w-[640px]">
+            {/* Desktop: table — overflow visible so search dropdown isn't clipped */}
+            <div className="hidden md:block">
+              <table className="w-full text-sm table-fixed">
+
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="text-left px-3 py-2.5 font-medium text-muted-foreground w-10">#</th>
-                    <th className="text-left px-3 py-2.5 font-medium text-muted-foreground min-w-[280px]">
+                    <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">
                       Nguyên liệu (variant)
                     </th>
                     <th className="text-center px-3 py-2.5 font-medium text-muted-foreground w-[110px]">
                       SL / output
                     </th>
-                    <th className="text-center px-3 py-2.5 font-medium text-muted-foreground w-[80px]">
+                    <th className="text-center px-3 py-2.5 font-medium text-muted-foreground w-[90px]">
                       Đ.vị
                     </th>
                     <th className="w-12" />
                   </tr>
+
                 </thead>
                 <tbody>
                   {rows.map((row, idx) => {
@@ -380,14 +468,9 @@ export default function ProductionRecipeFormPage() {
                     <Fragment key={idx}>
                     <tr key={`${idx}-r`} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-3 py-2 text-muted-foreground text-xs tabular-nums align-top">{idx + 1}</td>
-                      <td className="px-3 py-2">
-                        <div className="space-y-1 min-w-0">
-                          {row.variantId ? (
-                            <p className="text-[11px] text-muted-foreground font-mono">
-                              {row.productId} · {row.variantId}
-                            </p>
-                          ) : null}
-                          <div className="flex items-start gap-1">
+                      <td className="px-3 py-2 align-top">
+                        <div className="space-y-2 min-w-0">
+                          <div className="flex items-start gap-2">
                             <div className="flex-1 min-w-0">
                               <VariantSearchPicker
                                 context="recipe"
@@ -400,15 +483,25 @@ export default function ProductionRecipeFormPage() {
                             <button
                               type="button"
                               onClick={() => setQuickCreate({ mode: "material", rowIdx: idx })}
-                              className="shrink-0 inline-flex items-center gap-1 px-2 h-8 text-[11px] font-medium border rounded-md hover:bg-muted text-primary"
+                              className="shrink-0 inline-flex items-center gap-1 px-2 h-8 text-[11px] font-medium border rounded-md hover:bg-muted text-primary whitespace-nowrap"
                               title="Tạo nguyên liệu nhanh"
                             >
                               <Plus className="h-3 w-3" /> Tạo
                             </button>
                           </div>
+                          {row.variantId ? (
+                            <VariantSummaryCard
+                              productId={row.productId}
+                              variantId={row.variantId}
+                              meta={pm}
+                              fallbackProductCode={rowProduct?.code}
+                              fallbackProductName={rowProduct?.name}
+                              fallbackVariantName={rowVariant?.name}
+                            />
+                          ) : null}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-center">
+                      <td className="px-3 py-2 align-top text-center">
                         <input
                           type="number"
                           min={1}
@@ -418,10 +511,10 @@ export default function ProductionRecipeFormPage() {
                             next[idx] = { ...next[idx], qty: Number(e.target.value) || 1 };
                             setRows(next);
                           }}
-                          className="w-20 h-9 text-center text-xs border rounded-md bg-background mx-auto focus:outline-none focus:ring-2 focus:ring-ring/40 tabular-nums"
+                          className="w-full max-w-[90px] h-8 text-center text-xs border rounded-md bg-background mx-auto focus:outline-none focus:ring-2 focus:ring-ring/40 tabular-nums"
                         />
                       </td>
-                      <td className="px-3 py-2 text-center">
+                      <td className="px-3 py-2 align-top text-center">
                         <input
                           value={row.unit}
                           onChange={(e) => {
@@ -429,9 +522,10 @@ export default function ProductionRecipeFormPage() {
                             next[idx] = { ...next[idx], unit: e.target.value };
                             setRows(next);
                           }}
-                          className="w-16 h-9 text-center text-xs border rounded-md bg-background mx-auto font-mono focus:outline-none focus:ring-2 focus:ring-ring/40"
+                          className="w-full max-w-[72px] h-8 text-center text-xs border rounded-md bg-background mx-auto font-mono focus:outline-none focus:ring-2 focus:ring-ring/40"
                         />
                       </td>
+
                       <td className="px-3 py-2 align-top">
                         <button
                           type="button"
@@ -446,27 +540,26 @@ export default function ProductionRecipeFormPage() {
                         </button>
                       </td>
                     </tr>
-                    {(rowVariant || pm || !row.productId) && (
+                    {(!row.productId ||
+                      rowVariant?.expiryDate ||
+                      (row.unit && row.unit !== (rowVariant?.sellUnit ?? pm?.sellUnit))) && (
                       <tr key={`${idx}-m`} className="border-b last:border-0">
                         <td />
                         <td colSpan={4} className="px-3 pb-2 text-[11px] text-muted-foreground">
                           {!row.productId ? (
                             <span>Chọn nguyên liệu để tự điền đơn vị và xem tồn khả dụng.</span>
-                          ) : rowVariant || pm ? (
+                          ) : (
                             <span className="space-x-2">
-                              <span>Đơn vị tồn kho: <b>{rowVariant?.sellUnit ?? pm?.sellUnit}</b></span>
-                              <span>· Đơn vị nhập: <b>{rowVariant?.importUnit ?? pm?.importUnit}</b></span>
-                              <span>· Quy đổi: 1 {rowVariant?.importUnit ?? pm?.importUnit} = {rowVariant?.piecesPerImportUnit ?? pm?.piecesPerImportUnit} {rowVariant?.sellUnit ?? pm?.sellUnit}</span>
-                              <span>· Tồn khả dụng: <b>{rowVariant?.stock ?? pm?.stock}</b></span>
-                              {rowVariant?.expiryDate && <span>· HSD: {rowVariant.expiryDate}</span>}
+                              {rowVariant?.expiryDate && <span>HSD: {rowVariant.expiryDate}</span>}
                               {row.unit && row.unit !== (rowVariant?.sellUnit ?? pm?.sellUnit) && (
                                 <span className="text-warning">· Đơn vị đã được chỉnh riêng cho công thức này.</span>
                               )}
                             </span>
-                          ) : null}
+                          )}
                         </td>
                       </tr>
                     )}
+
                     </Fragment>
                     );
                   })}
@@ -499,14 +592,9 @@ export default function ProductionRecipeFormPage() {
                       </button>
                     </div>
 
-                    <div>
+                    <div className="space-y-2">
                       <label className="text-[11px] font-medium text-muted-foreground">Nguyên liệu (variant)</label>
-                      {row.variantId ? (
-                        <p className="mt-0.5 text-[10px] font-mono text-muted-foreground">
-                          {row.productId} · {row.variantId}
-                        </p>
-                      ) : null}
-                      <div className="mt-1 flex items-start gap-1">
+                      <div className="flex items-start gap-2">
                         <div className="flex-1 min-w-0">
                           <VariantSearchPicker
                             context="recipe"
@@ -517,16 +605,26 @@ export default function ProductionRecipeFormPage() {
                         <button
                           type="button"
                           onClick={() => setQuickCreate({ mode: "material", rowIdx: idx })}
-                          className="shrink-0 inline-flex items-center gap-1 px-2 h-8 text-[11px] font-medium border rounded-md hover:bg-muted text-primary"
+                          className="shrink-0 inline-flex items-center gap-1 px-2 h-8 text-[11px] font-medium border rounded-md hover:bg-muted text-primary whitespace-nowrap"
                           title="Tạo nguyên liệu nhanh"
                         >
                           <Plus className="h-3 w-3" /> Tạo
                         </button>
                       </div>
+                      {row.variantId ? (
+                        <VariantSummaryCard
+                          productId={row.productId}
+                          variantId={row.variantId}
+                          meta={pm}
+                          fallbackProductCode={rowProduct?.code}
+                          fallbackProductName={rowProduct?.name}
+                          fallbackVariantName={rowVariant?.name}
+                        />
+                      ) : null}
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
-                      <div>
+                      <div className="min-w-0">
                         <label className="text-[11px] font-medium text-muted-foreground">SL / output</label>
                         <input
                           type="number"
@@ -540,7 +638,7 @@ export default function ProductionRecipeFormPage() {
                           className="mt-1 w-full h-9 px-2 text-sm border rounded-md bg-background tabular-nums focus:outline-none focus:ring-2 focus:ring-ring/40"
                         />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <label className="text-[11px] font-medium text-muted-foreground">Đơn vị</label>
                         <input
                           value={row.unit}
@@ -554,32 +652,23 @@ export default function ProductionRecipeFormPage() {
                       </div>
                     </div>
 
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      {!row.productId ? (
-                        <span>Chọn nguyên liệu để tự điền đơn vị và xem tồn khả dụng.</span>
-                      ) : rowVariant || pm ? (
-                        <span className="space-y-0.5 inline-block">
-                          <span className="block">
-                            Đơn vị tồn kho: <b>{rowVariant?.sellUnit ?? pm?.sellUnit}</b> · Đơn vị nhập:{" "}
-                            <b>{rowVariant?.importUnit ?? pm?.importUnit}</b>
-                          </span>
-                          <span className="block">
-                            Quy đổi: 1 {rowVariant?.importUnit ?? pm?.importUnit} ={" "}
-                            {rowVariant?.piecesPerImportUnit ?? pm?.piecesPerImportUnit}{" "}
-                            {rowVariant?.sellUnit ?? pm?.sellUnit}
-                          </span>
-                          <span className="block">
-                            Tồn khả dụng: <b>{rowVariant?.stock ?? pm?.stock}</b>
-                            {rowVariant?.expiryDate ? <> · HSD: {rowVariant.expiryDate}</> : null}
-                          </span>
-                          {row.unit && row.unit !== (rowVariant?.sellUnit ?? pm?.sellUnit) && (
-                            <span className="block text-warning">
-                              · Đơn vị đã được chỉnh riêng cho công thức này.
-                            </span>
-                          )}
-                        </span>
-                      ) : null}
-                    </p>
+                    {!row.productId ? (
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Chọn nguyên liệu để tự điền đơn vị và xem tồn khả dụng.
+                      </p>
+                    ) : (
+                      <>
+                        {rowVariant?.expiryDate ? (
+                          <p className="text-[11px] text-muted-foreground">HSD: {rowVariant.expiryDate}</p>
+                        ) : null}
+                        {row.unit && row.unit !== (rowVariant?.sellUnit ?? pm?.sellUnit) ? (
+                          <p className="text-[11px] text-warning">
+                            Đơn vị đã được chỉnh riêng cho công thức này.
+                          </p>
+                        ) : null}
+                      </>
+                    )}
+
                   </div>
                 );
               })}

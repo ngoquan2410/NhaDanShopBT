@@ -167,7 +167,7 @@ export default function AdminGoodsReceipts() {
       />
 
       <DataTableToolbar search={search} onSearchChange={setSearch} searchPlaceholder="Tìm số phiếu, NCC..." />
-      <PeriodFilter value={period} onChange={setPeriod} />
+      <PeriodFilter value={period} onChange={setPeriod} disableFutureDates />
 
       {filteredDrafts.length > 0 && (
         <div className="bg-info-soft/40 border border-info/20 rounded-lg p-3">

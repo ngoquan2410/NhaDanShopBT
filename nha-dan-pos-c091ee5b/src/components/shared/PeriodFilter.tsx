@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Calendar as CalendarIcon } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { localToday, toLocalDateString } from "@/lib/localDate";
 
@@ -17,6 +18,13 @@ interface Props {
   value: PeriodValue;
   onChange: (v: PeriodValue) => void;
   className?: string;
+  /**
+   * Opt-in: when true, the custom from/to date inputs cannot accept a date
+   * after today (Asia/Saigon local). Future values entered manually are
+   * rejected with a toast and the previous valid value is kept.
+   * Default: false (existing behavior unchanged for other pages).
+   */
+  disableFutureDates?: boolean;
 }
 
 function todayISO(): string {
@@ -61,8 +69,35 @@ const PRESETS: { key: PeriodPreset; label: string }[] = [
   { key: "month", label: "Tháng này" },
 ];
 
-export function PeriodFilter({ value, onChange, className }: Props) {
+export function PeriodFilter({ value, onChange, className, disableFutureDates }: Props) {
   const [customOpen, setCustomOpen] = useState(value.preset === "custom");
+  const maxDate = disableFutureDates ? todayISO() : undefined;
+
+  const guardFuture = (next: string): string | null => {
+    if (!disableFutureDates) return next;
+    if (!next) return next;
+    if (next > todayISO()) {
+      toast.error("Không được chọn ngày trong tương lai");
+      return null;
+    }
+    return next;
+  };
+
+  const handleFromChange = (raw: string) => {
+    const v = guardFuture(raw);
+    if (v === null) return;
+    let nextTo = value.to;
+    if (disableFutureDates && v && nextTo && v > nextTo) nextTo = v;
+    onChange({ ...value, preset: "custom", from: v, to: nextTo });
+  };
+
+  const handleToChange = (raw: string) => {
+    const v = guardFuture(raw);
+    if (v === null) return;
+    let nextFrom = value.from;
+    if (disableFutureDates && v && nextFrom && v < nextFrom) nextFrom = v;
+    onChange({ ...value, preset: "custom", from: nextFrom, to: v });
+  };
 
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
@@ -96,14 +131,16 @@ export function PeriodFilter({ value, onChange, className }: Props) {
           <input
             type="date"
             value={value.from ?? ""}
-            onChange={(e) => onChange({ ...value, preset: "custom", from: e.target.value })}
+            max={maxDate}
+            onChange={(e) => handleFromChange(e.target.value)}
             className="h-7 px-2 border rounded-md bg-background"
           />
           <span className="text-muted-foreground">→</span>
           <input
             type="date"
             value={value.to ?? ""}
-            onChange={(e) => onChange({ ...value, preset: "custom", to: e.target.value })}
+            max={maxDate}
+            onChange={(e) => handleToChange(e.target.value)}
             className="h-7 px-2 border rounded-md bg-background"
           />
         </div>
