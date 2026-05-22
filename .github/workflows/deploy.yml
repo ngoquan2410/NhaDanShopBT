@@ -152,6 +152,16 @@ jobs:
     name: 🚀 Deploy to EC2 (EC2 Postgres)
     runs-on: ubuntu-latest
     needs: [detect-changes, build-backend, build-frontend]
+    timeout-minutes: 30
+    env:
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      SSH_OPTS: >-
+        -o BatchMode=yes
+        -o StrictHostKeyChecking=no
+        -o ConnectTimeout=20
+        -o ConnectionAttempts=3
+        -o ServerAliveInterval=10
+        -o ServerAliveCountMax=3
     if: |
       always() &&
       github.ref == 'refs/heads/main' &&
@@ -177,23 +187,43 @@ jobs:
           path: ./artifacts/frontend
 
       - name: 🔑 Setup SSH key
+        timeout-minutes: 3
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+          KEYSCAN_OK=false
+          for i in 1 2 3 4 5; do
+            echo "ssh-keyscan attempt $i/5"
+            if timeout 15 ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null; then
+              KEYSCAN_OK=true
+              break
+            fi
+            sleep 10
+          done
+
+          if [ "$KEYSCAN_OK" != "true" ]; then
+            echo "::error::Cannot read SSH host key from EC2_HOST on port 22"
+            exit 1
+          fi
+
+          ssh -i ~/.ssh/id_rsa $SSH_OPTS "${EC2_USER}@${EC2_HOST}" "echo SSH_OK"
 
       # ── Deploy Backend ──────────────────────────────────────────────────────
       - name: 📤 Upload JAR lên EC2
         if: needs.detect-changes.outputs.backend == 'true'
+        timeout-minutes: 3
         run: |
-          scp -o StrictHostKeyChecking=no \
+          scp -i ~/.ssh/id_rsa $SSH_OPTS \
             ./artifacts/backend/nhadanshop.jar \
-            ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/nhadanshop-new.jar
+            "${EC2_USER}@${EC2_HOST}:/tmp/nhadanshop-new.jar"
           echo "✅ JAR uploaded"
 
       - name: ⚙️ Ghi systemd service file lên EC2
         if: needs.detect-changes.outputs.backend == 'true'
+        timeout-minutes: 5
         run: |
           # Dung printf de tranh leading whitespace tu YAML indent
           # Secrets duoc GitHub Actions expand truoc khi chay shell
@@ -219,7 +249,7 @@ jobs:
             "Environment=\"R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}\"" \
             "Environment=\"R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}\"" \
             "Environment=\"JWT_SECRET=${{ secrets.JWT_SECRET }}\"" \
-            "Environment=\"CORS_ALLOWED_ORIGINS=http://${{ secrets.EC2_HOST }}\"" \
+            "Environment=\"CORS_ALLOWED_ORIGINS=http://${EC2_HOST}\"" \
             "Environment=\"MAIL_HOST=${{ secrets.MAIL_HOST }}\"" \
             "Environment=\"MAIL_PORT=${{ secrets.MAIL_PORT }}\"" \
             "Environment=\"MAIL_USERNAME=${{ secrets.MAIL_USERNAME }}\"" \
@@ -251,25 +281,25 @@ jobs:
           grep -c "PASSWORD\|SECRET\|KEY\|TOKEN\|GHN\|CASSO\|GOONG\|MAIL" /tmp/nhadanshop.service
 
           # Upload service file len EC2
-          scp -o StrictHostKeyChecking=no \
+          scp -i ~/.ssh/id_rsa $SSH_OPTS \
             /tmp/nhadanshop.service \
-            ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/nhadanshop.service
+            "${EC2_USER}@${EC2_HOST}:/tmp/nhadanshop.service"
           echo "Service file uploaded"
 
       - name: 🔄 Swap JAR + reload systemd + restart
         if: needs.detect-changes.outputs.backend == 'true'
+        timeout-minutes: 8
         run: |
           # Buoc 1: Tao SQL file de sync DB password (tranh escape quotes qua SSH)
           printf "ALTER USER nhadanshop_user WITH PASSWORD '%s';\n" \
             "${{ secrets.DB_PASSWORD }}" > /tmp/sync_pass.sql
-          scp -o StrictHostKeyChecking=no /tmp/sync_pass.sql \
-            ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/sync_pass.sql
-          ssh -o StrictHostKeyChecking=no ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
+          scp -i ~/.ssh/id_rsa $SSH_OPTS /tmp/sync_pass.sql \
+            "${EC2_USER}@${EC2_HOST}:/tmp/sync_pass.sql"
+          ssh -i ~/.ssh/id_rsa $SSH_OPTS "${EC2_USER}@${EC2_HOST}" \
             "sudo -u postgres psql -f /tmp/sync_pass.sql && rm /tmp/sync_pass.sql && echo DB_PASS_SYNCED"
 
           # Buoc 2: Swap JAR + restart service
-          ssh -o StrictHostKeyChecking=no \
-              ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} bash -s << 'ENDSSH'
+          ssh -i ~/.ssh/id_rsa $SSH_OPTS "${EC2_USER}@${EC2_HOST}" bash -s << 'ENDSSH'
             set -e
 
             echo "=== Cài service file ==="
@@ -317,18 +347,19 @@ jobs:
       # ── Deploy Frontend ─────────────────────────────────────────────────────
       - name: 📤 Upload Frontend lên EC2
         if: needs.detect-changes.outputs.frontend == 'true'
+        timeout-minutes: 5
         run: |
-          ssh -o StrictHostKeyChecking=no \
-              ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
+          ssh -i ~/.ssh/id_rsa $SSH_OPTS \
+              "${EC2_USER}@${EC2_HOST}" \
               "sudo mkdir -p ${{ env.WEB_DIR }} && sudo chown -R ubuntu:ubuntu ${{ env.WEB_DIR }}"
 
           rsync -avz --delete \
-            -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa" \
+            -e "ssh -i ~/.ssh/id_rsa $SSH_OPTS" \
             ./artifacts/frontend/ \
-            ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ env.WEB_DIR }}/
+            "${EC2_USER}@${EC2_HOST}:${{ env.WEB_DIR }}/"
 
-          ssh -o StrictHostKeyChecking=no \
-              ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
+          ssh -i ~/.ssh/id_rsa $SSH_OPTS \
+              "${EC2_USER}@${EC2_HOST}" \
               "sudo chown -R www-data:www-data ${{ env.WEB_DIR }} && \
                sudo chmod -R 755 ${{ env.WEB_DIR }} && \
                sudo systemctl reload nginx && \
@@ -336,25 +367,27 @@ jobs:
 
       # ── Health Check ────────────────────────────────────────────────────────
       - name: 🏥 Health Check
+        timeout-minutes: 2
         run: |
           sleep 5
           echo "=== Backend health check ==="
-          HTTP=$(curl -sf -o /dev/null -w "%{http_code}" \
-            http://${{ secrets.EC2_HOST }}/api/actuator/health || echo "000")
+          HTTP=$(curl --max-time 20 -sf -o /dev/null -w "%{http_code}" \
+            "http://${EC2_HOST}/api/actuator/health" || echo "000")
           echo "HTTP Status: $HTTP"
           [ "$HTTP" = "200" ] && echo "✅ Backend OK" || echo "⚠️ Backend: $HTTP"
 
           echo "=== Frontend check ==="
-          HTTP_FE=$(curl -sf -o /dev/null -w "%{http_code}" \
-            http://${{ secrets.EC2_HOST }}/ || echo "000")
+          HTTP_FE=$(curl --max-time 20 -sf -o /dev/null -w "%{http_code}" \
+            "http://${EC2_HOST}/" || echo "000")
           echo "HTTP Status: $HTTP_FE"
           [ "$HTTP_FE" = "200" ] && echo "✅ Frontend OK" || echo "⚠️ Frontend: $HTTP_FE"
 
       - name: 📋 Xem logs sau deploy
         if: always()
+        timeout-minutes: 1
         run: |
-          ssh -o StrictHostKeyChecking=no \
-              ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} \
+          ssh -i ~/.ssh/id_rsa $SSH_OPTS \
+              "${EC2_USER}@${EC2_HOST}" \
               "sudo journalctl -u nhadanshop -n 30 --no-pager" || true
 
       - name: 🎉 Deploy Summary
@@ -362,7 +395,7 @@ jobs:
         run: |
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  ✅ Deploy thành công!"
-          echo "  🌐 URL   : http://${{ secrets.EC2_HOST }}"
+          echo "  🌐 URL   : http://${EC2_HOST}"
           echo "  🗄️ DB    : PostgreSQL localhost:5432 (EC2)"
           echo "  📅 Time  : $(date '+%Y-%m-%d %H:%M:%S UTC')"
           echo "  💰 Chi phí: ~\$2-3/tháng (không có RDS)"
