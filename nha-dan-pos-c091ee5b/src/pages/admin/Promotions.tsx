@@ -8,11 +8,14 @@ import { useService } from "@/hooks/useService";
 import { formatDate } from "@/lib/format";
 import {
   type Promotion,
+  type PromotionEffectiveStatus,
   type PromotionType,
+  PROMOTION_EFFECTIVE_STATUS_LABELS,
   PROMOTION_TYPE_LABELS,
   makeEmptyPromotion,
   formatPromotionSummary,
   formatScope,
+  getPromotionEffectiveStatus,
 } from "@/lib/promotions";
 import { PromotionFormShell } from "@/components/promotions/PromotionFormShell";
 import { TablePagination } from "@/components/shared/TablePagination";
@@ -28,12 +31,19 @@ const TYPE_ICON_BG: Record<PromotionType, string> = {
   "free-shipping": "bg-muted text-foreground",
 };
 
+const STATUS_BADGE: Record<PromotionEffectiveStatus, { status: "active" | "inactive" | "pending" | "expired"; label: string }> = {
+  running: { status: "active", label: PROMOTION_EFFECTIVE_STATUS_LABELS.running },
+  scheduled: { status: "pending", label: PROMOTION_EFFECTIVE_STATUS_LABELS.scheduled },
+  expired: { status: "expired", label: PROMOTION_EFFECTIVE_STATUS_LABELS.expired },
+  inactive: { status: "inactive", label: PROMOTION_EFFECTIVE_STATUS_LABELS.inactive },
+};
+
 export default function AdminPromotions() {
   const [promoList, setPromoList] = useState<Promotion[]>([]);
   const [apiError, setApiError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState<string | null>(null);
+  const [filterStatus, setFilterStatus] = useState<PromotionEffectiveStatus | null>(null);
   const [filterType, setFilterType] = useState<PromotionType | null>(null);
   const [editing, setEditing] = useState<Promotion | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -52,7 +62,7 @@ export default function AdminPromotions() {
       page,
       pageSize,
       query: search || undefined,
-      active: filterStatus === null ? undefined : filterStatus === "active",
+      status: filterStatus ?? undefined,
       kinds: filterType ? [filterType] : undefined,
     })
       .then((page) => {
@@ -151,7 +161,9 @@ export default function AdminPromotions() {
         filters={
           <>
             <FilterChip label="Tất cả" active={!filterStatus && !filterType} onClick={() => { setPage(1); setFilterStatus(null); setFilterType(null); }} />
-            <FilterChip label="Đang chạy" active={filterStatus === "active"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "active" ? null : "active"); }} />
+            <FilterChip label="Đang chạy" active={filterStatus === "running"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "running" ? null : "running"); }} />
+            <FilterChip label="Sắp diễn ra" active={filterStatus === "scheduled"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "scheduled" ? null : "scheduled"); }} />
+            <FilterChip label="Đã hết hạn" active={filterStatus === "expired"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "expired" ? null : "expired"); }} />
             <FilterChip label="Tạm dừng" active={filterStatus === "inactive"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "inactive" ? null : "inactive"); }} />
             <span className="w-px h-5 bg-border mx-1" />
             {(Object.entries(PROMOTION_TYPE_LABELS) as [PromotionType, string][]).map(([k, label]) => (
@@ -180,13 +192,15 @@ export default function AdminPromotions() {
           {promoList.map((p) => {
             const summary = formatPromotionSummary(p);
             const scopeText = formatScope(p, { categoryNames });
+            const effectiveStatus = getPromotionEffectiveStatus(p);
+            const badge = STATUS_BADGE[effectiveStatus];
             return (
               <div key={p.id} className="bg-card rounded-lg border p-4 hover:shadow-sm transition-shadow">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <h3 className="font-medium text-sm">{p.name}</h3>
-                      <StatusBadge status={p.active ? "active" : "inactive"} />
+                      <StatusBadge status={badge.status} label={badge.label} />
                       <span className={`inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-full ${TYPE_ICON_BG[p.type]}`}>
                         {PROMOTION_TYPE_LABELS[p.type]}
                       </span>

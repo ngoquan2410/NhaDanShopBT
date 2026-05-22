@@ -37,6 +37,7 @@ import { AddressSelect, type AddressSelectValue } from "@/components/shared/Addr
 import { AddressAutocomplete, type GoongResolvedAddress, type FallbackReason, clearSessionFallback } from "@/components/shared/AddressAutocomplete";
 import { useAuth } from "@/lib/admin-auth";
 import { accountApi, type CustomerPointsSummary } from "@/services/account/accountApi";
+import { formatShippingZoneLabel } from "@/lib/shippingZoneLabel";
 
 const paymentMethods = [
   { id: "cash_on_delivery", label: "Tiền mặt khi nhận (COD)", icon: Banknote, desc: "Tạo đơn chờ — không lập hóa đơn cục bộ; admin xác nhận & xuất hóa đơn backend" },
@@ -1069,7 +1070,7 @@ function Row({ label, value, dataTestId }: { label: string; value: React.ReactNo
   );
 }
 
-function ShippingBlock({
+export function ShippingBlock({
   quote,
   loading,
   onRetry,
@@ -1162,7 +1163,7 @@ function ShippingBlock({
       <div className="mt-4 p-3 rounded-xl bg-success-soft text-xs text-success flex items-start gap-2">
         <Truck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
         <span>
-          {quote.zoneCode ? <>Khu vực <b>{quote.zoneCode}</b> · </> : null}
+          {quote.zoneCode ? <>Khu vực <b>{formatShippingZoneLabel(quote.zoneCode)}</b> · </> : null}
           {eta ? <>Dự kiến giao trong <b>{eta.min}–{eta.max} ngày</b> · </> : null}
           {quote.fee === 0 ? <b>Miễn phí giao hàng</b> : <>Phí: <b>{formatVND(quote.fee ?? 0)}</b></>}
         </span>

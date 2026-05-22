@@ -927,6 +927,12 @@ public class InvoiceService {
         return DtoMapper.toResponse(inv, resolvePendingOrderCode(inv.getPendingOrderId()));
     }
 
+    public SalesInvoiceResponse getInvoiceForCustomer(Long id, Long customerId) {
+        SalesInvoice inv = invoiceRepo.findByIdAndCustomerIdForResponse(id, customerId)
+                .orElseThrow(() -> new EntityNotFoundException("Khong tim thay hoa don ID: " + id));
+        return DtoMapper.toResponse(inv, resolvePendingOrderCode(inv.getPendingOrderId()));
+    }
+
     private String resolvePendingOrderCode(Long pendingOrderId) {
         if (pendingOrderId == null) {
             return null;

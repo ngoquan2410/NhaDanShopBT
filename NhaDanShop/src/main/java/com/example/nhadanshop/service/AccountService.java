@@ -25,6 +25,7 @@ public class AccountService {
     private final CustomerRepository customerRepository;
     private final SalesInvoiceRepository salesInvoiceRepository;
     private final CustomerLoyaltyService loyaltyService;
+    private final InvoiceService invoiceService;
 
     @Transactional
     public Customer ensureLinkedCustomer(String username) {
@@ -70,6 +71,12 @@ public class AccountService {
     public Page<AccountOrderResponse> orders(String username, Pageable pageable) {
         Customer c = ensureLinkedCustomer(username);
         return salesInvoiceRepository.findByCustomerIdOrderByInvoiceDateDesc(c.getId(), pageable).map(this::toOrder);
+    }
+
+    @Transactional
+    public SalesInvoiceResponse orderDetail(String username, Long invoiceId) {
+        Customer c = ensureLinkedCustomer(username);
+        return invoiceService.getInvoiceForCustomer(invoiceId, c.getId());
     }
 
     @Transactional

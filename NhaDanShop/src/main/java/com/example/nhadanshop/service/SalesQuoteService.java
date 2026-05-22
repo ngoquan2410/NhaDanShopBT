@@ -71,7 +71,7 @@ public class SalesQuoteService {
             Promotion loaded = promotionRepository.findByIdWithDetails(req.promotionId()).orElse(null);
             if (loaded == null) {
                 selectedPromotionInvalidReason = "Chương trình khuyến mãi không tồn tại";
-            } else if (!loaded.isCurrentlyActive()) {
+            } else if (!isPromotionCurrentlyActive(loaded)) {
                 selectedPromotionInvalidReason = "Chương trình khuyến mãi không còn hiệu lực";
             } else {
                 try {
@@ -484,6 +484,13 @@ public class SalesQuoteService {
     private Long parseNullableLong(String value) {
         if (value == null || value.isBlank()) return null;
         try { return Long.parseLong(value); } catch (NumberFormatException ex) { return null; }
+    }
+
+    private boolean isPromotionCurrentlyActive(Promotion promo) {
+        LocalDateTime now = LocalDateTime.now(businessClock);
+        return Boolean.TRUE.equals(promo.getActive())
+                && !now.isBefore(promo.getStartDate())
+                && !now.isAfter(promo.getEndDate());
     }
 
     private void assertQuoteSupportedPromotionType(Promotion promo) {

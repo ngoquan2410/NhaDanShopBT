@@ -10,6 +10,7 @@ import {
   fetchAdminPromotionPage,
   updateAdminPromotion,
 } from "./adminPromotionsApi";
+import { getPromotionEffectiveStatus } from "@/lib/promotions";
 import type { Promotion } from "@/lib/promotions";
 
 vi.mock("@/services/auth/adminApi", () => ({
@@ -42,13 +43,22 @@ describe("adminPromotionsApi", () => {
       startDate: "2026-04-01T00:00:00",
       endDate: "2026-04-30T23:59:59",
       active: true,
+      effectiveStatus: "expired",
       appliesTo: "ALL",
       categoryIds: [],
       productIds: [],
     });
 
     const ui = adminPromotionRowToUi(row);
-    expect(ui).toMatchObject({ id: "5", type: "free-shipping", minOrder: 200000, maxShippingDiscount: 30000 });
+    expect(ui).toMatchObject({ id: "5", type: "free-shipping", minOrder: 200000, maxShippingDiscount: 30000, effectiveStatus: "expired" });
+  });
+
+  it("derives effective statuses separately from the admin active flag", () => {
+    const now = new Date("2026-05-21T12:00:00+07:00");
+    expect(getPromotionEffectiveStatus({ active: true, startDate: "2026-05-01", endDate: "2026-05-16" }, now)).toBe("expired");
+    expect(getPromotionEffectiveStatus({ active: true, startDate: "2026-05-01", endDate: "2026-05-31" }, now)).toBe("running");
+    expect(getPromotionEffectiveStatus({ active: true, startDate: "2026-06-01", endDate: "2026-06-30" }, now)).toBe("scheduled");
+    expect(getPromotionEffectiveStatus({ active: false, startDate: "2026-05-01", endDate: "2026-05-31" }, now)).toBe("inactive");
   });
 
   it("builds backend upsert payload for product-scoped percent promotion", () => {
@@ -99,6 +109,14 @@ describe("adminPromotionsApi", () => {
     });
     expect(adminApi.adminFetchJson).toHaveBeenCalledWith(
       "/api/promotions?page=0&size=20&sort=name%2Casc&search=flash+sale&status=active&type=BUY_X_GET_Y&includeArchived=true",
+    );
+  });
+
+  it("sends effective status query params for admin promotion filters", async () => {
+    vi.mocked(adminApi.adminFetchJson).mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, number: 0, size: 20 });
+    await fetchAdminPromotionPage({ page: 0, size: 20, status: "expired" });
+    expect(adminApi.adminFetchJson).toHaveBeenCalledWith(
+      "/api/promotions?page=0&size=20&sort=createdAt%2Cdesc&status=expired",
     );
   });
 

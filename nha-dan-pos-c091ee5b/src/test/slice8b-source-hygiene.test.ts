@@ -35,6 +35,38 @@ describe("Slice8B honesty — báo cáo & storefront combo", () => {
     expect(t).toContain("ngưng hoạt động");
   });
 
+  it("RevenueReport category chart is multi-series LineChart, not AreaChart/Area", () => {
+    const t = read("pages/admin/RevenueReport.tsx");
+    const start = t.indexOf("Doanh thu theo danh mục");
+    const block = t.slice(start, t.indexOf("Chi tiết theo", start));
+    expect(block).toContain("<LineChart");
+    expect(block).toContain("<Line");
+    expect(block).toContain("<Legend");
+    expect(block).not.toContain("<AreaChart");
+    expect(block).not.toContain("<Area\n");
+    expect(block).toContain("Dữ liệu cũ chưa có snapshot danh mục");
+  });
+
+  it("Admin Promotions renders derived effective statuses instead of raw active=true", () => {
+    const t = read("pages/admin/Promotions.tsx");
+    expect(t).toContain("getPromotionEffectiveStatus");
+    expect(t).toContain("Đang chạy");
+    expect(t).toContain("Sắp diễn ra");
+    expect(t).toContain("Đã hết hạn");
+    expect(t).toContain("Tạm dừng");
+    expect(t).toContain('status: filterStatus ?? undefined');
+    expect(t).not.toContain('StatusBadge status={p.active ? "active" : "inactive"}');
+  });
+
+  it("Storefront shipping notices format technical LOCAL_MO_CAY zone code", () => {
+    const checkout = read("pages/storefront/Checkout.tsx");
+    const pending = read("pages/storefront/PendingPayment.tsx");
+    const helper = read("lib/shippingZoneLabel.ts");
+    expect(helper).toContain('if (raw === "LOCAL_MO_CAY") return "Mỏ Cày"');
+    expect(checkout).toContain("formatShippingZoneLabel(quote.zoneCode)");
+    expect(pending).toContain("formatShippingZoneLabel(order.shippingQuoteSnapshot.zoneCode)");
+  });
+
   it("GoodsReceiptCreate không có nhánh offline/success PN giả sau khi bỏ JWT", () => {
     const t = read("pages/admin/GoodsReceiptCreate.tsx");
     expect(t).not.toMatch(/\boffline\b/i);

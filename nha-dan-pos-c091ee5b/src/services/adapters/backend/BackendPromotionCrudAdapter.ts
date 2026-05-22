@@ -38,9 +38,9 @@ export class BackendPromotionCrudAdapter implements PromotionCrudService {
       page: Math.max(0, page - 1),
       size: pageSize,
       search: params?.query,
-      status: params?.active === undefined ? undefined : params.active ? "active" : "inactive",
+      status: params?.status ?? (params?.active === undefined ? undefined : params.active ? "active" : "inactive"),
       type: backendType,
-      includeArchived: params?.active === false,
+      includeArchived: params?.status != null || params?.active !== true,
       sort: "createdAt,desc",
     });
     return {

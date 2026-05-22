@@ -35,5 +35,16 @@ describe("BackendPromotionCrudAdapter list filters", () => {
       }),
     );
   });
+
+  it("passes effective status filters through to backend", async () => {
+    const adapter = new BackendPromotionCrudAdapter();
+    await adapter.list({ status: "expired", page: 1, pageSize: 20 });
+    expect(promotionsApi.fetchAdminPromotionPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "expired",
+        includeArchived: true,
+      }),
+    );
+  });
 });
 

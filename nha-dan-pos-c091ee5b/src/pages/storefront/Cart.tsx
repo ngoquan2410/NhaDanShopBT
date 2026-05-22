@@ -45,6 +45,10 @@ function isGiftPromotionType(type: string | null | undefined): boolean {
   return normalized === "buy_x_get_y" || normalized === "gift" || normalized === "quantity_gift";
 }
 
+function isFreeShippingPromotion(type: string | null | undefined): boolean {
+  return String(type ?? "").trim().toLowerCase().replace(/-/g, "_") === "free_shipping";
+}
+
 export default function CartPage() {
   const items = useCart();
   const persistedPromoId = useSelectedPromotionId();
@@ -88,7 +92,7 @@ export default function CartPage() {
   const pendingAddressFreeShippingPromos = useMemo(
     () =>
       allPromos.filter((p) =>
-        String(p.type).toLowerCase().replace(/-/g, "_") === "free_shipping" &&
+        isFreeShippingPromotion(p.type) &&
         !p.eligible &&
         (
           p.progress?.basis === "SHIPPING_ADDRESS" ||
@@ -96,12 +100,20 @@ export default function CartPage() {
         )),
     [allPromos],
   );
-  const selectablePromos = useMemo(
-    () => allPromos.filter((p) => p.eligible).concat(
-      pendingAddressFreeShippingPromos.filter((p) => !allPromos.some((x) => x.promotionId === p.promotionId && x.eligible)),
-    ),
-    [allPromos, pendingAddressFreeShippingPromos],
-  );
+  const selectedPromoCandidate: EvaluatedPromotion | null = useMemo(() => {
+    if (persistedPromoId != null) {
+      return allPromos.find((p) => p.promotionId === persistedPromoId) ?? null;
+    }
+    return null;
+  }, [persistedPromoId, allPromos]);
+  const manualSelectionActive = persistedPromoMode === "manual" && !!persistedPromoId;
+  const selectablePromos = useMemo(() => {
+    const byId = new Map<string, EvaluatedPromotion>();
+    for (const promo of allPromos.filter((p) => p.eligible)) byId.set(promo.promotionId, promo);
+    for (const promo of pendingAddressFreeShippingPromos) byId.set(promo.promotionId, promo);
+    if (manualSelectionActive && selectedPromoCandidate) byId.set(selectedPromoCandidate.promotionId, selectedPromoCandidate);
+    return [...byId.values()];
+  }, [allPromos, pendingAddressFreeShippingPromos, manualSelectionActive, selectedPromoCandidate]);
   // Default to the first eligible (best by value — adapter sorts) if user hasn't picked.
   const sortedEligible = useMemo(
     () => [...selectablePromos].sort(
@@ -111,19 +123,13 @@ export default function CartPage() {
     ),
     [selectablePromos],
   );
-  const selectedPromoCandidate: EvaluatedPromotion | null = useMemo(() => {
-    if (persistedPromoId != null) {
-      return allPromos.find((p) => p.promotionId === persistedPromoId) ?? null;
-    }
-    return null;
-  }, [persistedPromoId, allPromos]);
   const autoPromo: EvaluatedPromotion | null = useMemo(() => sortedEligible[0] ?? null, [sortedEligible]);
   const appliedPromo: EvaluatedPromotion | null = useMemo(() => {
-    if (selectedPromoCandidate?.eligible) {
-      return selectedPromoCandidate;
+    if (manualSelectionActive) {
+      return selectedPromoCandidate?.eligible ? selectedPromoCandidate : null;
     }
     return autoPromo;
-  }, [selectedPromoCandidate, autoPromo]);
+  }, [manualSelectionActive, selectedPromoCandidate, autoPromo]);
 
   useEffect(() => {
     if (promotionEvaluationStatus !== "loaded") return;
@@ -177,7 +183,8 @@ export default function CartPage() {
   const promoDiscount = appliedPromo?.type !== "free_shipping" ? (appliedPromo?.discountAmount ?? 0) : 0;
   const promoGiftLines = appliedPromo?.giftLines ?? [];
   const promoIsGift = isGiftPromotionType(appliedPromo?.type);
-  const promoShipFree = appliedPromo?.type === "free_shipping";
+  const promoShipFree = isFreeShippingPromotion(appliedPromo?.type);
+  const selectedPendingFreeShipping = manualSelectionActive && selectedPromoCandidate && isFreeShippingPromotion(selectedPromoCandidate.type) && !selectedPromoCandidate.eligible;
   const total = Math.max(0, subtotal - promoDiscount);
   const hasStockIssue = items.some((i) => {
     const cap = getCartQuantityCap(i);
@@ -241,11 +248,11 @@ export default function CartPage() {
                   <Gift className="h-4 w-4" /> Khuyến mãi áp dụng được ({sortedEligible.length})
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Hệ thống tự chọn ưu đãi có lợi nhất. Bạn có thể đổi sang khuyến mãi khác phù hợp hơn.
+                  Hệ thống tự chọn ưu đãi có lợi nhất ở chế độ tự động. Chọn thủ công sẽ giữ đúng khuyến mãi bạn muốn.
                 </p>
                 <div className="space-y-1.5">
                   {sortedEligible.map((p) => {
-                    const selected = appliedPromo?.promotionId === p.promotionId;
+                    const selected = manualSelectionActive ? persistedPromoId === p.promotionId : appliedPromo?.promotionId === p.promotionId;
                     return (
                       <button
                         key={p.promotionId}
@@ -278,15 +285,18 @@ export default function CartPage() {
                               </span>
                               {p.ruleSummary}
                             </p>
-                            {p.type === "free_shipping" && (
+                            {isFreeShippingPromotion(p.type) && (
                               <p className="text-[11px] text-muted-foreground mt-0.5">
                                 Phí ship cuối cùng được xác nhận sau khi nhập địa chỉ giao hàng.
                               </p>
                             )}
-                            {String(p.type).toLowerCase().replace(/-/g, "_") === "free_shipping" && !p.eligible && (
+                            {isFreeShippingPromotion(p.type) && !p.eligible && (
                               <span data-testid={`cart-promo-needs-address-${p.promotionId}`} className="inline-block mt-1 text-[10px] font-semibold rounded-full bg-warning-soft text-warning px-2 py-0.5">
                                 Cần địa chỉ giao hàng
                               </span>
+                            )}
+                            {!p.eligible && p.reasonIfIneligible && (
+                              <p className="text-[11px] text-warning mt-1">{p.reasonIfIneligible}</p>
                             )}
                             {p.giftLines.length > 0 && (
                               <p className="text-[11px] text-success mt-0.5">
@@ -305,9 +315,17 @@ export default function CartPage() {
             <div className="hidden" data-testid="cart-promo-selected-id">{persistedPromoId ?? ""}</div>
             <div className="hidden" data-testid="cart-promo-selected-mode">{persistedPromoMode}</div>
             <div className="hidden" data-testid="cart-promo-eval-status">{promotionEvaluationStatus}</div>
-            {persistedPromoId && selectedPromoCandidate && !selectedPromoCandidate.eligible && (
+            {manualSelectionActive && selectedPromoCandidate && !selectedPromoCandidate.eligible && (
               <div className="bg-warning-soft/40 border border-warning/40 rounded-2xl p-3 text-xs text-warning">
-                <b>Khuyến mãi đã chọn hiện chưa đủ điều kiện.</b> {selectedPromoCandidate.reasonIfIneligible ?? "Vui lòng cập nhật giỏ hoặc địa chỉ giao hàng."}
+                {selectedPendingFreeShipping ? (
+                  <>
+                    <b>Bạn đã chọn “{selectedPromoCandidate.name}”,</b> khuyến mãi này sẽ được xác nhận sau khi nhập địa chỉ giao hàng.
+                  </>
+                ) : (
+                  <>
+                    <b>Bạn đã chọn “{selectedPromoCandidate.name}”, khuyến mãi này hiện chưa đủ điều kiện.</b> {selectedPromoCandidate.reasonIfIneligible ?? "Vui lòng cập nhật giỏ hoặc địa chỉ giao hàng."}
+                  </>
+                )}
               </div>
             )}
 
@@ -350,7 +368,7 @@ export default function CartPage() {
                               {p.ruleSummary}
                             </p>
                           </div>
-                          {p.type === "free_shipping" && (
+                          {isFreeShippingPromotion(p.type) && (
                             <span data-testid={`cart-promo-needs-address-${p.promotionId}`} className="text-[10px] font-semibold rounded-full bg-warning-soft text-warning px-2 py-0.5 shrink-0">
                               Cần địa chỉ giao hàng
                             </span>
@@ -437,6 +455,12 @@ export default function CartPage() {
                   <span className="text-muted-foreground">Phí giao hàng</span>
                   <span className="font-semibold text-right text-muted-foreground">Tính ở bước thanh toán</span>
                 </div>
+                {selectedPendingFreeShipping && selectedPromoCandidate && (
+                  <div data-testid="cart-summary-selected-pending-freeship" className="rounded-lg bg-info-soft/50 px-3 py-2 text-xs text-info space-y-0.5">
+                    <p className="font-semibold">Khuyến mãi đã chọn: {selectedPromoCandidate.name}</p>
+                    <p>Sẽ xác nhận miễn phí giao hàng ở bước thanh toán sau khi có địa chỉ.</p>
+                  </div>
+                )}
                 {promoShipFree && (
                   <p className="text-[11px] text-success">
                     Miễn phí ship sẽ được xác nhận sau khi nhập địa chỉ giao hàng.

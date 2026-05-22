@@ -16,6 +16,7 @@ public record PromotionResponse(
         LocalDateTime endDate,
         Boolean active,
         boolean currentlyActive,
+        String effectiveStatus,
         String appliesTo,
         String minOrderScope,
         List<Long> categoryIds,
@@ -65,7 +66,7 @@ public record PromotionResponse(
             LocalDateTime updatedAt
     ) {
         this(id, name, description, type, discountValue, minOrderValue, maxDiscount,
-                startDate, endDate, active, currentlyActive, appliesTo, minOrderScope,
+                startDate, endDate, active, currentlyActive, effectiveStatus(active, startDate, endDate), appliesTo, minOrderScope,
                 categoryIds, categoryNames, productIds, productNames,
                 buyQty, getProductId, getProductName, getQty,
                 minBuyQty, maxBuyQty,
@@ -73,5 +74,13 @@ public record PromotionResponse(
                 true,
                 "QUANTITY_GIFT".equals(type) ? maxBuyQty : null,
                 createdAt, updatedAt);
+    }
+
+    private static String effectiveStatus(Boolean active, LocalDateTime startDate, LocalDateTime endDate) {
+        LocalDateTime now = LocalDateTime.now();
+        if (!Boolean.TRUE.equals(active)) return "inactive";
+        if (startDate != null && now.isBefore(startDate)) return "scheduled";
+        if (endDate != null && now.isAfter(endDate)) return "expired";
+        return "running";
     }
 }

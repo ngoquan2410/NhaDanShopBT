@@ -89,6 +89,13 @@ public interface SalesInvoiceRepository extends JpaRepository<SalesInvoice, Long
     @Query("SELECT i FROM SalesInvoice i WHERE i.id = :id")
     Optional<SalesInvoice> findByIdForResponse(@Param("id") Long id);
 
+    @EntityGraph(type = EntityGraphType.FETCH, attributePaths = {
+            "createdBy", "customer",
+            "items", "items.product", "items.variant"
+    })
+    @Query("SELECT i FROM SalesInvoice i WHERE i.id = :id AND i.customer.id = :customerId")
+    Optional<SalesInvoice> findByIdAndCustomerIdForResponse(@Param("id") Long id, @Param("customerId") Long customerId);
+
     @Query("""
             SELECT COALESCE(SUM(i.totalAmount), 0)
             FROM SalesInvoice i

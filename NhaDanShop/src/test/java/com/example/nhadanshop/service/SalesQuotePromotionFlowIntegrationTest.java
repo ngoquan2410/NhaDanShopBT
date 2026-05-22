@@ -217,8 +217,10 @@ class SalesQuotePromotionFlowIntegrationTest {
         p.setType(type);
         p.setDiscountValue(discount);
         p.setMinOrderValue(BigDecimal.ZERO);
-        p.setStartDate(LocalDateTime.now().minusDays(1));
-        p.setEndDate(LocalDateTime.now().plusDays(5));
+        // Slice7CommercialFlowIntegrationTest.TestCfg fixes businessClock at 2026-04-29T17:00+07.
+        // Keep quote promotion fixtures active relative to that business clock.
+        p.setStartDate(LocalDateTime.of(2026, 4, 28, 0, 0));
+        p.setEndDate(LocalDateTime.of(2026, 5, 4, 23, 59, 59));
         p.setActive(true);
         p.setAppliesTo("ALL");
         return promotionRepository.save(p);

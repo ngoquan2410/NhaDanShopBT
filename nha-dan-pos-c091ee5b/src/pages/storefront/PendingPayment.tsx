@@ -13,6 +13,7 @@ import type {
 import { toast } from "sonner";
 import { cartActions } from "@/lib/cart";
 import { accountApi } from "@/services/account/accountApi";
+import { formatShippingZoneLabel } from "@/lib/shippingZoneLabel";
 
 const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   cash: "Tiền mặt",
@@ -666,7 +667,7 @@ export default function PendingPaymentPage() {
           {order.shippingQuoteSnapshot?.etaDays && (
             <p className="text-[11px] text-muted-foreground mt-1">
               Dự kiến giao trong {order.shippingQuoteSnapshot.etaDays.min}-{order.shippingQuoteSnapshot.etaDays.max} ngày
-              {order.shippingQuoteSnapshot.zoneCode ? ` · ${order.shippingQuoteSnapshot.zoneCode}` : ""}
+              {order.shippingQuoteSnapshot.zoneCode ? ` · ${formatShippingZoneLabel(order.shippingQuoteSnapshot.zoneCode)}` : ""}
             </p>
           )}
         </div>

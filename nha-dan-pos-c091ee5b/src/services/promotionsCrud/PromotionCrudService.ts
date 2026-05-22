@@ -4,11 +4,13 @@
 
 import type { ListQuery, PagedResult } from "@/services/types";
 import type { Promotion } from "@/lib/promotions";
+import type { PromotionEffectiveStatus } from "@/lib/promotions";
 
 /** Backend-friendly list params. `kinds` accepts a multi-select of promotion
  *  types so the BE can filter without parsing CSV. */
 export interface PromotionListParams extends ListQuery {
   active?: boolean;
+  status?: PromotionEffectiveStatus;
   kinds?: string[];
   dateRange?: { from?: string; to?: string };
 }

@@ -1,4 +1,4 @@
-import type { Promotion, PromotionScope, PromotionType } from "@/lib/promotions";
+import type { Promotion, PromotionBase, PromotionEffectiveStatus, PromotionScope, PromotionType } from "@/lib/promotions";
 import { adminFetchJson } from "@/services/auth/adminApi";
 
 export type BackendPromotionType =
@@ -36,6 +36,7 @@ export type AdminPromotionRow = {
   endDate: string;
   active: boolean;
   currentlyActive: boolean;
+  effectiveStatus?: PromotionEffectiveStatus;
   appliesTo: "ALL" | "CATEGORY" | "PRODUCT";
   minOrderScope?: "ELIGIBLE_ITEMS" | "WHOLE_ORDER";
   categoryIds: number[];
@@ -142,6 +143,9 @@ export function parseAdminPromotionRow(raw: Record<string, unknown>): AdminPromo
     endDate: String(raw.endDate ?? ""),
     active: raw.active !== false,
     currentlyActive: Boolean(raw.currentlyActive),
+    effectiveStatus: ["running", "scheduled", "expired", "inactive"].includes(String(raw.effectiveStatus ?? ""))
+      ? String(raw.effectiveStatus) as PromotionEffectiveStatus
+      : undefined,
     appliesTo: String(raw.appliesTo ?? "ALL") as AdminPromotionRow["appliesTo"],
     minOrderScope: String(raw.minOrderScope ?? "ELIGIBLE_ITEMS") as AdminPromotionRow["minOrderScope"],
     categoryIds: numArray(raw.categoryIds),
@@ -163,22 +167,25 @@ export function parseAdminPromotionRow(raw: Record<string, unknown>): AdminPromo
 }
 
 export function adminPromotionRowToUi(row: AdminPromotionRow): Promotion {
-  const base = {
+  const minOrderBasis: "whole-order" | "scoped" = row.minOrderScope === "WHOLE_ORDER" ? "whole-order" : "scoped";
+  const base: PromotionBase = {
     id: String(row.id),
     name: row.name,
     description: row.description ?? "",
     active: row.active,
+    effectiveStatus: row.effectiveStatus,
     startDate: localDate(row.startDate),
     endDate: localDate(row.endDate),
     scope: parseScope(row),
-    minOrderBasis: row.minOrderScope === "WHOLE_ORDER" ? "whole-order" : "scoped",
+    minOrderBasis,
   };
   switch (BACKEND_TO_UI_PROMOTION_TYPE[row.type]) {
     case "fixed":
-      return { ...base, type: "fixed", amount: row.discountValue, minOrder: row.minOrderValue || undefined };
+      return { ...base, minOrderBasis, type: "fixed", amount: row.discountValue, minOrder: row.minOrderValue || undefined };
     case "buy-x-get-y":
       return {
         ...base,
+        minOrderBasis,
         type: "buy-x-get-y",
         buyItems:
           row.buyItems.length > 0
@@ -206,6 +213,7 @@ export function adminPromotionRowToUi(row: AdminPromotionRow): Promotion {
           : "buy-quantity";
       return {
         ...base,
+        minOrderBasis,
         type: "gift",
         triggerType,
         triggerValue: triggerType === "min-order" ? row.minOrderValue : row.minBuyQty ?? 1,
@@ -216,10 +224,10 @@ export function adminPromotionRowToUi(row: AdminPromotionRow): Promotion {
         repeatable: row.repeatable ?? false,
       };
     case "free-shipping":
-      return { ...base, type: "free-shipping", minOrder: row.minOrderValue || undefined, maxShippingDiscount: row.maxDiscount || undefined };
+      return { ...base, minOrderBasis, type: "free-shipping", minOrder: row.minOrderValue || undefined, maxShippingDiscount: row.maxDiscount || undefined };
     case "percent":
     default:
-      return { ...base, type: "percent", percent: row.discountValue, maxDiscount: row.maxDiscount || undefined, minOrder: row.minOrderValue || undefined };
+      return { ...base, minOrderBasis, type: "percent", percent: row.discountValue, maxDiscount: row.maxDiscount || undefined, minOrder: row.minOrderValue || undefined };
   }
 }
 
@@ -297,7 +305,8 @@ export async function fetchAdminPromotionPage(params?: {
   page?: number;
   size?: number;
   search?: string;
-  status?: "active" | "inactive" | "archived";
+  /** `active`/`inactive` are legacy admin-enable filters; running/scheduled/expired/inactive are effective-status filters. */
+  status?: "running" | "scheduled" | "expired" | "inactive" | "active" | "archived";
   type?: BackendPromotionType;
   includeArchived?: boolean;
   sort?: string;

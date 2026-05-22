@@ -16,6 +16,8 @@ export interface PromotionBase {
   name: string;
   description: string;
   active: boolean;
+  /** Derived backend/admin status; distinct from `active`, which is only the enable/disable flag. */
+  effectiveStatus?: PromotionEffectiveStatus;
   startDate: string; // YYYY-MM-DD
   endDate: string;   // YYYY-MM-DD
   scope: PromotionScope;
@@ -86,6 +88,24 @@ export type Promotion =
   | FreeShippingPromotion;
 
 export type PromotionType = Promotion["type"];
+
+export type PromotionEffectiveStatus = "running" | "scheduled" | "expired" | "inactive";
+
+export const PROMOTION_EFFECTIVE_STATUS_LABELS: Record<PromotionEffectiveStatus, string> = {
+  running: "Đang chạy",
+  scheduled: "Sắp diễn ra",
+  expired: "Đã hết hạn",
+  inactive: "Tạm dừng",
+};
+
+export function getPromotionEffectiveStatus(p: Pick<PromotionBase, "active" | "startDate" | "endDate" | "effectiveStatus">, now = new Date()): PromotionEffectiveStatus {
+  if (p.effectiveStatus) return p.effectiveStatus;
+  if (!p.active) return "inactive";
+  const today = toLocalDateString(now);
+  if (p.startDate && today < p.startDate) return "scheduled";
+  if (p.endDate && today > p.endDate) return "expired";
+  return "running";
+}
 
 export const PROMOTION_TYPE_LABELS: Record<PromotionType, string> = {
   percent: "% giảm giá",

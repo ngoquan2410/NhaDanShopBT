@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 
 import jakarta.persistence.criteria.Predicate;
 import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -50,6 +51,7 @@ public class PromotionService {
     private final ProductRepository productRepo;
     private final SalesInvoiceRepository salesInvoiceRepository;
     private final PendingOrderRepository pendingOrderRepository;
+    private final Clock businessClock;
 
     // ─────────────────── CRUD ────────────────────────────────────────────────
 
@@ -103,7 +105,7 @@ public class PromotionService {
     }
 
     public List<PromotionResponse> listActive() {
-        List<Promotion> lightweight = promotionRepo.findCurrentlyActive(LocalDateTime.now());
+        List<Promotion> lightweight = promotionRepo.findCurrentlyActive(LocalDateTime.now(businessClock));
         if (lightweight.isEmpty()) {
             return List.of();
         }
@@ -279,7 +281,7 @@ public class PromotionService {
         return new PromotionResponse(
                 p.getId(), p.getName(), p.getDescription(), p.getType(),
                 p.getDiscountValue(), p.getMinOrderValue(), p.getMaxDiscount(),
-                p.getStartDate(), p.getEndDate(), p.getActive(), p.isCurrentlyActive(),
+                p.getStartDate(), p.getEndDate(), p.getActive(), isCurrentlyActive(p), effectiveStatus(p),
                 p.getAppliesTo(), p.getMinOrderScope() != null ? p.getMinOrderScope() : "ELIGIBLE_ITEMS",
                 catIds, catNames, prodIds, prodNames,
                 p.getBuyQty(), p.getGetProductId(), getProductName, p.getGetQty(),
@@ -321,7 +323,9 @@ public class PromotionService {
         }
         String lower = normalized.toLowerCase(Locale.ROOT);
         return switch (lower) {
-            case "active", "inactive", "archived" -> lower;
+            // Backward compatibility: active/inactive keep the old admin enable-flag meaning.
+            // New values below are effective statuses derived from active + start/end window.
+            case "active", "inactive", "running", "scheduled", "expired", "archived" -> lower;
             default -> throw new IllegalArgumentException("status không hợp lệ: " + input);
         };
     }
@@ -331,10 +335,11 @@ public class PromotionService {
             String status,
             String type,
             boolean includeArchived) {
+        LocalDateTime now = LocalDateTime.now(businessClock);
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
-            if (!includeArchived) {
-                // NOTE: current schema has no archived flag; preserve legacy behavior.
+            if (!includeArchived && status == null) {
+                // NOTE: current schema has no archived flag; preserve legacy default list as admin-enabled only.
                 predicates.add(cb.isTrue(root.get("active")));
             }
             if (type != null) {
@@ -343,10 +348,24 @@ public class PromotionService {
                         type.toUpperCase(Locale.ROOT)));
             }
             if (status != null) {
-                if ("active".equals(status)) {
-                    predicates.add(cb.isTrue(root.get("active")));
-                } else {
-                    predicates.add(cb.isFalse(root.get("active")));
+                switch (status) {
+                    case "active" -> predicates.add(cb.isTrue(root.get("active")));
+                    case "inactive" -> predicates.add(cb.isFalse(root.get("active")));
+                    case "running" -> {
+                        predicates.add(cb.isTrue(root.get("active")));
+                        predicates.add(cb.lessThanOrEqualTo(root.get("startDate"), now));
+                        predicates.add(cb.greaterThanOrEqualTo(root.get("endDate"), now));
+                    }
+                    case "scheduled" -> {
+                        predicates.add(cb.isTrue(root.get("active")));
+                        predicates.add(cb.greaterThan(root.get("startDate"), now));
+                    }
+                    case "expired" -> {
+                        predicates.add(cb.isTrue(root.get("active")));
+                        predicates.add(cb.lessThan(root.get("endDate"), now));
+                    }
+                    case "archived" -> predicates.add(cb.disjunction());
+                    default -> { }
                 }
             }
             if (search != null) {
@@ -358,5 +377,23 @@ public class PromotionService {
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
+    }
+
+    private boolean isCurrentlyActive(Promotion p) {
+        return "running".equals(effectiveStatus(p));
+    }
+
+    private String effectiveStatus(Promotion p) {
+        LocalDateTime now = LocalDateTime.now(businessClock);
+        if (!Boolean.TRUE.equals(p.getActive())) {
+            return "inactive";
+        }
+        if (p.getStartDate() != null && now.isBefore(p.getStartDate())) {
+            return "scheduled";
+        }
+        if (p.getEndDate() != null && now.isAfter(p.getEndDate())) {
+            return "expired";
+        }
+        return "running";
     }
 }

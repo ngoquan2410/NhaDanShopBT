@@ -22,6 +22,7 @@ const mockedState = vi.hoisted(() => {
   return {
     defaultCartLine,
     selectedPromotionId: "2",
+    selectedPromotionMode: "manual" as "manual" | "auto",
     evalResponse: [] as any[],
     /** Refreshed in `beforeEach` so Cart promo `useEffect([items])` re-runs when mocks change. */
     cartItems: [defaultCartLine()],
@@ -55,7 +56,7 @@ vi.mock("@/lib/cart", async () => {
     ...actual,
     useCart: () => mockedState.cartItems,
     useSelectedPromotionId: () => mockedState.selectedPromotionId,
-    useSelectedPromotionMode: () => "manual" as const,
+    useSelectedPromotionMode: () => mockedState.selectedPromotionMode,
     cartActions: { ...c, ...mockedState.cartSpy },
   };
 });
@@ -71,6 +72,7 @@ describe("Cart promo render flags", () => {
     vi.clearAllMocks();
     mockedState.cartItems = [mockedState.defaultCartLine()];
     mockedState.selectedPromotionId = "2";
+    mockedState.selectedPromotionMode = "manual";
     mockedState.evalResponse = [
       { promotionId: "1", name: "FS", type: "free_shipping", eligible: true, ruleSummary: "", reasonIfIneligible: "", discountAmount: 0, shippingDiscountAmount: 20000, voucherDiscountAmount: 0, affectedLines: [], giftLines: [] },
       { promotionId: "2", name: "Manual Invalid", type: "percent_discount", eligible: false, ruleSummary: "r", reasonIfIneligible: "not enough", discountAmount: 0, shippingDiscountAmount: 0, voucherDiscountAmount: 0, affectedLines: [], giftLines: [] },
@@ -101,11 +103,11 @@ describe("Cart promo render flags", () => {
     expect(screen.getByTestId("cart-promo-selected-id").textContent).toBe("2");
     expect(screen.getByTestId("cart-promo-selected-mode").textContent).toBe("manual");
     expect(mockedState.cartSpy.clearSelectedPromotion).not.toHaveBeenCalled();
-    expect(screen.getByText(/khuyến mãi đã chọn hiện chưa đủ điều kiện/i)).toBeTruthy();
+    expect(screen.getByText(/Bạn đã chọn “Manual Invalid”, khuyến mãi này hiện chưa đủ điều kiện/i)).toBeTruthy();
     expect(screen.queryByTestId("cart-summary-promotion-gifts")).toBeNull();
   });
 
-  it("ineligible manual selection does not apply stale gift/discount summary", async () => {
+  it("ineligible manual selection does not fallback to another eligible discount", async () => {
     mockedState.selectedPromotionId = "old-gift";
     mockedState.evalResponse = [
       {
@@ -139,7 +141,66 @@ describe("Cart promo render flags", () => {
     await waitFor(() => expect(screen.getByTestId("cart-promo-eval-status").textContent).toBe("loaded"));
     expect(screen.queryByText("Stale Gift")).toBeNull();
     expect(screen.queryByTestId("cart-summary-promotion-gifts")).toBeNull();
-    expect(screen.getByText(/khuyến mãi \(Auto Percent\)/i)).toBeTruthy();
+    expect(screen.queryByText(/khuyến mãi \(Auto Percent\)/i)).toBeNull();
+    const totalRow = screen.getByText("Tổng cộng").parentElement;
+    expect(totalRow?.textContent).toContain("100.000");
+  });
+
+  it("manual pending freeship remains selected, names the promo, and does not apply another eligible promo", async () => {
+    mockedState.selectedPromotionId = "free-300";
+    mockedState.selectedPromotionMode = "manual";
+    mockedState.cartItems = [{ ...mockedState.defaultCartLine(), qty: 3, lineSubtotal: 300000 }];
+    mockedState.evalResponse = [
+      {
+        promotionId: "free-300",
+        name: "Free ship cho toàn bộ đơn hàng từ 300k",
+        type: "free_shipping",
+        eligible: false,
+        ruleSummary: "Miễn phí ship cho đơn từ 300k",
+        reasonIfIneligible: "Cần đủ địa chỉ và phí vận chuyển để áp dụng miễn phí ship",
+        progress: { basis: "SHIPPING_ADDRESS" },
+        discountAmount: 0,
+        shippingDiscountAmount: 0,
+        voucherDiscountAmount: 0,
+        affectedLines: [],
+        giftLines: [],
+      },
+      {
+        promotionId: "salt-15k",
+        name: "Giảm 15k cho đơn từ 100k khi mua muối",
+        type: "fixed_discount",
+        eligible: true,
+        ruleSummary: "Giảm 15k",
+        reasonIfIneligible: "",
+        discountAmount: 15000,
+        shippingDiscountAmount: 0,
+        voucherDiscountAmount: 0,
+        affectedLines: [],
+        giftLines: [],
+      },
+    ];
+
+    render(<CartPage />);
+    await waitFor(() => expect(screen.getByTestId("cart-promo-eval-status").textContent).toBe("loaded"));
+    expect(screen.getByTestId("cart-promo-selected-id").textContent).toBe("free-300");
+    const selectedCard = screen.getByTestId("cart-promo-option-free-300");
+    expect(selectedCard.className).toContain("border-success");
+    expect(screen.getByText(/Bạn đã chọn “Free ship cho toàn bộ đơn hàng từ 300k”/i)).toBeTruthy();
+    expect(screen.getByTestId("cart-summary-selected-pending-freeship").textContent).toContain("Free ship cho toàn bộ đơn hàng từ 300k");
+    expect(screen.queryByText(/khuyến mãi \(Giảm 15k/i)).toBeNull();
+    const totalRow = screen.getByText("Tổng cộng").parentElement;
+    expect(totalRow?.textContent).toContain("300.000");
+  });
+
+  it("auto mode can still apply the best eligible promotion", async () => {
+    mockedState.selectedPromotionId = null as any;
+    mockedState.selectedPromotionMode = "auto";
+    mockedState.evalResponse = [
+      { promotionId: "free-pending", name: "Free pending", type: "free_shipping", eligible: false, progress: { basis: "SHIPPING_ADDRESS" }, ruleSummary: "", reasonIfIneligible: "Cần địa chỉ", discountAmount: 0, shippingDiscountAmount: 0, voucherDiscountAmount: 0, affectedLines: [], giftLines: [] },
+      { promotionId: "auto-fixed", name: "Auto Fixed", type: "fixed_discount", eligible: true, ruleSummary: "", reasonIfIneligible: "", discountAmount: 15000, shippingDiscountAmount: 0, voucherDiscountAmount: 0, affectedLines: [], giftLines: [] },
+    ];
+    render(<CartPage />);
+    await waitFor(() => expect(screen.getByText(/khuyến mãi \(Auto Fixed\)/i)).toBeTruthy());
   });
 
   it("summary shows gift block for selected BUY_X_GET_Y with gift lines", async () => {

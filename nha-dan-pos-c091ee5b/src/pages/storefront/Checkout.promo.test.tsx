@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import CheckoutPage from "./Checkout";
-import { buildCheckoutGiftSummaryLines, isGiftPromotionType } from "./Checkout";
+import { buildCheckoutGiftSummaryLines, isGiftPromotionType, ShippingBlock } from "./Checkout";
 
 const mocked = vi.hoisted(() => ({
   selectedPromotionId: "1",
@@ -234,5 +234,19 @@ describe("Checkout promo test ids", () => {
     expect(isGiftPromotionType("gift")).toBe(true);
     expect(isGiftPromotionType("BUY_X_GET_Y")).toBe(true);
     expect(isGiftPromotionType("QUANTITY_GIFT")).toBe(true);
+  });
+
+  it("Checkout shipping notice maps LOCAL_MO_CAY to a customer-facing label", () => {
+    render(
+      <ShippingBlock
+        quote={{ status: "quoted", source: "local_rule", zoneCode: "LOCAL_MO_CAY", fee: 0, etaDays: { min: 1, max: 1 } }}
+        loading={false}
+        onRetry={vi.fn()}
+        retryCooldown={0}
+      />,
+    );
+    expect(screen.getByText(/Khu vực/i).textContent).toContain("Mỏ Cày");
+    expect(screen.getByText(/Khu vực/i).textContent).not.toContain("LOCAL_MO_CAY");
+    expect(screen.getByText(/Khu vực/i).textContent).toContain("Miễn phí giao hàng");
   });
 });

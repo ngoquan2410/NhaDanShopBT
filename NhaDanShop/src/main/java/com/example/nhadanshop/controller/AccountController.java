@@ -34,6 +34,11 @@ public class AccountController {
         return accountService.orders(auth.getName(), pageable);
     }
 
+    @GetMapping("/orders/{id}")
+    public SalesInvoiceResponse orderDetail(Authentication auth, @PathVariable Long id) {
+        return accountService.orderDetail(auth.getName(), id);
+    }
+
     @GetMapping("/pending-orders")
     public java.util.List<PendingOrderResponse> pendingOrders(Authentication auth) {
         Customer c = accountService.ensureLinkedCustomer(auth.getName());
