@@ -45,8 +45,8 @@ type ScanMode = "hid" | "camera" | "manual";
 export default function AdminPOS() {
   const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 200 }), []);
   const { data: customerData, reload: reloadCustomers } = useService(
-    () => adminCustomers.list({ pageSize: 100 }),
-    [],
+      () => adminCustomers.list({ pageSize: 100 }),
+      [],
   );
   const storeProducts = productData?.items ?? [];
   const customers = customerData?.items ?? [];
@@ -99,8 +99,8 @@ export default function AdminPOS() {
   }, []);
 
   const selectedShippingZone = useMemo(
-    () => shippingZones.find((z) => z.zoneCode === shippingZoneCode) ?? null,
-    [shippingZones, shippingZoneCode],
+      () => shippingZones.find((z) => z.zoneCode === shippingZoneCode) ?? null,
+      [shippingZones, shippingZoneCode],
   );
 
   // Auto-select newly created customer
@@ -138,19 +138,19 @@ export default function AdminPOS() {
       setPosVariantLoading(true);
       setPosVariantSearchErr(null);
       void searchVariantsForTransaction({ search: q, context: "pos", page: 0, size: 40, signal: ac.signal })
-        .then((res) => {
-          if (seq !== posSearchSeqRef.current) return;
-          setPosVariantHits(res.items);
-        })
-        .catch((e: unknown) => {
-          if (e instanceof Error && e.name === "AbortError") return;
-          if (seq !== posSearchSeqRef.current) return;
-          setPosVariantHits([]);
-          setPosVariantSearchErr(e instanceof Error ? e.message : "Lỗi tìm kiếm");
-        })
-        .finally(() => {
-          if (seq === posSearchSeqRef.current) setPosVariantLoading(false);
-        });
+          .then((res) => {
+            if (seq !== posSearchSeqRef.current) return;
+            setPosVariantHits(res.items);
+          })
+          .catch((e: unknown) => {
+            if (e instanceof Error && e.name === "AbortError") return;
+            if (seq !== posSearchSeqRef.current) return;
+            setPosVariantHits([]);
+            setPosVariantSearchErr(e instanceof Error ? e.message : "Lỗi tìm kiếm");
+          })
+          .finally(() => {
+            if (seq === posSearchSeqRef.current) setPosVariantLoading(false);
+          });
     }, 250);
     return () => window.clearTimeout(posSearchDebounceRef.current);
   }, [search]);
@@ -177,16 +177,16 @@ export default function AdminPOS() {
   useEffect(() => {
     let cancel = false;
     void promotionsCrud.list({ page: 1, pageSize: 200, active: true })
-      .then((res) => {
-        if (cancel) return;
-        setBackendPromotions(res.items);
-        setPromotionLoadError(null);
-      })
-      .catch((e) => {
-        if (cancel) return;
-        setBackendPromotions([]);
-        setPromotionLoadError(e instanceof Error ? e.message : "Không tải được khuyến mãi backend");
-      });
+        .then((res) => {
+          if (cancel) return;
+          setBackendPromotions(res.items);
+          setPromotionLoadError(null);
+        })
+        .catch((e) => {
+          if (cancel) return;
+          setBackendPromotions([]);
+          setPromotionLoadError(e instanceof Error ? e.message : "Không tải được khuyến mãi backend");
+        });
     return () => {
       cancel = true;
     };
@@ -195,15 +195,15 @@ export default function AdminPOS() {
   // Real POS promotion source is backend DB. Local promotion helpers may still
   // render demo/offline previews elsewhere, but this selector never reads local store IDs.
   const activePromotions = useMemo(
-    () => backendPromotions.filter((p) => p.active),
-    [backendPromotions],
+      () => backendPromotions.filter((p) => p.active),
+      [backendPromotions],
   );
   const selectedPromotion: Promotion | null =
-    activePromotions.find((p) => p.id === promotionId) ?? null;
+      activePromotions.find((p) => p.id === promotionId) ?? null;
 
   const promotionEvaluationById = useMemo(
-    () => Object.fromEntries(promotionEvaluations.map((p) => [p.promotionId, p])),
-    [promotionEvaluations],
+      () => Object.fromEntries(promotionEvaluations.map((p) => [p.promotionId, p])),
+      [promotionEvaluations],
   );
   const selectedPromotionEvaluation = selectedPromotion ? promotionEvaluationById[selectedPromotion.id] : undefined;
   const selectedPromotionBackendEligible = selectedPromotionEvaluation?.eligible === true;
@@ -233,16 +233,16 @@ export default function AdminPOS() {
       shippingQuote: { status: "quoted", fee: shippingFee },
     };
     void promotionEvaluationService.evaluateAll(ctx)
-      .then((rows) => {
-        if (cancel) return;
-        setPromotionEvaluations(rows);
-        setPromotionEvalError(null);
-      })
-      .catch((e) => {
-        if (cancel) return;
-        setPromotionEvaluations([]);
-        setPromotionEvalError(e instanceof Error ? e.message : "Không đánh giá được khuyến mãi backend");
-      });
+        .then((rows) => {
+          if (cancel) return;
+          setPromotionEvaluations(rows);
+          setPromotionEvalError(null);
+        })
+        .catch((e) => {
+          if (cancel) return;
+          setPromotionEvaluations([]);
+          setPromotionEvalError(e instanceof Error ? e.message : "Không đánh giá được khuyến mãi backend");
+        });
     return () => {
       cancel = true;
     };
@@ -250,15 +250,15 @@ export default function AdminPOS() {
 
   // Compute totals
   const totals = useMemo(
-    () => computeInvoice({
-      lines,
-      manualDiscount: { mode: discountMode, value: discountValue },
-      promotion: promotionForLocalTotals,
-      shippingFee,
-      vatPercent,
-      productCategory,
-    }),
-    [lines, discountMode, discountValue, promotionForLocalTotals, shippingFee, vatPercent, productCategory],
+      () => computeInvoice({
+        lines,
+        manualDiscount: { mode: discountMode, value: discountValue },
+        promotion: promotionForLocalTotals,
+        shippingFee,
+        vatPercent,
+        productCategory,
+      }),
+      [lines, discountMode, discountValue, promotionForLocalTotals, shippingFee, vatPercent, productCategory],
   );
 
   const billable = lines.filter((l) => !l.reward);
@@ -266,16 +266,16 @@ export default function AdminPOS() {
   const overStockLine = lines.find((l) => !l.reward && l.quantity > l.stock);
 
   const checkoutDisabledReason =
-    billable.length === 0 ? "Chưa có sản phẩm" :
-    checkoutBusy ? "Đang tạo hóa đơn…" :
-    null;
+      billable.length === 0 ? "Chưa có sản phẩm" :
+          checkoutBusy ? "Đang tạo hóa đơn…" :
+              null;
   const checkoutStockReason = !checkoutDisabledReason && overStockLine
-    ? `Sản phẩm "${overStockLine.productName}" vượt tồn kho`
-    : null;
+      ? `Sản phẩm "${overStockLine.productName}" vượt tồn kho`
+      : null;
   const checkoutFeeReason =
-    !checkoutDisabledReason && !checkoutStockReason && shippingFee < 0 ? "Phí ship không hợp lệ" :
-    !checkoutDisabledReason && !checkoutStockReason && (vatPercent < 0 || vatPercent > 100) ? "VAT không hợp lệ" :
-    null;
+      !checkoutDisabledReason && !checkoutStockReason && shippingFee < 0 ? "Phí ship không hợp lệ" :
+          !checkoutDisabledReason && !checkoutStockReason && (vatPercent < 0 || vatPercent > 100) ? "VAT không hợp lệ" :
+              null;
   const blockedCheckoutReason = checkoutDisabledReason ?? checkoutStockReason ?? checkoutFeeReason;
 
   useEffect(() => {
@@ -328,7 +328,7 @@ export default function AdminPOS() {
   }, [scanMode]);
 
   const numFromApi = (v: string | number | null | undefined) =>
-    v == null || v === "" ? 0 : typeof v === "number" ? v : Number(v);
+      v == null || v === "" ? 0 : typeof v === "number" ? v : Number(v);
 
   const posPaymentToBackend = (t: Invoice["paymentType"]): string => {
     switch (t) {
@@ -531,9 +531,9 @@ export default function AdminPOS() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Không kết nối được máy chủ quét mã";
       toast.error(
-        looksBatch
-          ? msg || "Lỗi scan lô (backend)"
-          : `Không quét được mã từ backend — không thêm vào giỏ. ${msg} Kiểm tra mạng, đăng nhập admin, hoặc thử quét lại.`,
+          looksBatch
+              ? msg || "Lỗi scan lô (backend)"
+              : `Không quét được mã từ backend — không thêm vào giỏ. ${msg} Kiểm tra mạng, đăng nhập admin, hoặc thử quét lại.`,
       );
       setScanFlash("err");
       setTimeout(() => setScanFlash(null), 700);
@@ -610,18 +610,18 @@ export default function AdminPOS() {
       setCheckoutBusy(true);
       try {
         const shipSnap =
-          shippingFee !== 0 || !!shippingZoneCode
-            ? {
-                source: "client_snapshot" as const,
-                zoneCode: shippingZoneCode || selectedShippingZone?.zoneCode,
-                fee: shippingFee,
-                etaDays: selectedShippingZone?.etaDays,
-              }
-            : null;
+            shippingFee !== 0 || !!shippingZoneCode
+                ? {
+                  source: "client_snapshot" as const,
+                  zoneCode: shippingZoneCode || selectedShippingZone?.zoneCode,
+                  fee: shippingFee,
+                  etaDays: selectedShippingZone?.etaDays,
+                }
+                : null;
 
         const promoRaw = promotionId.trim();
         const promotionBackendId =
-          promoRaw && Number.isFinite(Number(promoRaw)) ? Number(promoRaw) : null;
+            promoRaw && Number.isFinite(Number(promoRaw)) ? Number(promoRaw) : null;
 
         const quoteLines = billable.map((line) => {
           const productId = parseOptionalLong(line.productId);
@@ -656,8 +656,8 @@ export default function AdminPOS() {
           method: "POST",
           body: JSON.stringify({
             customerName:
-              (customerId == null ? customers.find((c) => c.id === selectedCustomer)?.name : undefined) ||
-              "Khách lẻ",
+                (customerId == null ? customers.find((c) => c.id === selectedCustomer)?.name : undefined) ||
+                "Khách lẻ",
             customerId,
             note: note.trim() || null,
             promotionId: null,
@@ -694,12 +694,12 @@ export default function AdminPOS() {
     }
 
     const allowLocalInvoiceDemo =
-      import.meta.env.MODE === "test" || import.meta.env.VITE_POS_LOCAL_INVOICE_DEMO === "true";
+        import.meta.env.MODE === "test" || import.meta.env.VITE_POS_LOCAL_INVOICE_DEMO === "true";
     const hasAdminSession = Boolean(getAdminSession()?.accessToken);
 
     if (!hasAdminSession && !allowLocalInvoiceDemo) {
       toast.error(
-        "Cần đăng nhập phiên admin (backend) để lập hóa đơn thật. Hóa đơn chỉ được lưu trên máy chủ — không tạo hóa đơn cục bộ.",
+          "Cần đăng nhập phiên admin (backend) để lập hóa đơn thật. Hóa đơn chỉ được lưu trên máy chủ — không tạo hóa đơn cục bộ.",
       );
       return;
     }
@@ -708,18 +708,18 @@ export default function AdminPOS() {
       setCheckoutBusy(true);
       try {
         const shipSnap =
-          shippingFee !== 0 || !!shippingZoneCode
-            ? {
-                source: "client_snapshot" as const,
-                zoneCode: shippingZoneCode || selectedShippingZone?.zoneCode,
-                fee: shippingFee,
-                etaDays: selectedShippingZone?.etaDays,
-              }
-            : null;
+            shippingFee !== 0 || !!shippingZoneCode
+                ? {
+                  source: "client_snapshot" as const,
+                  zoneCode: shippingZoneCode || selectedShippingZone?.zoneCode,
+                  fee: shippingFee,
+                  etaDays: selectedShippingZone?.etaDays,
+                }
+                : null;
 
         const promoRaw = promotionId.trim();
         const promotionBackendId =
-          promoRaw && Number.isFinite(Number(promoRaw)) ? Number(promoRaw) : null;
+            promoRaw && Number.isFinite(Number(promoRaw)) ? Number(promoRaw) : null;
 
         const quoteLines = billable.map((line) => {
           const productId = parseOptionalLong(line.productId);
@@ -752,8 +752,8 @@ export default function AdminPOS() {
           method: "POST",
           body: JSON.stringify({
             customerName:
-              (customerId == null ? customers.find((c) => c.id === selectedCustomer)?.name : undefined) ||
-              "Khách lẻ",
+                (customerId == null ? customers.find((c) => c.id === selectedCustomer)?.name : undefined) ||
+                "Khách lẻ",
             customerId,
             note: note.trim() || null,
             promotionId: null,
@@ -843,19 +843,19 @@ export default function AdminPOS() {
 
   /** Committed backend quote checkout → 58mm uses quote snapshot; else draft/local preview. */
   const useBackendPos58Print =
-    lastInvoice != null && lastPrintableInvoice != null && lastPrintableLines != null;
+      lastInvoice != null && lastPrintableInvoice != null && lastPrintableLines != null;
   const pos58Empty: InvoiceLine = { name: "Hóa đơn trống", code: "-", qty: 0, price: 0 };
   const pos58Invoice = useBackendPos58Print ? lastPrintableInvoice : printableInvoice;
   const pos58Lines = useBackendPos58Print
-    ? lastPrintableLines.length > 0
-      ? lastPrintableLines
-      : [pos58Empty]
-    : printableLines.length > 0
-      ? printableLines
-      : [pos58Empty];
+      ? lastPrintableLines.length > 0
+          ? lastPrintableLines
+          : [pos58Empty]
+      : printableLines.length > 0
+          ? printableLines
+          : [pos58Empty];
 
   const filteredProducts = storeProducts.filter((p) =>
-    p.active && (!search || p.name.toLowerCase().includes(search.toLowerCase()) || p.code.toLowerCase().includes(search.toLowerCase()))
+      p.active && (!search || p.name.toLowerCase().includes(search.toLowerCase()) || p.code.toLowerCase().includes(search.toLowerCase()))
   );
 
   // Build promotion options from backend promotion rows + backend stateless evaluation.
@@ -872,598 +872,623 @@ export default function AdminPOS() {
       const eligible = evalRow?.eligible === true;
       const reason = promotionEvalError ? "Chưa xác nhận eligibility từ backend" : evalRow?.reasonIfIneligible;
       return {
-      id: p.id,
-      label: p.name,
-      sub: `${PROMOTION_TYPE_LABELS[p.type]} · ${formatPromotionSummary(p)}${!eligible && reason ? ` — ${reason}` : ""}`,
-      group: eligible ? "Đủ điều kiện (backend)" : "Khuyến mãi backend",
-      badge: eligible
-        ? { label: "Đủ điều kiện", tone: "success" as const }
-        : { label: promotionEvalError ? "Chưa xác nhận" : "Chưa đủ điều kiện", tone: "warning" as const },
+        id: p.id,
+        label: p.name,
+        sub: `${PROMOTION_TYPE_LABELS[p.type]} · ${formatPromotionSummary(p)}${!eligible && reason ? ` — ${reason}` : ""}`,
+        group: eligible ? "Đủ điều kiện (backend)" : "Khuyến mãi backend",
+        badge: eligible
+            ? { label: "Đủ điều kiện", tone: "success" as const }
+            : { label: promotionEvalError ? "Chưa xác nhận" : "Chưa đủ điều kiện", tone: "warning" as const },
       };
     });
   }, [activePromotions, promotionEvaluationById, promotionEvalError]);
 
   // ------ Render helpers ------
   const SummaryBreakdown = () => (
-    <div className="space-y-1.5 text-sm">
-      <Row label="Tạm tính" value={formatVND(totals.subtotal)} muted />
-      {totals.manualDiscount > 0 && (
-        <Row label="Chiết khấu thủ công" value={`-${formatVND(totals.manualDiscount)}`} className="text-danger" />
-      )}
-      {totals.promoDiscount > 0 && (
-        <Row label="Khuyến mãi" value={`-${formatVND(totals.promoDiscount)}`} className="text-danger" />
-      )}
-      {totals.shippingFee > 0 && (
-        <Row label="Phí ship" value={formatVND(totals.shippingFee)} muted />
-      )}
-      {totals.shippingDiscount > 0 && (
-        <Row label="Ưu đãi ship" value={`-${formatVND(totals.shippingDiscount)}`} className="text-danger" />
-      )}
-      {vatPercent > 0 && (
-        <Row label={`VAT (${vatPercent}%)`} value={formatVND(totals.vatAmount)} muted />
-      )}
-      <div className="border-t pt-2 flex justify-between font-bold text-base">
-        <span>Tổng cộng</span>
-        <span className="text-primary">{formatVND(totals.total)}</span>
+      <div className="space-y-1.5 text-sm">
+        <Row label="Tạm tính" value={formatVND(totals.subtotal)} muted />
+        {totals.manualDiscount > 0 && (
+            <Row label="Chiết khấu thủ công" value={`-${formatVND(totals.manualDiscount)}`} className="text-danger" />
+        )}
+        {totals.promoDiscount > 0 && (
+            <Row label="Khuyến mãi" value={`-${formatVND(totals.promoDiscount)}`} className="text-danger" />
+        )}
+        {totals.shippingFee > 0 && (
+            <Row label="Phí ship" value={formatVND(totals.shippingFee)} muted />
+        )}
+        {totals.shippingDiscount > 0 && (
+            <Row label="Ưu đãi ship" value={`-${formatVND(totals.shippingDiscount)}`} className="text-danger" />
+        )}
+        {vatPercent > 0 && (
+            <Row label={`VAT (${vatPercent}%)`} value={formatVND(totals.vatAmount)} muted />
+        )}
+        <div className="border-t pt-2 flex justify-between font-bold text-base">
+          <span>Tổng cộng</span>
+          <span className="text-primary">{formatVND(totals.total)}</span>
+        </div>
       </div>
-    </div>
   );
 
   const PromotionBlock = () => (
-    <div>
-      <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
-        <Tag className="h-3 w-3" /> Khuyến mãi
-      </label>
-      <SearchableCombobox
-        className="mt-1"
-        value={promotionId}
-        onChange={setPromotionId}
-        disabled={!!lastInvoice || checkoutBusy}
-        showEmptyOption
-        emptyOptionLabel="Không áp dụng"
-        placeholder="Chọn khuyến mãi..."
-        options={promoOptions}
-      />
-      {(promotionLoadError || promotionEvalError) && (
-        <p className="mt-1 text-[10px] text-warning">
-          {promotionLoadError
-            ? `Không tải được khuyến mãi backend: ${promotionLoadError}`
-            : `Không đánh giá được khuyến mãi backend: ${promotionEvalError}. POS sẽ không áp dụng preview local.`}
-        </p>
-      )}
-      {hasBatchCart && (
-        <p className="mt-1 text-[10px] text-muted-foreground">
-          Giỏ có dòng lô (quét BATCH:…) — thanh toán qua <span className="font-medium">quote backend</span> giữ đúng lô; quà KM do máy chủ tính trong báo giá.
-        </p>
-      )}
-      <div className="mt-2">
-        <label className="text-[11px] font-medium text-muted-foreground">Mã voucher (máy chủ)</label>
-        <input
-          value={posVoucherCode}
-          onChange={(e) => setPosVoucherCode(e.target.value)}
-          className="mt-1 w-full h-9 px-2 text-xs border rounded-md bg-background"
-          placeholder="Tùy chọn"
-          disabled={!!lastInvoice || checkoutBusy}
+      <div>
+        <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+          <Tag className="h-3 w-3" /> Khuyến mãi
+        </label>
+        <SearchableCombobox
+            className="mt-1"
+            value={promotionId}
+            onChange={setPromotionId}
+            disabled={!!lastInvoice || checkoutBusy}
+            showEmptyOption
+            emptyOptionLabel="Không áp dụng"
+            placeholder="Chọn khuyến mãi..."
+            options={promoOptions}
         />
-      </div>
-      {selectedPromotion && (
-        <div className={cn(
-          "mt-1.5 p-2 rounded-md text-[11px] border",
-          selectedPromotionBackendEligible ? "bg-success-soft border-success/30 text-foreground" : "bg-warning-soft border-warning/30 text-foreground",
-        )}>
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="font-medium truncate">{selectedPromotion.name}</div>
-              <div className="text-muted-foreground">{formatPromotionSummary(selectedPromotion)}</div>
-              {selectedPromotionBackendEligible ? (
-                <div className="mt-1 text-success font-medium">✓ Backend xác nhận đủ điều kiện</div>
-              ) : (
-                <div className="mt-1 text-warning font-medium">⚠ {promotionEvalError ? "Chưa xác nhận từ backend" : selectedPromotionEvaluation?.reasonIfIneligible || "Chưa đủ điều kiện"}</div>
-              )}
-            </div>
-            <button onClick={() => setPromotionId("")} className="text-muted-foreground hover:text-danger" title="Bỏ khuyến mãi">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
+        {(promotionLoadError || promotionEvalError) && (
+            <p className="mt-1 text-[10px] text-warning">
+              {promotionLoadError
+                  ? `Không tải được khuyến mãi backend: ${promotionLoadError}`
+                  : `Không đánh giá được khuyến mãi backend: ${promotionEvalError}. POS sẽ không áp dụng preview local.`}
+            </p>
+        )}
+        {hasBatchCart && (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Giỏ có dòng lô (quét BATCH:…) — thanh toán qua <span className="font-medium">quote backend</span> giữ đúng lô; quà KM do máy chủ tính trong báo giá.
+            </p>
+        )}
+        <div className="mt-2">
+          <label className="text-[11px] font-medium text-muted-foreground">Mã voucher (máy chủ)</label>
+          <input
+              value={posVoucherCode}
+              onChange={(e) => setPosVoucherCode(e.target.value)}
+              className="mt-1 w-full h-9 px-2 text-xs border rounded-md bg-background"
+              placeholder="Tùy chọn"
+              disabled={!!lastInvoice || checkoutBusy}
+          />
         </div>
-      )}
-    </div>
+        {selectedPromotion && (
+            <div className={cn(
+                "mt-1.5 p-2 rounded-md text-[11px] border",
+                selectedPromotionBackendEligible ? "bg-success-soft border-success/30 text-foreground" : "bg-warning-soft border-warning/30 text-foreground",
+            )}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium truncate">{selectedPromotion.name}</div>
+                  <div className="text-muted-foreground">{formatPromotionSummary(selectedPromotion)}</div>
+                  {selectedPromotionBackendEligible ? (
+                      <div className="mt-1 text-success font-medium">✓ Backend xác nhận đủ điều kiện</div>
+                  ) : (
+                      <div className="mt-1 text-warning font-medium">⚠ {promotionEvalError ? "Chưa xác nhận từ backend" : selectedPromotionEvaluation?.reasonIfIneligible || "Chưa đủ điều kiện"}</div>
+                  )}
+                </div>
+                <button onClick={() => setPromotionId("")} className="text-muted-foreground hover:text-danger" title="Bỏ khuyến mãi">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+        )}
+      </div>
   );
 
   return (
-    <>
-      <div className="admin-dense -m-4 lg:-m-6 h-[calc(100vh-3.5rem)] flex flex-col lg:flex-row overflow-hidden no-print">
-        {/* Left panel — product picker */}
-        <div className="lg:w-80 xl:w-96 border-b lg:border-b-0 lg:border-r bg-card flex flex-col shrink-0 max-h-[40vh] lg:max-h-none">
-          <div className="p-3 border-b space-y-2">
-            <div className="flex items-center gap-1.5">
-              <div className={cn(
-                "relative flex-1 transition-all rounded-md",
-                scanFlash === "ok" && "ring-2 ring-success",
-                scanFlash === "err" && "ring-2 ring-danger animate-pulse",
-              )}>
-                <Barcode className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      <>
+        <div className="admin-dense -m-4 lg:-m-6 h-[calc(100vh-3.5rem)] flex flex-col lg:flex-row overflow-hidden no-print">
+          {/* Left panel — product picker */}
+          <div className="lg:w-80 xl:w-96 border-b lg:border-b-0 lg:border-r bg-card flex flex-col shrink-0 max-h-[40vh] lg:max-h-none">
+            <div className="p-3 border-b space-y-2">
+              <div className="flex items-center gap-1.5">
+                <div className={cn(
+                    "relative flex-1 transition-all rounded-md",
+                    scanFlash === "ok" && "ring-2 ring-success",
+                    scanFlash === "err" && "ring-2 ring-danger animate-pulse",
+                )}>
+                  <Barcode className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                      ref={barcodeRef}
+                      value={barcodeInput}
+                      onChange={(e) => setBarcodeInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleBarcodeSubmit(); } }}
+                      placeholder={scanMode === "hid" ? "Sẵn sàng quét bằng máy quét HID..." : scanMode === "camera" ? "Dùng camera bên dưới hoặc gõ tay..." : "Nhập mã vạch + Enter"}
+                      inputMode={scanMode === "camera" ? "none" : "text"}
+                      className="w-full h-9 pl-9 pr-3 text-sm bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                      autoComplete="off"
+                      aria-label="Ô nhập mã vạch"
+                  />
+                </div>
+                <div className="flex border rounded-md overflow-hidden">
+                  {[
+                    { mode: "hid" as const, icon: Barcode, title: "Máy quét HID" },
+                    { mode: "camera" as const, icon: Camera, title: "Camera" },
+                    { mode: "manual" as const, icon: Keyboard, title: "Thủ công" },
+                  ].map((m) => (
+                      <button key={m.mode} onClick={() => setScanMode(m.mode)} title={m.title}
+                              className={cn("p-1.5 transition-colors", scanMode === m.mode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}>
+                        <m.icon className="h-3.5 w-3.5" />
+                      </button>
+                  ))}
+                </div>
+              </div>
+
+              {scanMode === "hid" && (
+                  <div className="flex items-start gap-2 p-2 bg-muted/60 rounded-md text-[11px] text-muted-foreground">
+                    <ScanLine className="h-3.5 w-3.5 mt-0.5 text-primary shrink-0" />
+                    <span>Máy quét HID hoạt động như bàn phím. Giữ con trỏ ở ô mã vạch — mã sẽ tự nhập và Enter để hoàn tất.</span>
+                  </div>
+              )}
+              {scanMode === "camera" && <CameraScanner active onDetected={handleScannedCode} onClose={() => setScanMode("hid")} />}
+              {scanMode === "manual" && (
+                  <button onClick={handleBarcodeSubmit} className="w-full h-7 text-[11px] bg-secondary hover:bg-secondary/80 rounded-md font-medium">Thêm mã vạch</button>
+              )}
+
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <input
-                  ref={barcodeRef}
-                  value={barcodeInput}
-                  onChange={(e) => setBarcodeInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleBarcodeSubmit(); } }}
-                  placeholder={scanMode === "hid" ? "Sẵn sàng quét bằng máy quét HID..." : scanMode === "camera" ? "Dùng camera bên dưới hoặc gõ tay..." : "Nhập mã vạch + Enter"}
-                  inputMode={scanMode === "camera" ? "none" : "text"}
-                  className="w-full h-9 pl-9 pr-3 text-sm bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-primary font-mono"
-                  autoComplete="off"
-                  aria-label="Ô nhập mã vạch"
+                    data-testid="pos-product-search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Tìm SP / variant (≥2 ký tự — backend)…"
+                    className="w-full h-8 pl-9 pr-3 text-sm bg-muted rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
-              <div className="flex border rounded-md overflow-hidden">
-                {[
-                  { mode: "hid" as const, icon: Barcode, title: "Máy quét HID" },
-                  { mode: "camera" as const, icon: Camera, title: "Camera" },
-                  { mode: "manual" as const, icon: Keyboard, title: "Thủ công" },
-                ].map((m) => (
-                  <button key={m.mode} onClick={() => setScanMode(m.mode)} title={m.title}
-                    className={cn("p-1.5 transition-colors", scanMode === m.mode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}>
-                    <m.icon className="h-3.5 w-3.5" />
-                  </button>
-                ))}
-              </div>
+              {posVariantSearchErr ? (
+                  <p className="text-[10px] text-danger">{posVariantSearchErr}</p>
+              ) : null}
             </div>
 
-            {scanMode === "hid" && (
-              <div className="flex items-start gap-2 p-2 bg-muted/60 rounded-md text-[11px] text-muted-foreground">
-                <ScanLine className="h-3.5 w-3.5 mt-0.5 text-primary shrink-0" />
-                <span>Máy quét HID hoạt động như bàn phím. Giữ con trỏ ở ô mã vạch — mã sẽ tự nhập và Enter để hoàn tất.</span>
-              </div>
-            )}
-            {scanMode === "camera" && <CameraScanner active onDetected={handleScannedCode} onClose={() => setScanMode("hid")} />}
-            {scanMode === "manual" && (
-              <button onClick={handleBarcodeSubmit} className="w-full h-7 text-[11px] bg-secondary hover:bg-secondary/80 rounded-md font-medium">Thêm mã vạch</button>
-            )}
-
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                data-testid="pos-product-search"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Tìm SP / variant (≥2 ký tự — backend)…"
-                className="w-full h-8 pl-9 pr-3 text-sm bg-muted rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
-            {posVariantSearchErr ? (
-              <p className="text-[10px] text-danger">{posVariantSearchErr}</p>
-            ) : null}
-          </div>
-
-          <div className="flex-1 overflow-y-auto scrollbar-thin p-2">
-            {search.trim().length >= 2 ? (
-              <div>
-                {posVariantLoading ? (
-                  <p className="text-[10px] text-muted-foreground px-1 py-2">Đang tìm variant (backend)…</p>
-                ) : null}
-                <div className="grid grid-cols-2 gap-1.5" data-testid="pos-variant-search-hits">
-                  {posVariantHits.map((hit) => {
-                    const isOutOfStock = hit.stockQty === 0;
-                    return (
-                      <button
-                        key={hit.variantId}
-                        type="button"
-                        data-testid={`pos-variant-hit-${hit.variantCode}`}
-                        data-variant-id={hit.variantId}
-                        disabled={isOutOfStock}
-                        onClick={() => addProductByVariantSearchHit(hit)}
-                        className={cn(
-                          "text-left p-2 rounded-md border text-xs transition-all",
-                          isOutOfStock
-                            ? "opacity-50 cursor-not-allowed bg-muted"
-                            : "hover:border-primary hover:shadow-sm bg-background active:scale-[0.98]",
-                        )}
-                      >
-                        <p className="font-medium truncate">{hit.productName}</p>
-                        <p className="text-muted-foreground truncate font-mono text-[10px]">{hit.variantCode}</p>
-                        <p className="text-muted-foreground truncate">{hit.variantName}</p>
-                        <div className="flex items-center justify-between mt-1">
-                          <span className="font-bold text-primary">{formatVND(hit.sellPrice)}</span>
-                          {isOutOfStock ? (
-                            <StatusBadge status="out-of-stock" size="sm" />
-                          ) : hit.stockQty <= hit.minStockQty ? (
-                            <StatusBadge status="low-stock" label={`${hit.stockQty}`} size="sm" />
-                          ) : null}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-                {!posVariantLoading && posVariantHits.length === 0 && !posVariantSearchErr ? (
-                  <p className="text-[11px] text-muted-foreground px-1 py-2">Không có variant khớp tìm kiếm.</p>
-                ) : null}
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-1.5">
-                {filteredProducts.map((product) => {
-                  const dv = product.variants.find((v) => v.isDefault) || product.variants[0];
-                  const isOutOfStock = dv.stock === 0;
-                  return (
-                    <button key={product.id} disabled={isOutOfStock} onClick={() => addProductByVariant(product.id, product.name, dv)}
-                      className={cn("text-left p-2 rounded-md border text-xs transition-all",
-                        isOutOfStock ? "opacity-50 cursor-not-allowed bg-muted" : "hover:border-primary hover:shadow-sm bg-background active:scale-[0.98]")}>
-                      <p className="font-medium truncate">{product.name}</p>
-                      <p className="text-muted-foreground truncate">{dv.name}</p>
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="font-bold text-primary">{formatVND(dv.sellPrice)}</span>
-                        {isOutOfStock ? <StatusBadge status="out-of-stock" size="sm" /> :
-                          dv.stock <= dv.minStock ? <StatusBadge status="low-stock" label={`${dv.stock}`} size="sm" /> : null}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Center — Cart lines */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden pb-32 lg:pb-0">
-          <div className="p-3 border-b flex items-center justify-between">
-            <h2 className="font-semibold text-sm flex items-center gap-2">
-              <Receipt className="h-4 w-4" />
-              {lastInvoice ? lastInvoice.number : "Hóa đơn mới"}
-              <span className="text-muted-foreground font-normal">({totalItems} sản phẩm)</span>
-            </h2>
-            {lines.length > 0 && !lastInvoice && (
-              <button onClick={() => { setLines([]); toast("Đã xóa hóa đơn nháp"); }} className="text-xs text-muted-foreground hover:text-danger">
-                Xóa tất cả
-              </button>
-            )}
-          </div>
-
-          <div className="flex-1 overflow-y-auto scrollbar-thin">
-            {selectedPromotion && !lastInvoice && lines.length > 0 && !selectedPromotionBackendEligible && (
-              <div className="m-3 p-2.5 rounded-md border border-warning/40 bg-warning-soft flex items-start gap-2 text-xs">
-                <Tag className="h-4 w-4 text-warning shrink-0 mt-0.5" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-foreground">
-                    {promotionEvalError
-                      ? "Chưa xác nhận được khuyến mãi từ backend; POS không áp dụng preview local."
-                      : selectedPromotionEvaluation?.reasonIfIneligible || "Khuyến mãi chưa đủ điều kiện theo backend."}
-                  </p>
-                </div>
-              </div>
-            )}
-            {selectedPromotion && !lastInvoice && lines.length > 0 && selectedPromotionBackendEligible && (
-              <div className="m-3 p-2.5 rounded-md border border-success/40 bg-success-soft flex items-center gap-2 text-xs">
-                <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
-                <p className="font-medium text-foreground">
-                  Backend xác nhận đủ điều kiện khuyến mãi <span className="font-semibold">{selectedPromotion.name}</span>
-                </p>
-              </div>
-            )}
-            {lastInvoice ? (
-              <div className="flex flex-col items-center justify-center h-full text-center p-6">
-                <div className="rounded-full bg-success-soft p-4 mb-4">
-                  <CheckCircle2 className="h-12 w-12 text-success" />
-                </div>
-                <h3 className="font-semibold text-lg">Tạo hóa đơn thành công</h3>
-                <p className="font-mono text-sm text-muted-foreground mt-1">{lastInvoice.number}</p>
-                <p className="text-2xl font-bold text-primary mt-3">{formatVND(lastInvoice.total)}</p>
-                <div className="flex gap-2 mt-6 flex-wrap justify-center">
-                  <button onClick={handlePrint} className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium border rounded-md hover:bg-muted">
-                    <Printer className="h-4 w-4" /> In POS58
-                  </button>
-                  <button onClick={handleNewInvoice} className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover">
-                    <Receipt className="h-4 w-4" /> Hóa đơn mới
-                  </button>
-                </div>
-              </div>
-            ) : lines.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center p-4">
-                <div className="rounded-full bg-muted p-4 mb-3">
-                  <ShoppingCart className="h-10 w-10 text-muted-foreground/40" />
-                </div>
-                <p className="font-medium text-muted-foreground">Chưa có sản phẩm</p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-                  Quét mã vạch ({scanMode === "hid" ? "máy quét" : scanMode === "camera" ? "camera" : "thủ công"}) hoặc bấm vào sản phẩm bên trái để thêm
-                </p>
-              </div>
-            ) : (
-              <div className="divide-y">
-                {lines.map((line, i) => {
-                  const overStock = !line.reward && line.quantity > line.stock;
-                  return (
-                    <div key={line.id}
-                      className={cn(
-                        "p-3 flex gap-3 transition-colors",
-                        overStock && "bg-danger-soft/50",
-                        line.reward && "bg-warning-soft/30 border-l-2 border-warning",
-                        !overStock && !line.reward && "hover:bg-muted/30",
-                      )}>
-                      <div className={cn(
-                        "flex items-center justify-center h-8 w-8 rounded text-xs font-bold shrink-0",
-                        line.reward ? "bg-warning text-warning-foreground" : "bg-muted text-muted-foreground",
-                      )}>
-                        {line.reward ? <Gift className="h-4 w-4" /> : i + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium flex items-center gap-1.5 flex-wrap">
-                              {line.productName}
-                              {line.reward && (
-                                <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded bg-warning text-warning-foreground">
-                                  Quà tặng
-                                </span>
-                              )}
-                            </p>
-                            <p className="text-xs text-muted-foreground truncate">
-                              {line.variantName}{!line.reward && ` · ${line.variantCode}`}
-                              {line.reward && line.rewardSource && ` · từ "${line.rewardSource}"`}
-                            </p>
-                            {line.batchId && !line.reward && (
-                              <p className="text-[10px] text-muted-foreground mt-0.5">
-                                Lô <span className="font-mono">{line.batchCode ?? line.batchId}</span>
-                                {line.batchExpiryDate ? ` · HSD ${line.batchExpiryDate}` : ""}
-                                {line.remainingQty != null ? ` · còn ${line.remainingQty}` : ""}
-                              </p>
-                            )}
-                          </div>
-                          {!line.reward && (
-                            <button onClick={() => removeLine(line.id)} className="text-muted-foreground hover:text-danger shrink-0 p-0.5" title="Xóa dòng">
-                              <X className="h-3.5 w-3.5" />
+            <div className="flex-1 overflow-y-auto scrollbar-thin p-2">
+              {search.trim().length >= 2 ? (
+                  <div>
+                    {posVariantLoading ? (
+                        <p className="text-[10px] text-muted-foreground px-1 py-2">Đang tìm variant (backend)…</p>
+                    ) : null}
+                    <div className="grid grid-cols-2 gap-1.5" data-testid="pos-variant-search-hits">
+                      {posVariantHits.map((hit) => {
+                        const isOutOfStock = hit.stockQty === 0;
+                        return (
+                            <button
+                                key={hit.variantId}
+                                type="button"
+                                data-testid={`pos-variant-hit-${hit.variantCode}`}
+                                data-variant-id={hit.variantId}
+                                disabled={isOutOfStock}
+                                onClick={() => addProductByVariantSearchHit(hit)}
+                                className={cn(
+                                    "text-left p-2 rounded-md border text-xs transition-all",
+                                    isOutOfStock
+                                        ? "opacity-50 cursor-not-allowed bg-muted"
+                                        : "hover:border-primary hover:shadow-sm bg-background active:scale-[0.98]",
+                                )}
+                            >
+                              <p className="font-medium truncate">{hit.productName}</p>
+                              <p className="text-muted-foreground truncate font-mono text-[10px]">{hit.variantCode}</p>
+                              <p className="text-muted-foreground truncate">{hit.variantName}</p>
+                              <div className="flex items-center justify-between mt-1">
+                                <span className="font-bold text-primary">{formatVND(hit.sellPrice)}</span>
+                                {isOutOfStock ? (
+                                    <StatusBadge status="out-of-stock" size="sm" />
+                                ) : hit.stockQty <= hit.minStockQty ? (
+                                    <StatusBadge status="low-stock" label={`${hit.stockQty}`} size="sm" />
+                                ) : null}
+                              </div>
                             </button>
-                          )}
-                        </div>
-                        {overStock && (
-                          <p className="text-[11px] text-danger flex items-center gap-1 mt-0.5">
-                            <AlertTriangle className="h-3 w-3" /> Vượt tồn kho (còn {line.stock})
-                          </p>
-                        )}
-                        <div className="flex items-center justify-between mt-2">
-                          <div className="flex items-center gap-3">
-                            {line.reward ? (
-                              <span className="text-xs font-medium px-2 py-1 bg-muted rounded">SL: {line.quantity}</span>
-                            ) : (
-                              <QuantityStepper value={line.quantity} onChange={(v) => updateLine(line.id, v)} size="sm" max={line.stock} />
-                            )}
-                            <span className="text-xs text-muted-foreground">× {line.reward ? "0đ" : formatVND(line.unitPrice)}</span>
-                          </div>
-                          <span className={cn("font-bold text-sm", line.reward && "text-success")}>
-                            {line.reward ? "Miễn phí" : formatVND(line.unitPrice * line.quantity)}
-                          </span>
-                        </div>
-                      </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                    {!posVariantLoading && posVariantHits.length === 0 && !posVariantSearchErr ? (
+                        <p className="text-[11px] text-muted-foreground px-1 py-2">Không có variant khớp tìm kiếm.</p>
+                    ) : null}
+                  </div>
+              ) : (
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {filteredProducts.map((product) => {
+                      const dv = product.variants.find((v) => v.isDefault) || product.variants[0];
+                      const isOutOfStock = dv.stock === 0;
+                      return (
+                          <button key={product.id} disabled={isOutOfStock} onClick={() => addProductByVariant(product.id, product.name, dv)}
+                                  className={cn("text-left p-2 rounded-md border text-xs transition-all",
+                                      isOutOfStock ? "opacity-50 cursor-not-allowed bg-muted" : "hover:border-primary hover:shadow-sm bg-background active:scale-[0.98]")}>
+                            <p className="font-medium truncate">{product.name}</p>
+                            <p className="text-muted-foreground truncate">{dv.name}</p>
+                            <div className="flex items-center justify-between mt-1">
+                              <span className="font-bold text-primary">{formatVND(dv.sellPrice)}</span>
+                              {isOutOfStock ? <StatusBadge status="out-of-stock" size="sm" /> :
+                                  dv.stock <= dv.minStock ? <StatusBadge status="low-stock" label={`${dv.stock}`} size="sm" /> : null}
+                            </div>
+                          </button>
+                      );
+                    })}
+                  </div>
+              )}
+            </div>
           </div>
-        </div>
 
-        {/* Right panel — Summary (desktop) */}
-        <div className="hidden lg:flex lg:w-80 xl:w-96 border-l bg-card flex-col shrink-0">
-          <div className="flex-1 overflow-y-auto scrollbar-thin p-3 space-y-3">
-            {/* Customer */}
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground">Khách hàng</label>
-              <SearchableCombobox className="mt-1" value={selectedCustomer} onChange={setSelectedCustomer}
-                disabled={!!lastInvoice} showEmptyOption emptyOptionLabel="Khách lẻ"
-                placeholder="Tìm SĐT, tên khách..."
-                options={customers.filter((c) => c.active).map((c) => ({ id: c.id, label: c.name, sub: `${c.code} · ${c.phone}` }))}
-                onCreateNew={() => setCustomerDrawerOpen(true)} createLabel="Tạo khách hàng mới" />
-            </div>
-
-            {/* Note */}
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground">Ghi chú</label>
-              <input value={note} onChange={(e) => setNote(e.target.value)} disabled={!!lastInvoice}
-                placeholder="Ghi chú hóa đơn..."
-                className="mt-1 w-full h-8 px-2 text-sm bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60" />
-            </div>
-
-            {/* Payment method */}
-            <PaymentMethodPicker
-              value={paymentType}
-              onChange={setPaymentType}
-              disabled={!!lastInvoice}
-              onOpenQr={paymentType !== "cash" && totals.total > 0 ? () => setQrDialogOpen(true) : undefined}
-            />
-
-            {/* Promotion */}
-            <PromotionBlock />
-
-            {/* Manual discount */}
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground">Chiết khấu thủ công</label>
-              <div className="mt-1 flex items-center gap-1">
-                <input type="number" min={0} value={discountValue || ""}
-                  onChange={(e) => setDiscountValue(Math.max(0, +e.target.value || 0))}
-                  disabled={!!lastInvoice || lines.length === 0 || checkoutBusy} placeholder="0"
-                  className="flex-1 h-8 px-2 text-sm text-right bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60" />
-                <div className="flex border rounded-md overflow-hidden h-8">
-                  <button type="button" onClick={() => setDiscountMode("amount")} disabled={!!lastInvoice || checkoutBusy}
-                    className={cn("px-2 text-xs font-medium transition-colors", discountMode === "amount" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted")}>₫</button>
-                  <button type="button" onClick={() => setDiscountMode("percent")} disabled={!!lastInvoice || checkoutBusy}
-                    className={cn("px-2 text-xs font-medium transition-colors border-l", discountMode === "percent" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted")}>%</button>
-                </div>
-              </div>
-            </div>
-
-            {/* Shipping zone (printed on receipt for delivery verification) */}
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
-                <Truck className="h-3 w-3" /> Vùng giao hàng
-              </label>
-              <select
-                value={shippingZoneCode}
-                onChange={(e) => setShippingZoneCode(e.target.value)}
-                disabled={!!lastInvoice || checkoutBusy}
-                className="mt-1 w-full h-8 px-2 text-sm bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-              >
-                <option value="">— Không gắn vùng —</option>
-                {shippingZones.map((z) => (
-                  <option key={z.zoneCode} value={z.zoneCode}>
-                    {z.zoneCode} · {z.label} ({z.etaDays.min}–{z.etaDays.max} ngày)
-                  </option>
-                ))}
-              </select>
-              {selectedShippingZone && (
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  In trên hóa đơn: <span className="font-mono">{selectedShippingZone.zoneCode}</span> · giao{" "}
-                  {selectedShippingZone.etaDays.min}–{selectedShippingZone.etaDays.max} ngày
-                </p>
+          {/* Center — Cart lines */}
+          <div className="flex-1 flex flex-col min-w-0 overflow-hidden pb-32 lg:pb-0">
+            <div className="p-3 border-b flex items-center justify-between">
+              <h2 className="font-semibold text-sm flex items-center gap-2">
+                <Receipt className="h-4 w-4" />
+                {lastInvoice ? lastInvoice.number : "Hóa đơn mới"}
+                <span className="text-muted-foreground font-normal">({totalItems} sản phẩm)</span>
+              </h2>
+              {lines.length > 0 && !lastInvoice && (
+                  <button onClick={() => { setLines([]); toast("Đã xóa hóa đơn nháp"); }} className="text-xs text-muted-foreground hover:text-danger">
+                    Xóa tất cả
+                  </button>
               )}
             </div>
 
-            {/* Shipping + VAT */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="flex-1 overflow-y-auto scrollbar-thin">
+              {selectedPromotion && !lastInvoice && lines.length > 0 && !selectedPromotionBackendEligible && (
+                  <div className="m-3 p-2.5 rounded-md border border-warning/40 bg-warning-soft flex items-start gap-2 text-xs">
+                    <Tag className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-foreground">
+                        {promotionEvalError
+                            ? "Chưa xác nhận được khuyến mãi từ backend; POS không áp dụng preview local."
+                            : selectedPromotionEvaluation?.reasonIfIneligible || "Khuyến mãi chưa đủ điều kiện theo backend."}
+                      </p>
+                    </div>
+                  </div>
+              )}
+              {selectedPromotion && !lastInvoice && lines.length > 0 && selectedPromotionBackendEligible && (
+                  <div className="m-3 p-2.5 rounded-md border border-success/40 bg-success-soft flex items-center gap-2 text-xs">
+                    <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
+                    <p className="font-medium text-foreground">
+                      Backend xác nhận đủ điều kiện khuyến mãi <span className="font-semibold">{selectedPromotion.name}</span>
+                    </p>
+                  </div>
+              )}
+              {lastInvoice ? (
+                  <div className="flex flex-col items-center justify-center h-full text-center p-6">
+                    <div className="rounded-full bg-success-soft p-4 mb-4">
+                      <CheckCircle2 className="h-12 w-12 text-success" />
+                    </div>
+                    <h3 className="font-semibold text-lg">Tạo hóa đơn thành công</h3>
+                    <p className="font-mono text-sm text-muted-foreground mt-1">{lastInvoice.number}</p>
+                    <p className="text-2xl font-bold text-primary mt-3">{formatVND(lastInvoice.total)}</p>
+                    <div className="flex gap-2 mt-6 flex-wrap justify-center">
+                      <button onClick={handlePrint} className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium border rounded-md hover:bg-muted">
+                        <Printer className="h-4 w-4" /> In POS58
+                      </button>
+                      <button onClick={handleNewInvoice} className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover">
+                        <Receipt className="h-4 w-4" /> Hóa đơn mới
+                      </button>
+                    </div>
+                  </div>
+              ) : lines.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full text-center p-4">
+                    <div className="rounded-full bg-muted p-4 mb-3">
+                      <ShoppingCart className="h-10 w-10 text-muted-foreground/40" />
+                    </div>
+                    <p className="font-medium text-muted-foreground">Chưa có sản phẩm</p>
+                    <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                      Quét mã vạch ({scanMode === "hid" ? "máy quét" : scanMode === "camera" ? "camera" : "thủ công"}) hoặc bấm vào sản phẩm bên trái để thêm
+                    </p>
+                  </div>
+              ) : (
+                  <div className="divide-y">
+                    {lines.map((line, i) => {
+                      const overStock = !line.reward && line.quantity > line.stock;
+                      return (
+                          <div key={line.id}
+                               className={cn(
+                                   "p-3 flex gap-3 transition-colors",
+                                   overStock && "bg-danger-soft/50",
+                                   line.reward && "bg-warning-soft/30 border-l-2 border-warning",
+                                   !overStock && !line.reward && "hover:bg-muted/30",
+                               )}>
+                            <div className={cn(
+                                "flex items-center justify-center h-8 w-8 rounded text-xs font-bold shrink-0",
+                                line.reward ? "bg-warning text-warning-foreground" : "bg-muted text-muted-foreground",
+                            )}>
+                              {line.reward ? <Gift className="h-4 w-4" /> : i + 1}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium flex items-center gap-1.5 flex-wrap">
+                                    {line.productName}
+                                    {line.reward && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded bg-warning text-warning-foreground">
+                                  Quà tặng
+                                </span>
+                                    )}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground truncate">
+                                    {line.variantName}{!line.reward && ` · ${line.variantCode}`}
+                                    {line.reward && line.rewardSource && ` · từ "${line.rewardSource}"`}
+                                  </p>
+                                  {line.batchId && !line.reward && (
+                                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                                        Lô <span className="font-mono">{line.batchCode ?? line.batchId}</span>
+                                        {line.batchExpiryDate ? ` · HSD ${line.batchExpiryDate}` : ""}
+                                        {line.remainingQty != null ? ` · còn ${line.remainingQty}` : ""}
+                                      </p>
+                                  )}
+                                </div>
+                                {!line.reward && (
+                                    <button onClick={() => removeLine(line.id)} className="text-muted-foreground hover:text-danger shrink-0 p-0.5" title="Xóa dòng">
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                )}
+                              </div>
+                              {overStock && (
+                                  <p className="text-[11px] text-danger flex items-center gap-1 mt-0.5">
+                                    <AlertTriangle className="h-3 w-3" /> Vượt tồn kho (còn {line.stock})
+                                  </p>
+                              )}
+                              <div className="flex items-center justify-between mt-2">
+                                <div className="flex items-center gap-3">
+                                  {line.reward ? (
+                                      <span className="text-xs font-medium px-2 py-1 bg-muted rounded">SL: {line.quantity}</span>
+                                  ) : (
+                                      <QuantityStepper value={line.quantity} onChange={(v) => updateLine(line.id, v)} size="sm" max={line.stock} />
+                                  )}
+                                  <span className="text-xs text-muted-foreground">× {line.reward ? "0đ" : formatVND(line.unitPrice)}</span>
+                                </div>
+                                <span className={cn("font-bold text-sm", line.reward && "text-success")}>
+                            {line.reward ? "Miễn phí" : formatVND(line.unitPrice * line.quantity)}
+                          </span>
+                              </div>
+                            </div>
+                          </div>
+                      );
+                    })}
+                  </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right panel — Summary (desktop) */}
+          <div className="hidden lg:flex lg:w-80 xl:w-96 border-l bg-card flex-col shrink-0">
+            <div className="flex-1 overflow-y-auto scrollbar-thin p-3 space-y-3">
+              {/* Customer */}
+              <div>
+                <label className="text-[11px] font-medium text-muted-foreground">Khách hàng</label>
+                <SearchableCombobox className="mt-1" value={selectedCustomer} onChange={setSelectedCustomer}
+                                    disabled={!!lastInvoice} showEmptyOption emptyOptionLabel="Khách lẻ"
+                                    placeholder="Tìm SĐT, tên khách..."
+                                    options={customers.filter((c) => c.active).map((c) => ({ id: c.id, label: c.name, sub: `${c.code} · ${c.phone}` }))}
+                                    onCreateNew={() => setCustomerDrawerOpen(true)} createLabel="Tạo khách hàng mới" />
+              </div>
+
+              {/* Note */}
+              <div>
+                <label className="text-[11px] font-medium text-muted-foreground">Ghi chú</label>
+                <input value={note} onChange={(e) => setNote(e.target.value)} disabled={!!lastInvoice}
+                       placeholder="Ghi chú hóa đơn..."
+                       className="mt-1 w-full h-8 px-2 text-sm bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60" />
+              </div>
+
+              {/* Payment method */}
+              <PaymentMethodPicker
+                  value={paymentType}
+                  onChange={setPaymentType}
+                  disabled={!!lastInvoice}
+                  onOpenQr={paymentType !== "cash" && totals.total > 0 ? () => setQrDialogOpen(true) : undefined}
+              />
+
+              {/* Promotion */}
+              <PromotionBlock />
+
+              {/* Manual discount */}
+              <div>
+                <label className="text-[11px] font-medium text-muted-foreground">Chiết khấu thủ công</label>
+                <div className="mt-1 flex items-center gap-1">
+                  <input type="number" min={0} value={discountValue || ""}
+                         onChange={(e) => setDiscountValue(Math.max(0, +e.target.value || 0))}
+                         disabled={!!lastInvoice || lines.length === 0 || checkoutBusy} placeholder="0"
+                         className="flex-1 h-8 px-2 text-sm text-right bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60" />
+                  <div className="flex border rounded-md overflow-hidden h-8">
+                    <button type="button" onClick={() => setDiscountMode("amount")} disabled={!!lastInvoice || checkoutBusy}
+                            className={cn("px-2 text-xs font-medium transition-colors", discountMode === "amount" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted")}>₫</button>
+                    <button type="button" onClick={() => setDiscountMode("percent")} disabled={!!lastInvoice || checkoutBusy}
+                            className={cn("px-2 text-xs font-medium transition-colors border-l", discountMode === "percent" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted")}>%</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Shipping zone (printed on receipt for delivery verification) */}
               <div>
                 <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
-                  <Truck className="h-3 w-3" /> Phí ship (₫)
+                  <Truck className="h-3 w-3" /> Vùng giao hàng
                 </label>
-                <input type="number" min={0} value={shippingFee || ""}
-                  onChange={(e) => setShippingFee(Math.max(0, +e.target.value || 0))}
-                  disabled={!!lastInvoice || checkoutBusy} placeholder="0"
-                  className={cn("mt-1 w-full h-8 px-2 text-sm text-right bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60",
-                    shippingFee < 0 && "border-danger")} />
-                {shippingFee < 0 && <p className="text-[10px] text-danger mt-0.5">Phí ship không hợp lệ</p>}
+                <select
+                    value={shippingZoneCode}
+                    onChange={(e) => setShippingZoneCode(e.target.value)}
+                    disabled={!!lastInvoice || checkoutBusy}
+                    className="mt-1 w-full h-8 px-2 text-sm bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                >
+                  <option value="">— Không gắn vùng —</option>
+                  {shippingZones.map((z) => (
+                      <option key={z.zoneCode} value={z.zoneCode}>
+                        {z.zoneCode} · {z.label} ({z.etaDays.min}–{z.etaDays.max} ngày)
+                      </option>
+                  ))}
+                </select>
+                {selectedShippingZone && (
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      In trên hóa đơn: <span className="font-mono">{selectedShippingZone.zoneCode}</span> · giao{" "}
+                      {selectedShippingZone.etaDays.min}–{selectedShippingZone.etaDays.max} ngày
+                    </p>
+                )}
               </div>
-              <div>
-                <label className="text-[11px] font-medium text-muted-foreground">VAT (%)</label>
-                <input type="number" min={0} max={100} value={vatPercent || ""}
-                  onChange={(e) => setVatPercent(Math.max(0, Math.min(100, +e.target.value || 0)))}
-                  disabled={!!lastInvoice || checkoutBusy} placeholder="0"
-                  className={cn("mt-1 w-full h-8 px-2 text-sm text-right bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60",
-                    (vatPercent < 0 || vatPercent > 100) && "border-danger")} />
+
+              {/* Shipping + VAT */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                    <Truck className="h-3 w-3" /> Phí ship (₫)
+                  </label>
+                  <input type="number" min={0} value={shippingFee || ""}
+                         onChange={(e) => setShippingFee(Math.max(0, +e.target.value || 0))}
+                         disabled={!!lastInvoice || checkoutBusy} placeholder="0"
+                         className={cn("mt-1 w-full h-8 px-2 text-sm text-right bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60",
+                             shippingFee < 0 && "border-danger")} />
+                  {shippingFee < 0 && <p className="text-[10px] text-danger mt-0.5">Phí ship không hợp lệ</p>}
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground">VAT (%)</label>
+                  <input type="number" min={0} max={100} value={vatPercent || ""}
+                         onChange={(e) => setVatPercent(Math.max(0, Math.min(100, +e.target.value || 0)))}
+                         disabled={!!lastInvoice || checkoutBusy} placeholder="0"
+                         className={cn("mt-1 w-full h-8 px-2 text-sm text-right bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60",
+                             (vatPercent < 0 || vatPercent > 100) && "border-danger")} />
+                </div>
+              </div>
+
+              {/* Breakdown */}
+              <div className="border-t pt-3">
+                <SummaryBreakdown />
               </div>
             </div>
 
-            {/* Breakdown */}
-            <div className="border-t pt-3">
-              <SummaryBreakdown />
+            {/* CTA */}
+            <div className="p-3 border-t space-y-2">
+              {lastInvoice ? (
+                  <>
+                    <button onClick={handlePrint} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-md text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary-hover">
+                      <Printer className="h-4 w-4" /> In POS58
+                    </button>
+                    <button onClick={handleNewInvoice} className="w-full flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium border hover:bg-muted">
+                      <Receipt className="h-4 w-4" /> Hóa đơn mới
+                    </button>
+                  </>
+              ) : (
+                  <>
+                    <button
+                        onClick={() => void handleCheckout()}
+                        disabled={!!blockedCheckoutReason || checkoutBusy}
+                        title={blockedCheckoutReason ?? ""}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-md text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      <Check className="h-4 w-4" />
+                      Tạo hóa đơn — {formatVND(totals.total)}
+                    </button>
+                    {blockedCheckoutReason && <p className="text-[10px] text-center text-muted-foreground">{blockedCheckoutReason}</p>}
+                    <button onClick={handlePrint} disabled={lines.length === 0}
+                            className="w-full flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium border hover:bg-muted transition-colors disabled:opacity-50">
+                      <Printer className="h-4 w-4" /> In tạm POS58
+                    </button>
+                  </>
+              )}
             </div>
           </div>
 
-          {/* CTA */}
-          <div className="p-3 border-t space-y-2">
-            {lastInvoice ? (
-              <>
-                <button onClick={handlePrint} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-md text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary-hover">
-                  <Printer className="h-4 w-4" /> In POS58
-                </button>
-                <button onClick={handleNewInvoice} className="w-full flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium border hover:bg-muted">
-                  <Receipt className="h-4 w-4" /> Hóa đơn mới
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => void handleCheckout()}
-                  disabled={!!blockedCheckoutReason || checkoutBusy}
-                  title={blockedCheckoutReason ?? ""}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-md text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                  <Check className="h-4 w-4" />
-                  Tạo hóa đơn — {formatVND(totals.total)}
-                </button>
-                {blockedCheckoutReason && <p className="text-[10px] text-center text-muted-foreground">{blockedCheckoutReason}</p>}
-                <button onClick={handlePrint} disabled={lines.length === 0}
-                  className="w-full flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium border hover:bg-muted transition-colors disabled:opacity-50">
-                  <Printer className="h-4 w-4" /> In tạm POS58
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Mobile sticky summary sheet */}
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-card border-t shadow-lg">
-          <button onClick={() => setMobileSummaryOpen((o) => !o)} className="w-full px-3 py-2 flex items-center justify-between text-xs">
+          {/* Mobile sticky summary sheet */}
+          <div className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-card border-t shadow-lg">
+            <button onClick={() => setMobileSummaryOpen((o) => !o)} className="w-full px-3 py-2 flex items-center justify-between text-xs">
             <span className="flex items-center gap-2">
               {mobileSummaryOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
               <span className="font-medium">{totalItems} SP</span>
               <span className="text-muted-foreground">·</span>
               <span className="font-bold text-primary">{formatVND(totals.total)}</span>
             </span>
-            {selectedPromotion && (
-              <span className={cn("text-[10px] px-1.5 py-0.5 rounded", selectedPromotionBackendEligible ? "bg-success-soft text-success" : "bg-warning-soft text-warning")}>
+              {selectedPromotion && (
+                  <span className={cn("text-[10px] px-1.5 py-0.5 rounded", selectedPromotionBackendEligible ? "bg-success-soft text-success" : "bg-warning-soft text-warning")}>
                 {selectedPromotionBackendEligible ? "✓ KM" : "⚠ KM"}
               </span>
+              )}
+            </button>
+            {mobileSummaryOpen && (
+                <div className="px-3 pb-3 max-h-[60vh] overflow-y-auto space-y-3 border-t">
+                  <div className="pt-3">
+                    <label className="text-[11px] font-medium text-muted-foreground">Khách hàng</label>
+                    <SearchableCombobox className="mt-1" value={selectedCustomer} onChange={setSelectedCustomer}
+                                        disabled={!!lastInvoice} showEmptyOption emptyOptionLabel="Khách lẻ" placeholder="Tìm SĐT, tên..."
+                                        options={customers.filter((c) => c.active).map((c) => ({ id: c.id, label: c.name, sub: `${c.code} · ${c.phone}` }))}
+                                        onCreateNew={() => setCustomerDrawerOpen(true)} createLabel="Tạo khách hàng mới" />
+                  </div>
+                  <PaymentMethodPicker
+                      value={paymentType}
+                      onChange={setPaymentType}
+                      disabled={!!lastInvoice}
+                      onOpenQr={paymentType !== "cash" && totals.total > 0 ? () => setQrDialogOpen(true) : undefined}
+                  />
+                  <PromotionBlock />
+                  {/* Shipping zone (mobile) — mirrors desktop right panel so cashiers can attach a vùng giao hàng on phones too. */}
+                  <div>
+                    <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                      <Truck className="h-3 w-3" /> Vùng giao hàng
+                    </label>
+                    <select
+                        value={shippingZoneCode}
+                        onChange={(e) => setShippingZoneCode(e.target.value)}
+                        disabled={!!lastInvoice || checkoutBusy}
+                        className="mt-1 w-full h-9 px-2 text-sm bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                    >
+                      <option value="">— Không gắn vùng —</option>
+                      {shippingZones.map((z) => (
+                          <option key={z.zoneCode} value={z.zoneCode}>
+                            {z.zoneCode} · {z.label} ({z.etaDays.min}–{z.etaDays.max} ngày)
+                          </option>
+                      ))}
+                    </select>
+                    {selectedShippingZone && (
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          In trên hóa đơn: <span className="font-mono">{selectedShippingZone.zoneCode}</span> · giao{" "}
+                          {selectedShippingZone.etaDays.min}–{selectedShippingZone.etaDays.max} ngày
+                        </p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[11px] text-muted-foreground">Phí ship</label>
+                      <input type="number" min={0} value={shippingFee || ""} onChange={(e) => setShippingFee(Math.max(0, +e.target.value || 0))}
+                             disabled={!!lastInvoice || checkoutBusy}
+                             className="mt-1 w-full h-8 px-2 text-sm text-right bg-background border rounded-md disabled:opacity-60" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-muted-foreground">VAT (%)</label>
+                      <input type="number" min={0} max={100} value={vatPercent || ""} onChange={(e) => setVatPercent(Math.max(0, Math.min(100, +e.target.value || 0)))}
+                             disabled={!!lastInvoice || checkoutBusy}
+                             className="mt-1 w-full h-8 px-2 text-sm text-right bg-background border rounded-md disabled:opacity-60" />
+                    </div>
+                  </div>
+                  <SummaryBreakdown />
+                </div>
             )}
-          </button>
-          {mobileSummaryOpen && (
-            <div className="px-3 pb-3 max-h-[60vh] overflow-y-auto space-y-3 border-t">
-              <div className="pt-3">
-                <label className="text-[11px] font-medium text-muted-foreground">Khách hàng</label>
-                <SearchableCombobox className="mt-1" value={selectedCustomer} onChange={setSelectedCustomer}
-                  disabled={!!lastInvoice} showEmptyOption emptyOptionLabel="Khách lẻ" placeholder="Tìm SĐT, tên..."
-                  options={customers.filter((c) => c.active).map((c) => ({ id: c.id, label: c.name, sub: `${c.code} · ${c.phone}` }))}
-                  onCreateNew={() => setCustomerDrawerOpen(true)} createLabel="Tạo khách hàng mới" />
-              </div>
-              <PaymentMethodPicker
-                value={paymentType}
-                onChange={setPaymentType}
-                disabled={!!lastInvoice}
-                onOpenQr={paymentType !== "cash" && totals.total > 0 ? () => setQrDialogOpen(true) : undefined}
-              />
-              <PromotionBlock />
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[11px] text-muted-foreground">Phí ship</label>
-                  <input type="number" min={0} value={shippingFee || ""} onChange={(e) => setShippingFee(Math.max(0, +e.target.value || 0))}
-                    disabled={!!lastInvoice || checkoutBusy}
-                    className="mt-1 w-full h-8 px-2 text-sm text-right bg-background border rounded-md disabled:opacity-60" />
-                </div>
-                <div>
-                  <label className="text-[11px] text-muted-foreground">VAT (%)</label>
-                  <input type="number" min={0} max={100} value={vatPercent || ""} onChange={(e) => setVatPercent(Math.max(0, Math.min(100, +e.target.value || 0)))}
-                    disabled={!!lastInvoice || checkoutBusy}
-                    className="mt-1 w-full h-8 px-2 text-sm text-right bg-background border rounded-md disabled:opacity-60" />
-                </div>
-              </div>
-              <SummaryBreakdown />
+            <div className="p-2 border-t">
+              {lastInvoice ? (
+                  <button onClick={handleNewInvoice} className="w-full py-2.5 rounded-md text-sm font-semibold bg-primary text-primary-foreground">Hóa đơn mới</button>
+              ) : (
+                  <button
+                      onClick={() => void handleCheckout()}
+                      disabled={!!blockedCheckoutReason || checkoutBusy}
+                      className="w-full py-2.5 rounded-md text-sm font-semibold bg-primary text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed">
+                    {blockedCheckoutReason ?? `Tạo hóa đơn — ${formatVND(totals.total)}`}
+                  </button>
+              )}
             </div>
-          )}
-          <div className="p-2 border-t">
-            {lastInvoice ? (
-              <button onClick={handleNewInvoice} className="w-full py-2.5 rounded-md text-sm font-semibold bg-primary text-primary-foreground">Hóa đơn mới</button>
-            ) : (
-              <button
-                onClick={() => void handleCheckout()}
-                disabled={!!blockedCheckoutReason || checkoutBusy}
-                className="w-full py-2.5 rounded-md text-sm font-semibold bg-primary text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed">
-                {blockedCheckoutReason ?? `Tạo hóa đơn — ${formatVND(totals.total)}`}
-              </button>
-            )}
           </div>
         </div>
-      </div>
 
-      {(lines.length > 0 || lastInvoice) && (
-        <Printable58Invoice invoice={pos58Invoice} lines={pos58Lines} />
-      )}
-      <CustomerFormDrawer
-        open={customerDrawerOpen}
-        onClose={() => setCustomerDrawerOpen(false)}
-        onSave={async (input) => { await adminCustomers.save(input); reloadCustomers(); }}
-      />
-      {paymentType !== "cash" && (
-        <PosQrDialog
-          open={qrDialogOpen}
-          onOpenChange={setQrDialogOpen}
-          amount={totals.total}
-          paymentType={paymentType as PosQrPaymentType}
-          reference={lastInvoice?.number}
+        {(lines.length > 0 || lastInvoice) && (
+            <Printable58Invoice invoice={pos58Invoice} lines={pos58Lines} />
+        )}
+        <CustomerFormDrawer
+            open={customerDrawerOpen}
+            onClose={() => setCustomerDrawerOpen(false)}
+            onSave={async (input) => { await adminCustomers.save(input); reloadCustomers(); }}
         />
-      )}
-    </>
+        {paymentType !== "cash" && (
+            <PosQrDialog
+                open={qrDialogOpen}
+                onOpenChange={setQrDialogOpen}
+                amount={totals.total}
+                paymentType={paymentType as PosQrPaymentType}
+                reference={lastInvoice?.number}
+            />
+        )}
+      </>
   );
 }
 
 function Row({ label, value, muted, className }: { label: string; value: string; muted?: boolean; className?: string }) {
   return (
-    <div className={cn("flex justify-between", className)}>
-      <span className={muted ? "text-muted-foreground" : ""}>{label}</span>
-      <span className="tabular-nums">{value}</span>
-    </div>
+      <div className={cn("flex justify-between", className)}>
+        <span className={muted ? "text-muted-foreground" : ""}>{label}</span>
+        <span className="tabular-nums">{value}</span>
+      </div>
   );
 }
 
@@ -1475,11 +1500,11 @@ const PAYMENT_METHODS: { value: Invoice["paymentType"]; label: string; icon: typ
 ];
 
 function PaymentMethodPicker({
-  value,
-  onChange,
-  disabled,
-  onOpenQr,
-}: {
+                               value,
+                               onChange,
+                               disabled,
+                               onOpenQr,
+                             }: {
   value: Invoice["paymentType"];
   onChange: (v: Invoice["paymentType"]) => void;
   disabled?: boolean;
@@ -1488,49 +1513,49 @@ function PaymentMethodPicker({
 }) {
   const activeMeta = PAYMENT_METHODS.find((m) => m.value === value);
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <label className="text-[11px] font-medium text-muted-foreground">Phương thức thanh toán</label>
-        {activeMeta && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+      <div>
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] font-medium text-muted-foreground">Phương thức thanh toán</label>
+          {activeMeta && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
             {activeMeta.label}
           </span>
+          )}
+        </div>
+        <div className="mt-1 grid grid-cols-2 gap-1.5">
+          {PAYMENT_METHODS.map((m) => {
+            const Icon = m.icon;
+            const active = value === m.value;
+            return (
+                <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => onChange(m.value)}
+                    disabled={disabled}
+                    className={cn(
+                        "flex items-center justify-center gap-1.5 h-9 px-2 text-xs font-medium rounded-md border transition-colors",
+                        "disabled:opacity-60 disabled:cursor-not-allowed",
+                        active
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-background text-foreground border-border hover:bg-muted",
+                    )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {m.label}
+                </button>
+            );
+          })}
+        </div>
+        {onOpenQr && (
+            <button
+                type="button"
+                onClick={onOpenQr}
+                className="mt-1.5 w-full h-8 px-2 text-xs font-medium rounded-md border border-primary/40 text-primary bg-primary/5 hover:bg-primary/10 transition-colors flex items-center justify-center gap-1.5"
+            >
+              <ScanLine className="h-3.5 w-3.5" />
+              Mở QR cho khách quét
+            </button>
         )}
       </div>
-      <div className="mt-1 grid grid-cols-2 gap-1.5">
-        {PAYMENT_METHODS.map((m) => {
-          const Icon = m.icon;
-          const active = value === m.value;
-          return (
-            <button
-              key={m.value}
-              type="button"
-              onClick={() => onChange(m.value)}
-              disabled={disabled}
-              className={cn(
-                "flex items-center justify-center gap-1.5 h-9 px-2 text-xs font-medium rounded-md border transition-colors",
-                "disabled:opacity-60 disabled:cursor-not-allowed",
-                active
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-background text-foreground border-border hover:bg-muted",
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {m.label}
-            </button>
-          );
-        })}
-      </div>
-      {onOpenQr && (
-        <button
-          type="button"
-          onClick={onOpenQr}
-          className="mt-1.5 w-full h-8 px-2 text-xs font-medium rounded-md border border-primary/40 text-primary bg-primary/5 hover:bg-primary/10 transition-colors flex items-center justify-center gap-1.5"
-        >
-          <ScanLine className="h-3.5 w-3.5" />
-          Mở QR cho khách quét
-        </button>
-      )}
-    </div>
   );
 }

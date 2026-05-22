@@ -65,21 +65,21 @@ export default function AdminPromotions() {
       status: filterStatus ?? undefined,
       kinds: filterType ? [filterType] : undefined,
     })
-      .then((page) => {
-        if (cancel) return;
-        setPromoList(page.items);
-        setTotal(page.total);
-        setApiError(null);
-      })
-      .catch((err) => {
-        if (cancel) return;
-        const message = err instanceof Error ? err.message : "Không tải được khuyến mãi từ backend";
-        setApiError(message);
-        setPromoList([]);
-      })
-      .finally(() => {
-        if (!cancel) setLoading(false);
-      });
+        .then((page) => {
+          if (cancel) return;
+          setPromoList(page.items);
+          setTotal(page.total);
+          setApiError(null);
+        })
+        .catch((err) => {
+          if (cancel) return;
+          const message = err instanceof Error ? err.message : "Không tải được khuyến mãi từ backend";
+          setApiError(message);
+          setPromoList([]);
+        })
+        .finally(() => {
+          if (!cancel) setLoading(false);
+        });
     return () => { cancel = true; };
   }, [page, pageSize, search, filterStatus, filterType]);
 
@@ -131,132 +131,138 @@ export default function AdminPromotions() {
   };
 
   return (
-    <div className="space-y-4 admin-dense">
-      <PageHeader
-        title="Khuyến mãi"
-        description={loading ? "Đang tải..." : `${promoList.length} chương trình`}
-        actions={
-          <button
-            onClick={() => setEditing(makeEmptyPromotion("percent"))}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover"
-          >
-            <Plus className="h-3.5 w-3.5" /> Tạo khuyến mãi
-          </button>
-        }
-      />
-
-      {apiError && (
-        <div className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
-          Lỗi API khuyến mãi: {apiError}
-        </div>
-      )}
-
-      <DataTableToolbar
-        search={search}
-        onSearchChange={(value) => {
-          setPage(1);
-          setSearch(value);
-        }}
-        searchPlaceholder="Tìm khuyến mãi..."
-        filters={
-          <>
-            <FilterChip label="Tất cả" active={!filterStatus && !filterType} onClick={() => { setPage(1); setFilterStatus(null); setFilterType(null); }} />
-            <FilterChip label="Đang chạy" active={filterStatus === "running"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "running" ? null : "running"); }} />
-            <FilterChip label="Sắp diễn ra" active={filterStatus === "scheduled"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "scheduled" ? null : "scheduled"); }} />
-            <FilterChip label="Đã hết hạn" active={filterStatus === "expired"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "expired" ? null : "expired"); }} />
-            <FilterChip label="Tạm dừng" active={filterStatus === "inactive"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "inactive" ? null : "inactive"); }} />
-            <span className="w-px h-5 bg-border mx-1" />
-            {(Object.entries(PROMOTION_TYPE_LABELS) as [PromotionType, string][]).map(([k, label]) => (
-              <FilterChip key={k} label={label} active={filterType === k} onClick={() => { setPage(1); setFilterType(filterType === k ? null : k); }} />
-            ))}
-          </>
-        }
-      />
-
-      {promoList.length === 0 ? (
-        <EmptyState
-          icon={Tags}
-          title="Chưa có khuyến mãi"
-          description="Tạo chương trình khuyến mãi đầu tiên"
-          action={
-            <button
-              onClick={() => setEditing(makeEmptyPromotion("percent"))}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover"
-            >
-              <Plus className="h-3.5 w-3.5" /> Tạo khuyến mãi
-            </button>
-          }
+      <div className="space-y-4 admin-dense">
+        <PageHeader
+            title="Khuyến mãi"
+            description={loading ? "Đang tải..." : `${promoList.length} chương trình`}
+            actions={
+              <button
+                  onClick={() => setEditing(makeEmptyPromotion("percent"))}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover"
+              >
+                <Plus className="h-3.5 w-3.5" /> Tạo khuyến mãi
+              </button>
+            }
         />
-      ) : (
-        <div className="space-y-2">
-          {promoList.map((p) => {
-            const summary = formatPromotionSummary(p);
-            const scopeText = formatScope(p, { categoryNames });
-            const effectiveStatus = getPromotionEffectiveStatus(p);
-            const badge = STATUS_BADGE[effectiveStatus];
-            return (
-              <div key={p.id} className="bg-card rounded-lg border p-4 hover:shadow-sm transition-shadow">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <h3 className="font-medium text-sm">{p.name}</h3>
-                      <StatusBadge status={badge.status} label={badge.label} />
-                      <span className={`inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-full ${TYPE_ICON_BG[p.type]}`}>
-                        {PROMOTION_TYPE_LABELS[p.type]}
-                      </span>
-                    </div>
-                    <p className="text-sm text-foreground font-medium mt-1">{summary}</p>
-                    {p.description && <p className="text-xs text-muted-foreground mt-0.5">{p.description}</p>}
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-muted-foreground bg-muted rounded-full">
+
+        {apiError && (
+            <div className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
+              Lỗi API khuyến mãi: {apiError}
+            </div>
+        )}
+
+        <DataTableToolbar
+            search={search}
+            onSearchChange={(value) => {
+              setPage(1);
+              setSearch(value);
+            }}
+            searchPlaceholder="Tìm khuyến mãi..."
+            filters={
+              <>
+                <FilterChip label="Tất cả" active={!filterStatus && !filterType} onClick={() => { setPage(1); setFilterStatus(null); setFilterType(null); }} />
+                <FilterChip label="Đang chạy" active={filterStatus === "running"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "running" ? null : "running"); }} />
+                <FilterChip label="Sắp diễn ra" active={filterStatus === "scheduled"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "scheduled" ? null : "scheduled"); }} />
+                <FilterChip label="Đã hết hạn" active={filterStatus === "expired"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "expired" ? null : "expired"); }} />
+                <FilterChip label="Tạm dừng" active={filterStatus === "inactive"} onClick={() => { setPage(1); setFilterStatus(filterStatus === "inactive" ? null : "inactive"); }} />
+                <span className="w-px h-5 bg-border mx-1" />
+                {(Object.entries(PROMOTION_TYPE_LABELS) as [PromotionType, string][]).map(([k, label]) => (
+                    <FilterChip key={k} label={label} active={filterType === k} onClick={() => { setPage(1); setFilterType(filterType === k ? null : k); }} />
+                ))}
+              </>
+            }
+        />
+
+        {promoList.length === 0 ? (
+            <EmptyState
+                icon={Tags}
+                title="Chưa có khuyến mãi"
+                description="Tạo chương trình khuyến mãi đầu tiên"
+                action={
+                  <button
+                      onClick={() => setEditing(makeEmptyPromotion("percent"))}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Tạo khuyến mãi
+                  </button>
+                }
+            />
+        ) : (
+            <div className="space-y-2">
+              {promoList.map((p) => {
+                const summary = formatPromotionSummary(p);
+                const scopeText = formatScope(p, { categoryNames });
+                const effectiveStatus = getPromotionEffectiveStatus(p);
+                const badge = STATUS_BADGE[effectiveStatus];
+                return (
+                    <div key={p.id} className="bg-card rounded-lg border p-3 sm:p-4 hover:shadow-sm transition-shadow">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start gap-2 flex-wrap">
+                            <h3 className="font-medium text-sm leading-snug break-words min-w-0 flex-1 sm:flex-none">
+                              {p.name}
+                            </h3>
+                            <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                              <StatusBadge status={badge.status} label={badge.label} />
+                              <span className={`inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-full ${TYPE_ICON_BG[p.type]}`}>
+                          {PROMOTION_TYPE_LABELS[p.type]}
+                        </span>
+                            </div>
+                          </div>
+                          <p className="text-sm text-foreground font-medium mt-1.5 line-clamp-2">{summary}</p>
+                          {p.description && (
+                              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{p.description}</p>
+                          )}
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] text-muted-foreground bg-muted rounded-full whitespace-nowrap">
                         <Calendar className="h-3 w-3" /> {formatDate(p.startDate)} — {formatDate(p.endDate)}
                       </span>
-                      <span className="inline-flex items-center px-2 py-0.5 text-[11px] text-muted-foreground bg-muted rounded-full">
+                            <span className="inline-flex items-center px-2 py-0.5 text-[11px] text-muted-foreground bg-muted rounded-full max-w-full truncate">
                         {scopeText}
                       </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 sm:self-start -mr-1 sm:mr-0">
+                          <button onClick={() => toggleActive(p.id)} className="p-1.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted" title={p.active ? "Tạm dừng" : "Kích hoạt"}>
+                            <Power className="h-4 w-4" />
+                          </button>
+                          <button onClick={() => setEditing({ ...p })} className="p-1.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted" title="Sửa">
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button onClick={() => setDeleteTarget(p.id)} className="p-1.5 text-muted-foreground hover:text-danger rounded hover:bg-muted" title="Xóa">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => toggleActive(p.id)} className="p-1.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted" title={p.active ? "Tạm dừng" : "Kích hoạt"}>
-                      <Power className="h-4 w-4" />
-                    </button>
-                    <button onClick={() => setEditing({ ...p })} className="p-1.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted" title="Sửa">
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button onClick={() => setDeleteTarget(p.id)} className="p-1.5 text-muted-foreground hover:text-danger rounded hover:bg-muted" title="Xóa">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          <TablePagination
-            page={page}
-            totalPages={Math.max(1, Math.ceil(total / pageSize))}
-            total={total}
-            rangeStart={total === 0 ? 0 : (page - 1) * pageSize + 1}
-            rangeEnd={Math.min(page * pageSize, total)}
-            pageSize={pageSize}
-            onPageChange={setPage}
-            onPageSizeChange={(value) => {
-              setPage(1);
-              setPageSize(value);
-            }}
-          />
-        </div>
-      )}
+                );
+              })}
+              <TablePagination
+                  page={page}
+                  totalPages={Math.max(1, Math.ceil(total / pageSize))}
+                  total={total}
+                  rangeStart={total === 0 ? 0 : (page - 1) * pageSize + 1}
+                  rangeEnd={Math.min(page * pageSize, total)}
+                  pageSize={pageSize}
+                  onPageChange={setPage}
+                  onPageSizeChange={(value) => {
+                    setPage(1);
+                    setPageSize(value);
+                  }}
+              />
+            </div>
+        )}
 
-      {editing && <PromotionFormShell promo={editing} onClose={() => setEditing(null)} onSave={handleSave} />}
-      <ConfirmDialog
-        open={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={handleDelete}
-        title="Xóa khuyến mãi?"
-        description="Khuyến mãi sẽ bị xóa vĩnh viễn. Thao tác này không thể hoàn tác."
-        confirmLabel="Xóa"
-        variant="danger"
-      />
-    </div>
+        {editing && <PromotionFormShell promo={editing} onClose={() => setEditing(null)} onSave={handleSave} />}
+        <ConfirmDialog
+            open={!!deleteTarget}
+            onClose={() => setDeleteTarget(null)}
+            onConfirm={handleDelete}
+            title="Xóa khuyến mãi?"
+            description="Khuyến mãi sẽ bị xóa vĩnh viễn. Thao tác này không thể hoàn tác."
+            confirmLabel="Xóa"
+            variant="danger"
+        />
+      </div>
   );
 }

@@ -169,7 +169,63 @@ export default function AdminInventoryReport() {
         {loading && <p className="text-sm text-muted-foreground">Đang tải báo cáo tồn kho từ backend...</p>}
         {error && <p className="text-sm text-danger">Không tải được báo cáo tồn kho: {error.message}</p>}
 
-        <div className="bg-card rounded-lg border overflow-x-auto">
+        {/* Mobile cards */}
+        <div className="sm:hidden space-y-2">
+          {tc.pageRows.map(r => (
+              <div key={`m-${r.variantCode}`} className={cn("bg-card rounded-lg border p-3", r.closingStock === 0 && "bg-danger-soft/30")}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-sm truncate">{r.productName}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{r.variantName} · <span className="font-mono">{r.variantCode}</span></p>
+                    <p className="text-[11px] text-muted-foreground truncate">{r.categoryName || "Không phân loại"} · {r.unit}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-bold text-sm">{formatNumber(r.closingStock)}</div>
+                    <div className="text-[11px] text-muted-foreground">{formatVND(r.closingValue)}</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-4 gap-1 mt-2 text-[11px]">
+                  <div><span className="block text-[10px] text-muted-foreground">Đầu kỳ</span>{formatNumber(r.openingStock)}</div>
+                  <div><span className="block text-[10px] text-muted-foreground">Nhập</span><span className="text-success font-medium">+{formatNumber(r.received)}</span></div>
+                  <div><span className="block text-[10px] text-muted-foreground">Bán</span><span className="text-primary font-medium">-{formatNumber(r.sold)}</span></div>
+                  <div><span className="block text-[10px] text-muted-foreground">Đ.chỉnh</span>{r.adjusted !== 0 ? <span className={r.adjusted > 0 ? 'text-success' : 'text-danger'}>{r.adjusted > 0 ? '+' : ''}{r.adjusted}</span> : '—'}</div>
+                </div>
+              </div>
+          ))}
+          {!loading && filtered.length === 0 && (
+              <div className="bg-card rounded-lg border p-6 text-center">
+                <Package className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
+                <p className="text-sm font-medium">Không có phân loại phù hợp bộ lọc.</p>
+              </div>
+          )}
+        </div>
+        {/* Mobile totals — bù phần tfoot vốn chỉ hiện trên desktop */}
+        {!loading && filtered.length > 0 && (
+            <div className="sm:hidden space-y-2">
+              {isPaginated && (
+                  <div className="bg-muted/30 rounded-lg border p-3 text-xs">
+                    <div className="flex items-center justify-between gap-2 text-muted-foreground">
+                      <span>Tổng trang hiện tại ({formatNumber(tc.rangeStart)}-{formatNumber(tc.rangeEnd)})</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-1 font-medium text-foreground">
+                      <span className="tabular-nums">{formatNumber(pageClosingStock)} đv</span>
+                      <span className="tabular-nums">{formatVND(pageClosingValue)}</span>
+                    </div>
+                  </div>
+              )}
+              <div className="bg-muted/60 rounded-lg border p-3 text-xs">
+                <div className="text-muted-foreground">
+                  {isFiltered ? "Tổng theo bộ lọc" : "Tổng toàn bộ"} ({formatNumber(tc.total)} phân loại)
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-1 font-bold text-foreground">
+                  <span className="tabular-nums">{formatNumber(totalClosingStock)} đv</span>
+                  <span className="tabular-nums">{formatVND(totalClosingValue)}</span>
+                </div>
+              </div>
+            </div>
+        )}
+        {/* Desktop / tablet table */}
+        <div className="hidden sm:block bg-card rounded-lg border overflow-x-auto">
           <table className="w-full text-sm min-w-[700px]">
             <thead>
             <tr className="border-b bg-muted/50">

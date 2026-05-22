@@ -12,7 +12,7 @@ import { TrendingUp, Download, ShoppingCart, BarChart3, Search, Check, X } from 
 import { toast } from "sonner";
 import { localToday } from "@/lib/localDate";
 import { cn } from "@/lib/utils";
-import { Area, AreaChart, CartesianGrid, Legend, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartContainer } from "@/components/ui/chart";
 
 type Group = "daily" | "weekly" | "monthly" | "yearly";
@@ -42,6 +42,7 @@ export default function AdminRevenueReport() {
   const [productPage, setProductPage] = useState(1);
   const [productPageSize, setProductPageSize] = useState(20);
   const PRODUCT_PAGE_SIZE_OPTIONS = [20, 50, 100];
+  const [categoryChartMode, setCategoryChartMode] = useState<"value" | "percent">("value");
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -130,11 +131,14 @@ export default function AdminRevenueReport() {
 
   const categorySeriesMeta = useMemo(() => {
     const map = new Map<string, { key: string; id: string; name: string }>();
+    const totals = new Map<string, number>();
     for (const row of backendCategorySeries) {
       const key = categorySeriesKey(row);
       if (!map.has(key)) map.set(key, { key, id: row.categoryId, name: row.categoryName });
+      totals.set(key, (totals.get(key) ?? 0) + (Number(row.revenue) || 0));
     }
-    return [...map.values()];
+    // Sort by total revenue desc so the largest category sits at the bottom of the stack.
+    return [...map.values()].sort((a, b) => (totals.get(b.key) ?? 0) - (totals.get(a.key) ?? 0));
   }, [backendCategorySeries]);
 
   const categoryChartRows = useMemo(() => {
@@ -149,6 +153,23 @@ export default function AdminRevenueReport() {
     }
     return [...byPeriod.values()];
   }, [backendCategorySeries]);
+
+  // Normalized rows for the 100% stacked (percent) mode.
+  const categoryChartRowsPercent = useMemo(() => {
+    return categoryChartRows.map((row) => {
+      let total = 0;
+      for (const meta of categorySeriesMeta) total += Number(row[meta.key] ?? 0);
+      const next: Record<string, string | number> = {
+        periodKey: row.periodKey as string,
+        periodLabel: row.periodLabel as string,
+      };
+      for (const meta of categorySeriesMeta) {
+        const v = Number(row[meta.key] ?? 0);
+        next[meta.key] = total > 0 ? +((v / total) * 100).toFixed(2) : 0;
+      }
+      return next;
+    });
+  }, [categoryChartRows, categorySeriesMeta]);
 
   const categoryChartHasRevenue = useMemo(
       () => backendCategorySeries.some((row) => row.revenue > 0),
@@ -262,14 +283,18 @@ export default function AdminRevenueReport() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">Nhóm theo:</span>
-          {(["daily", "weekly", "monthly", "yearly"] as Group[]).map((g) => (
-              <FilterChip key={g} label={groupLabel[g]} active={groupBy === g} onClick={() => setGroupBy(g)} />
-          ))}
-          <div className="ml-auto flex items-center gap-2">
-            <DateInput value={from} onChange={setFrom} />
-            <span className="text-xs text-muted-foreground">—</span>
-            <DateInput value={to} onChange={setTo} />
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">Nhóm theo:</span>
+            {(["daily", "weekly", "monthly", "yearly"] as Group[]).map((g) => (
+                <FilterChip key={g} label={groupLabel[g]} active={groupBy === g} onClick={() => setGroupBy(g)} />
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:ml-auto">
+            <div className="flex items-center gap-2 min-w-0">
+              <DateInput value={from} onChange={setFrom} />
+              <span className="text-xs text-muted-foreground">—</span>
+              <DateInput value={to} onChange={setTo} />
+            </div>
 
             <div className="relative" ref={pickerRef}>
               <button
@@ -450,7 +475,7 @@ export default function AdminRevenueReport() {
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="bg-card rounded-lg border p-4">
+          <div className="bg-card rounded-lg border p-3 sm:p-4">
             <h3 className="font-semibold text-sm mb-3">Doanh thu theo {groupLabel[groupBy].toLowerCase()}</h3>
             <ChartContainer config={{ revenue: { label: "Doanh thu", color: "hsl(var(--primary))" } }} className="h-72 w-full">
               <AreaChart data={rows} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
@@ -498,18 +523,44 @@ export default function AdminRevenueReport() {
             </div>
           </div>
 
-          <div className="bg-card rounded-lg border p-4">
-            <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="bg-card rounded-lg border p-3 sm:p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <h3 className="font-semibold text-sm">
                 {isFiltered ? "Doanh thu theo sản phẩm đã chọn" : "Doanh thu theo danh mục"}
               </h3>
-              <span className="text-[11px] text-muted-foreground">
-              {isFiltered
-                  ? `${selectedProductChartRows.length} sản phẩm`
-                  : selectedCategoryIds.length > 0
-                      ? "Danh mục đã chọn"
-                      : "Top 10 + Khác từ backend"}
-            </span>
+              <div className="flex items-center gap-2">
+                {!isFiltered && (
+                    <div className="inline-flex rounded-md border bg-muted/40 p-0.5 text-[11px]">
+                      <button
+                          type="button"
+                          onClick={() => setCategoryChartMode("value")}
+                          className={cn(
+                              "px-2 py-0.5 rounded-sm transition-colors",
+                              categoryChartMode === "value" ? "bg-background shadow-sm font-medium" : "text-muted-foreground",
+                          )}
+                      >
+                        ₫
+                      </button>
+                      <button
+                          type="button"
+                          onClick={() => setCategoryChartMode("percent")}
+                          className={cn(
+                              "px-2 py-0.5 rounded-sm transition-colors",
+                              categoryChartMode === "percent" ? "bg-background shadow-sm font-medium" : "text-muted-foreground",
+                          )}
+                      >
+                        %
+                      </button>
+                    </div>
+                )}
+                <span className="text-[11px] text-muted-foreground">
+                {isFiltered
+                    ? `${selectedProductChartRows.length} sản phẩm`
+                    : selectedCategoryIds.length > 0
+                        ? "Danh mục đã chọn"
+                        : "Top 10 + Khác từ backend"}
+              </span>
+              </div>
             </div>
             {isFiltered ? (
                 <div className="h-72 w-full overflow-y-auto scrollbar-thin pr-1">
@@ -550,48 +601,100 @@ export default function AdminRevenueReport() {
                         Không có dữ liệu doanh thu danh mục trong khoảng đã chọn
                       </div>
                   ) : (
-                      <LineChart data={categoryChartRows} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
-                        <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis dataKey="periodLabel" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                        <YAxis tickLine={false} axisLine={false} tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`} width={48} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                        <Tooltip
-                            cursor={{ stroke: "hsl(var(--success))", strokeWidth: 1, strokeDasharray: "3 3" }}
-                            content={({ active, payload, label }) => {
-                              if (!active || !payload?.length) return null;
-                              return (
-                                  <div className="rounded-lg border bg-background px-3 py-2 text-xs shadow-xl max-w-xs">
-                                    <p className="font-semibold mb-1">{label}</p>
-                                    <div className="space-y-0.5">
-                                      {payload.map((item) => (
-                                          <p key={String(item.dataKey)} className="flex items-center justify-between gap-3">
-                                            <span className="truncate" style={{ color: item.color }}>{item.name}</span>
-                                            <b>{formatVND(Number(item.value ?? 0))}</b>
-                                          </p>
-                                      ))}
-                                    </div>
-                                  </div>
-                              );
-                            }}
-                        />
-                        <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: 11 }} iconType="circle" />
-                        {categorySeriesMeta.map((series, index) => {
-                          const color = CATEGORY_COLORS[index % CATEGORY_COLORS.length];
-                          return (
-                              <Line
-                                  key={series.key}
-                                  type="linear"
-                                  dataKey={series.key}
-                                  name={series.name}
-                                  stroke={color}
-                                  strokeWidth={2}
-                                  connectNulls
-                                  isAnimationActive={false}
-                                  dot={{ r: 3, strokeWidth: 1, stroke: color, fill: "hsl(var(--background))" }}
-                                  activeDot={{ r: 5, strokeWidth: 2, stroke: "hsl(var(--background))", fill: color }}
+                      (() => {
+                        const isDaily = groupBy === "daily";
+                        const isPercent = categoryChartMode === "percent";
+                        const ChartCmp: typeof BarChart | typeof AreaChart = isDaily ? BarChart : AreaChart;
+                        const SeriesCmp: typeof Bar | typeof Area = isDaily ? Bar : Area;
+                        const data = isPercent ? categoryChartRowsPercent : categoryChartRows;
+                        const lastIndex = categorySeriesMeta.length - 1;
+                        return (
+                            <ChartCmp data={data} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
+                              <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                              <XAxis
+                                  dataKey="periodLabel"
+                                  tickLine={false}
+                                  axisLine={false}
+                                  tickMargin={8}
+                                  minTickGap={isDaily ? 8 : 24}
+                                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
                               />
-                          );
-                        })}
-                      </LineChart>
+                              <YAxis
+                                  tickLine={false}
+                                  axisLine={false}
+                                  width={isPercent ? 36 : 48}
+                                  domain={isPercent ? [0, 100] : undefined}
+                                  tickFormatter={(v) => (isPercent ? `${Math.round(Number(v))}%` : `${Math.round(Number(v) / 1000)}k`)}
+                                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                              />
+                              <Tooltip
+                                  cursor={isDaily
+                                      ? { fill: "hsl(var(--muted))", opacity: 0.4 }
+                                      : { stroke: "hsl(var(--success))", strokeWidth: 1, strokeDasharray: "3 3" }}
+                                  content={({ active, payload, label }) => {
+                                    if (!active || !payload?.length) return null;
+                                    const visible = [...payload]
+                                        .filter((p) => Number(p.value ?? 0) > 0)
+                                        .sort((a, b) => Number(b.value ?? 0) - Number(a.value ?? 0));
+                                    const total = visible.reduce((s, p) => s + Number(p.value ?? 0), 0);
+                                    return (
+                                        <div className="rounded-lg border bg-background px-3 py-2 text-xs shadow-xl max-w-xs">
+                                          <p className="font-semibold mb-1">{label}</p>
+                                          <div className="space-y-0.5">
+                                            {visible.map((item) => (
+                                                <p key={String(item.dataKey)} className="flex items-center justify-between gap-3">
+                                                  <span className="truncate flex items-center gap-1.5" style={{ color: item.color }}>
+                                                    <span className="inline-block w-2 h-2 rounded-sm" style={{ background: item.color }} />
+                                                    {item.name}
+                                                  </span>
+                                                  <b>{isPercent ? `${Number(item.value ?? 0).toFixed(1)}%` : formatVND(Number(item.value ?? 0))}</b>
+                                                </p>
+                                            ))}
+                                          </div>
+                                          {!isPercent && visible.length > 1 && (
+                                              <div className="mt-1 pt-1 border-t flex items-center justify-between gap-3">
+                                                <span className="text-muted-foreground">Tổng</span>
+                                                <b>{formatVND(total)}</b>
+                                              </div>
+                                          )}
+                                        </div>
+                                    );
+                                  }}
+                              />
+                              <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: 11 }} iconType="circle" />
+                              {categorySeriesMeta.map((series, index) => {
+                                const color = CATEGORY_COLORS[index % CATEGORY_COLORS.length];
+                                const common = {
+                                  dataKey: series.key,
+                                  name: series.name,
+                                  stackId: "revenue",
+                                  isAnimationActive: false,
+                                } as const;
+                                if (isDaily) {
+                                  return (
+                                      <Bar
+                                          key={series.key}
+                                          {...common}
+                                          fill={color}
+                                          radius={index === lastIndex ? [4, 4, 0, 0] : 0}
+                                      />
+                                  );
+                                }
+                                return (
+                                    <Area
+                                        key={series.key}
+                                        {...common}
+                                        type="monotone"
+                                        stroke={color}
+                                        fill={color}
+                                        fillOpacity={0.55}
+                                        strokeWidth={1.5}
+                                    />
+                                );
+                              })}
+                            </ChartCmp>
+                        );
+                      })()
                   )}
                 </ChartContainer>
             )}
@@ -611,65 +714,114 @@ export default function AdminRevenueReport() {
             <h3 className="font-semibold text-sm">Chi tiết theo {groupLabel[groupBy].toLowerCase()}</h3>
             <span className="text-[11px] text-muted-foreground">{rows.length} dòng</span>
           </div>
-          <table className="w-full text-sm">
-            <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="text-left px-3 py-2 font-medium text-muted-foreground">Kỳ</th>
-              <th className="text-right px-3 py-2 font-medium text-muted-foreground">Doanh thu</th>
-              <th className="text-center px-3 py-2 font-medium text-muted-foreground">Hóa đơn</th>
-              <th className="text-center px-3 py-2 font-medium text-muted-foreground">SP bán</th>
-              <th className="text-right px-3 py-2 font-medium text-muted-foreground">TB/hóa đơn</th>
-            </tr>
-            </thead>
-            <tbody>
+          {/* Mobile: stacked card list — no horizontal scroll */}
+          <ul className="sm:hidden divide-y">
             {rows.map((r, i) => (
-                <tr key={i} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2.5 font-medium">{r.period}</td>
-                  <td className="px-3 py-2.5 text-right text-primary font-medium">{formatVND(r.revenue)}</td>
-                  <td className="px-3 py-2.5 text-center">{r.invoiceCount}</td>
-                  <td className="px-3 py-2.5 text-center">{r.itemsSold}</td>
-                  <td className="px-3 py-2.5 text-right text-muted-foreground">
-                    {r.invoiceCount ? formatVND(Math.round(r.revenue / r.invoiceCount)) : "—"}
-                  </td>
-                </tr>
+                <li key={`m-${i}`} className="px-3 py-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-sm">{r.period}</span>
+                    <span className="text-primary font-semibold text-sm">{formatVND(r.revenue)}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-[11px] text-muted-foreground">
+                    <div><span className="block text-[10px] uppercase tracking-wide">Hóa đơn</span><span className="text-foreground font-medium">{r.invoiceCount}</span></div>
+                    <div><span className="block text-[10px] uppercase tracking-wide">SP bán</span><span className="text-foreground font-medium">{r.itemsSold}</span></div>
+                    <div className="text-right"><span className="block text-[10px] uppercase tracking-wide">TB/HĐ</span><span className="text-foreground font-medium">{r.invoiceCount ? formatVND(Math.round(r.revenue / r.invoiceCount)) : "—"}</span></div>
+                  </div>
+                </li>
             ))}
-            </tbody>
-            <tfoot>
-            <tr className="bg-muted/50 font-bold">
-              <td className="px-3 py-2">Tổng</td>
-              <td className="px-3 py-2 text-right text-primary">{formatVND(totalRevenue)}</td>
-              <td className="px-3 py-2 text-center">{totalInvoices}</td>
-              <td className="px-3 py-2 text-center">{totalItems}</td>
-              <td className="px-3 py-2 text-right">{totalInvoices ? formatVND(Math.round(totalRevenue / totalInvoices)) : "—"}</td>
-            </tr>
-            </tfoot>
-          </table>
+            <li className="px-3 py-2.5 bg-muted/50 font-semibold">
+              <div className="flex items-center justify-between text-sm">
+                <span>Tổng</span>
+                <span className="text-primary">{formatVND(totalRevenue)}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-[11px] mt-1">
+                <div><span className="block text-[10px] uppercase tracking-wide text-muted-foreground">Hóa đơn</span>{totalInvoices}</div>
+                <div><span className="block text-[10px] uppercase tracking-wide text-muted-foreground">SP bán</span>{totalItems}</div>
+                <div className="text-right"><span className="block text-[10px] uppercase tracking-wide text-muted-foreground">TB/HĐ</span>{totalInvoices ? formatVND(Math.round(totalRevenue / totalInvoices)) : "—"}</div>
+              </div>
+            </li>
+          </ul>
+          {/* Desktop / tablet: full table */}
+          <div className="hidden sm:block overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+              <tr className="border-b bg-muted/50">
+                <th className="text-left px-3 py-2 font-medium text-muted-foreground">Kỳ</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Doanh thu</th>
+                <th className="text-center px-3 py-2 font-medium text-muted-foreground">Hóa đơn</th>
+                <th className="text-center px-3 py-2 font-medium text-muted-foreground">SP bán</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">TB/hóa đơn</th>
+              </tr>
+              </thead>
+              <tbody>
+              {rows.map((r, i) => (
+                  <tr key={i} className="border-b last:border-0 hover:bg-muted/30">
+                    <td className="px-3 py-2.5 font-medium">{r.period}</td>
+                    <td className="px-3 py-2.5 text-right text-primary font-medium">{formatVND(r.revenue)}</td>
+                    <td className="px-3 py-2.5 text-center">{r.invoiceCount}</td>
+                    <td className="px-3 py-2.5 text-center">{r.itemsSold}</td>
+                    <td className="px-3 py-2.5 text-right text-muted-foreground">
+                      {r.invoiceCount ? formatVND(Math.round(r.revenue / r.invoiceCount)) : "—"}
+                    </td>
+                  </tr>
+              ))}
+              </tbody>
+              <tfoot>
+              <tr className="bg-muted/50 font-bold">
+                <td className="px-3 py-2">Tổng</td>
+                <td className="px-3 py-2 text-right text-primary">{formatVND(totalRevenue)}</td>
+                <td className="px-3 py-2 text-center">{totalInvoices}</td>
+                <td className="px-3 py-2 text-center">{totalItems}</td>
+                <td className="px-3 py-2 text-right">{totalInvoices ? formatVND(Math.round(totalRevenue / totalInvoices)) : "—"}</td>
+              </tr>
+              </tfoot>
+            </table>
+          </div>
         </div>
 
         <div className="bg-card rounded-lg border overflow-hidden">
           <div className="px-4 py-3 border-b">
             <h3 className="font-semibold text-sm">{isFiltered ? "Doanh thu theo sản phẩm đã chọn" : "Doanh thu theo sản phẩm"}</h3>
           </div>
-          <table className="w-full text-sm">
-            <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
-              <th className="text-left px-3 py-2 font-medium text-muted-foreground">Sản phẩm</th>
-              <th className="text-right px-3 py-2 font-medium text-muted-foreground">SL bán</th>
-              <th className="text-right px-3 py-2 font-medium text-muted-foreground">Doanh thu</th>
-            </tr>
-            </thead>
-            <tbody>
+          {/* Mobile: card list */}
+          <ul className="sm:hidden divide-y">
             {pagedProductRows.map((r, i) => (
-                <tr key={r.key} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2 text-muted-foreground">{productRangeStart + i}</td>
-                  <td className="px-3 py-2 font-medium">{r.name}</td>
-                  <td className="px-3 py-2 text-right">{formatNumber(r.qty)}</td>
-                  <td className="px-3 py-2 text-right font-medium text-primary">{formatVND(r.revenue)}</td>
-                </tr>
+                <li key={`mp-${r.key}`} className="px-3 py-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[11px] text-muted-foreground">#{productRangeStart + i}</div>
+                      <div className="font-medium text-sm truncate">{r.name}</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-primary font-semibold text-sm">{formatVND(r.revenue)}</div>
+                      <div className="text-[11px] text-muted-foreground">SL: {formatNumber(r.qty)}</div>
+                    </div>
+                  </div>
+                </li>
             ))}
-            </tbody>
-          </table>
+          </ul>
+          <div className="hidden sm:block overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+              <tr className="border-b bg-muted/50">
+                <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
+                <th className="text-left px-3 py-2 font-medium text-muted-foreground">Sản phẩm</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">SL bán</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Doanh thu</th>
+              </tr>
+              </thead>
+              <tbody>
+              {pagedProductRows.map((r, i) => (
+                  <tr key={r.key} className="border-b last:border-0 hover:bg-muted/30">
+                    <td className="px-3 py-2 text-muted-foreground">{productRangeStart + i}</td>
+                    <td className="px-3 py-2 font-medium">{r.name}</td>
+                    <td className="px-3 py-2 text-right">{formatNumber(r.qty)}</td>
+                    <td className="px-3 py-2 text-right font-medium text-primary">{formatVND(r.revenue)}</td>
+                  </tr>
+              ))}
+              </tbody>
+            </table>
+          </div>
           {productTotal > 0 && (
               <div className="px-4 py-2 border-t">
                 <TablePagination

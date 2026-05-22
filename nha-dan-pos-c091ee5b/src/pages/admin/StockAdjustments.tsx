@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import type { StockAdjustment } from "@/lib/mock-data";
 import { StockAdjustmentDetailDrawer } from "@/components/shared/StockAdjustmentDetailDrawer";
 import { TablePagination } from "@/components/shared/TablePagination";
+import { RowActions } from "@/components/shared/RowActions";
 import { useTableControls } from "@/hooks/useTableControls";
 import { useService } from "@/hooks/useService";
 import { adminStockAdjustments } from "@/services";
@@ -16,151 +17,165 @@ import { cn } from "@/lib/utils";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 export default function AdminStockAdjustments() {
-  const [search, setSearch] = useState("");
-  const debouncedSearch = useDebouncedValue(search, 250);
-  const [filterStatus, setFilterStatus] = useState<string | null>(null);
-  const [detail, setDetail] = useState<StockAdjustment | null>(null);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+    const [search, setSearch] = useState("");
+    const debouncedSearch = useDebouncedValue(search, 250);
+    const [filterStatus, setFilterStatus] = useState<string | null>(null);
+    const [detail, setDetail] = useState<StockAdjustment | null>(null);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(20);
 
-  const { data, loading, error, reload } = useService(
-    () =>
-      adminStockAdjustments.list({
-        search: debouncedSearch || undefined,
-        status: filterStatus ?? undefined,
-        page,
-        pageSize,
-      }),
-    [debouncedSearch, filterStatus, page, pageSize],
-  );
+    const { data, loading, error, reload } = useService(
+        () =>
+            adminStockAdjustments.list({
+                search: debouncedSearch || undefined,
+                status: filterStatus ?? undefined,
+                page,
+                pageSize,
+            }),
+        [debouncedSearch, filterStatus, page, pageSize],
+    );
 
-  const stockAdjustments = data?.items ?? [];
-  const apiTotal = data?.total ?? 0;
+    const stockAdjustments = data?.items ?? [];
+    const apiTotal = data?.total ?? 0;
 
-  useEffect(() => {
-    setPage(1);
-  }, [debouncedSearch, filterStatus]);
+    useEffect(() => {
+        setPage(1);
+    }, [debouncedSearch, filterStatus]);
 
-  const tc = useTableControls<StockAdjustment, "code" | "date" | "items">({
-    data: stockAdjustments,
-    pageSize: Math.max(stockAdjustments.length, 1),
-    initialSort: { key: "date", dir: "desc" },
-    sortAccessors: {
-      code: (a) => a.code,
-      date: (a) => new Date(a.createdDate),
-      items: (a) => a.itemCount,
-    },
-    resetToken: `${debouncedSearch}|${filterStatus}|${page}`,
-  });
+    const tc = useTableControls<StockAdjustment, "code" | "date" | "items">({
+        data: stockAdjustments,
+        pageSize: Math.max(stockAdjustments.length, 1),
+        initialSort: { key: "date", dir: "desc" },
+        sortAccessors: {
+            code: (a) => a.code,
+            date: (a) => new Date(a.createdDate),
+            items: (a) => a.itemCount,
+        },
+        resetToken: `${debouncedSearch}|${filterStatus}|${page}`,
+    });
 
-  return (
-    <div className="space-y-4 admin-dense">
-      <PageHeader
-        title="Kiểm kho / Điều chỉnh"
-        description={`${apiTotal} phiếu`}
-        actions={
-          <Link to="/admin/stock-adjustments/create" className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover">
-            <Plus className="h-3.5 w-3.5" /> Tạo phiếu điều chỉnh
-          </Link>
-        }
-      />
+    return (
+        <div className="space-y-4 admin-dense">
+            <PageHeader
+                title="Kiểm kho / Điều chỉnh"
+                description={`${apiTotal} phiếu`}
+                actions={
+                    <Link to="/admin/stock-adjustments/create" className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary-hover">
+                        <Plus className="h-3.5 w-3.5" /> Tạo phiếu điều chỉnh
+                    </Link>
+                }
+            />
 
-      <DataTableToolbar
-        search={search}
-        onSearchChange={(v) => {
-          setSearch(v);
-        }}
-        searchPlaceholder="Tìm mã phiếu, lý do..."
-        filters={<>
-          <FilterChip label="Tất cả" active={!filterStatus} onClick={() => setFilterStatus(null)} />
-          <FilterChip label="Nháp" active={filterStatus === 'draft'} onClick={() => setFilterStatus('draft')} />
-          <FilterChip label="Đã xác nhận" active={filterStatus === 'confirmed'} onClick={() => setFilterStatus('confirmed')} />
-        </>}
-      />
+            <DataTableToolbar
+                search={search}
+                onSearchChange={(v) => {
+                    setSearch(v);
+                }}
+                searchPlaceholder="Tìm mã phiếu, lý do..."
+                filters={<>
+                    <FilterChip label="Tất cả" active={!filterStatus} onClick={() => setFilterStatus(null)} />
+                    <FilterChip label="Nháp" active={filterStatus === 'draft'} onClick={() => setFilterStatus('draft')} />
+                    <FilterChip label="Đã xác nhận" active={filterStatus === 'confirmed'} onClick={() => setFilterStatus('confirmed')} />
+                </>}
+            />
 
-      {loading && <p className="text-sm text-muted-foreground">Đang tải phiếu điều chỉnh từ backend...</p>}
-      {error && <p className="text-sm text-danger">Không tải được phiếu điều chỉnh: {error.message}</p>}
+            {loading && <p className="text-sm text-muted-foreground">Đang tải phiếu điều chỉnh từ backend...</p>}
+            {error && <p className="text-sm text-danger">Không tải được phiếu điều chỉnh: {error.message}</p>}
 
-      {!loading && stockAdjustments.length === 0 ? (
-        <EmptyState icon={ClipboardCheck} title="Chưa có phiếu điều chỉnh" description="Tạo phiếu kiểm kho đầu tiên" />
-      ) : !loading && (
-        <>
-          <div className="hidden md:block bg-card rounded-lg border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left px-3 py-2 font-medium text-muted-foreground">Mã phiếu</th>
-                  <th className="text-left px-3 py-2 font-medium text-muted-foreground">Ngày tạo</th>
-                  <th className="text-left px-3 py-2 font-medium text-muted-foreground">Lý do</th>
-                  <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden lg:table-cell">Ghi chú</th>
-                  <th className="text-center px-3 py-2 font-medium text-muted-foreground">Mặt hàng</th>
-                  <th className="text-center px-3 py-2 font-medium text-muted-foreground">Trạng thái</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground w-[90px]">Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tc.pageRows.map(a => (
-                  <tr key={a.id} className={cn("border-b last:border-0 hover:bg-muted/30 transition-colors", a.status === 'draft' && "bg-info-soft/30")}>
-                    <td className="px-3 py-2.5 font-mono text-xs font-medium">
-                      <button onClick={() => setDetail(a)} className="hover:text-primary hover:underline">{a.code}</button>
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">{formatDate(a.createdDate)}</td>
-                    <td className="px-3 py-2.5">{a.reason}</td>
-                    <td className="px-3 py-2.5 text-muted-foreground text-xs max-w-[200px] truncate hidden lg:table-cell">{a.note}</td>
-                    <td className="px-3 py-2.5 text-center">{a.itemCount}</td>
-                    <td className="px-3 py-2.5 text-center">
-                      <StatusBadge status={a.status === 'draft' ? 'draft' : 'confirmed'} />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="inline-flex items-center justify-end gap-0.5 w-full">
-                        <button onClick={() => setDetail(a)} className="p-1.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted" title="Xem chi tiết"><Eye className="h-3.5 w-3.5" /></button>
-                        {a.status === 'draft' ? (
-                          <Link to={`/admin/stock-adjustments/create`} className="p-1.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted inline-flex" title="Sửa nháp"><Pencil className="h-3.5 w-3.5" /></Link>
-                        ) : (
-                          <span className="p-1.5 inline-flex text-muted-foreground/50" title="Đã xác nhận — không thể sửa"><Lock className="h-3.5 w-3.5" /></span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+            {!loading && stockAdjustments.length === 0 ? (
+                <EmptyState icon={ClipboardCheck} title="Chưa có phiếu điều chỉnh" description="Tạo phiếu kiểm kho đầu tiên" />
+            ) : !loading && (
+                <>
+                    <div className="hidden md:block bg-card rounded-lg border overflow-hidden">
+                        <table className="w-full text-sm">
+                            <thead>
+                            <tr className="border-b bg-muted/50">
+                                <th className="text-left px-3 py-2 font-medium text-muted-foreground">Mã phiếu</th>
+                                <th className="text-left px-3 py-2 font-medium text-muted-foreground">Ngày tạo</th>
+                                <th className="text-left px-3 py-2 font-medium text-muted-foreground">Lý do</th>
+                                <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden lg:table-cell">Ghi chú</th>
+                                <th className="text-center px-3 py-2 font-medium text-muted-foreground">Mặt hàng</th>
+                                <th className="text-center px-3 py-2 font-medium text-muted-foreground">Trạng thái</th>
+                                <th className="text-right px-3 py-2 font-medium text-muted-foreground w-[90px]">Thao tác</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {tc.pageRows.map(a => (
+                                <tr key={a.id} className={cn("border-b last:border-0 hover:bg-muted/30 transition-colors", a.status === 'draft' && "bg-info-soft/30")}>
+                                    <td className="px-3 py-2.5 font-mono text-xs font-medium">
+                                        <button onClick={() => setDetail(a)} className="hover:text-primary hover:underline">{a.code}</button>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-muted-foreground">{formatDate(a.createdDate)}</td>
+                                    <td className="px-3 py-2.5">{a.reason}</td>
+                                    <td className="px-3 py-2.5 text-muted-foreground text-xs max-w-[200px] truncate hidden lg:table-cell">{a.note}</td>
+                                    <td className="px-3 py-2.5 text-center">{a.itemCount}</td>
+                                    <td className="px-3 py-2.5 text-center">
+                                        <StatusBadge status={a.status === 'draft' ? 'draft' : 'confirmed'} />
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                        <div className="inline-flex items-center justify-end gap-0.5 w-full">
+                                            <button onClick={() => setDetail(a)} className="p-1.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted" title="Xem chi tiết"><Eye className="h-3.5 w-3.5" /></button>
+                                            {a.status === 'draft' ? (
+                                                <Link to={`/admin/stock-adjustments/create`} className="p-1.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted inline-flex" title="Sửa nháp"><Pencil className="h-3.5 w-3.5" /></Link>
+                                            ) : (
+                                                <span className="p-1.5 inline-flex text-muted-foreground/50" title="Đã xác nhận — không thể sửa"><Lock className="h-3.5 w-3.5" /></span>
+                                            )}
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                            </tbody>
+                        </table>
+                    </div>
 
-          <div className="md:hidden space-y-2">
-            {tc.pageRows.map(a => (
-              <div key={a.id} onClick={() => setDetail(a)} className={cn("bg-card rounded-lg border p-3 cursor-pointer", a.status === 'draft' && "border-info/30")}>
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-mono text-xs font-medium">{a.code}</p>
-                    <p className="text-xs text-muted-foreground">{a.reason} · {formatDate(a.createdDate)}</p>
-                  </div>
-                  <StatusBadge status={a.status === 'draft' ? 'draft' : 'confirmed'} />
-                </div>
-                <div className="flex items-center justify-between mt-2 pt-2 border-t text-xs text-muted-foreground">
-                  <span>{a.itemCount} mặt hàng</span>
-                  <span className="truncate max-w-[150px]">{a.note}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-          <TablePagination
-            page={page}
-            totalPages={Math.max(1, Math.ceil(apiTotal / pageSize))}
-            total={apiTotal}
-            rangeStart={apiTotal === 0 ? 0 : (page - 1) * pageSize + 1}
-            rangeEnd={Math.min(apiTotal, page * pageSize)}
-            pageSize={pageSize}
-            onPageChange={setPage}
-            onPageSizeChange={(n) => {
-              setPageSize(n);
-              setPage(1);
-            }}
-          />
-        </>
-      )}
+                    <div className="md:hidden space-y-2">
+                        {tc.pageRows.map(a => (
+                            <div key={a.id} onClick={() => setDetail(a)} className={cn("bg-card rounded-lg border p-3 cursor-pointer", a.status === 'draft' && "border-info/30")}>
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                        <p className="font-mono text-xs font-medium">{a.code}</p>
+                                        <p className="text-xs text-muted-foreground">{a.reason} · {formatDate(a.createdDate)}</p>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <StatusBadge status={a.status === 'draft' ? 'draft' : 'confirmed'} />
+                                        <RowActions
+                                            actions={[
+                                                { label: "Xem chi tiết", icon: <Eye className="h-3.5 w-3.5" />, onClick: () => setDetail(a) },
+                                                {
+                                                    label: a.status === 'draft' ? "Sửa nháp" : "Đã xác nhận",
+                                                    icon: a.status === 'draft' ? <Pencil className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />,
+                                                    disabled: a.status !== 'draft',
+                                                    disabledReason: "Đã xác nhận — không thể sửa",
+                                                    onClick: () => { window.location.href = "/admin/stock-adjustments/create"; },
+                                                },
+                                            ]}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex items-center justify-between mt-2 pt-2 border-t text-xs text-muted-foreground">
+                                    <span>{a.itemCount} mặt hàng</span>
+                                    <span className="truncate max-w-[150px]">{a.note}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <TablePagination
+                        page={page}
+                        totalPages={Math.max(1, Math.ceil(apiTotal / pageSize))}
+                        total={apiTotal}
+                        rangeStart={apiTotal === 0 ? 0 : (page - 1) * pageSize + 1}
+                        rangeEnd={Math.min(apiTotal, page * pageSize)}
+                        pageSize={pageSize}
+                        onPageChange={setPage}
+                        onPageSizeChange={(n) => {
+                            setPageSize(n);
+                            setPage(1);
+                        }}
+                    />
+                </>
+            )}
 
-      <StockAdjustmentDetailDrawer adjustment={detail} onClose={() => setDetail(null)} onChanged={reload} />
-    </div>
-  );
+            <StockAdjustmentDetailDrawer adjustment={detail} onClose={() => setDetail(null)} onChanged={reload} />
+        </div>
+    );
 }
