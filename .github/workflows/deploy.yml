@@ -37,15 +37,19 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          base: ${{ github.event.before }}
+          ref: ${{ github.sha }}
           filters: |
             backend:
               - 'NhaDanShop/**'
               - '.github/workflows/**'
             frontend:
-              - 'nha-dan-pos-c091ee5b/**'
+              - 'nha-dan-os-c091e5b/**'
               - '.github/workflows/**'
 
   # ─────────────────────────────────────────────
