@@ -586,4 +586,29 @@ class ProductSearchVariantAwareMvcIntegrationTest {
                 .andExpect(jsonPath("$.content[0].variants.length()").value(3))
                 .andExpect(jsonPath("$.totalElements").value(1));
     }
+
+    @Test
+    void admin_forSaleOnly_filtersNonSellableVariantsAndProductsWithoutSellableVariants() throws Exception {
+        long catId = createCategory();
+        String suffix = String.valueOf(System.nanoTime());
+        String visibleCode = "POSVIS-" + suffix;
+        String hiddenCode = "POSHID-" + suffix;
+        createSingleVariantProduct(
+                catId, hiddenCode, "Hidden POS " + suffix, "POSHIDV-" + suffix, "Hidden", true, false);
+        createSingleVariantProduct(
+                catId, visibleCode, "Visible POS " + suffix, "POSVISV-" + suffix, "Visible", true, true);
+
+        mockMvc.perform(get("/api/products")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("search", "POS")
+                        .param("forSaleOnly", "true")
+                        .param("page", "0")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].code").value(visibleCode))
+                .andExpect(jsonPath("$.content[0].variants.length()").value(1))
+                .andExpect(jsonPath("$.content[0].variants[0].isSellable").value(true))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
 }

@@ -93,6 +93,10 @@ class FlywayPostgresMigrationSmokeIntegrationTest {
         assertColumnExists("password_reset_tokens", "token_hash");
         assertColumnExists("customer_point_transactions", "idempotency_key");
         assertColumnExists("ghn_quote_logs", "latency_ms");
+        assertTimestampWithoutTimeZone("vouchers", "created_at");
+        assertTimestampWithoutTimeZone("vouchers", "updated_at");
+        assertTimestampWithoutTimeZone("vouchers", "start_at");
+        assertTimestampWithoutTimeZone("vouchers", "end_at");
     }
 
     private void assertColumnExists(String table, String column) {
@@ -105,5 +109,17 @@ class FlywayPostgresMigrationSmokeIntegrationTest {
                 table,
                 column);
         assertThat(c).isEqualTo(1L);
+    }
+
+    private void assertTimestampWithoutTimeZone(String table, String column) {
+        String dataType = jdbcTemplate.queryForObject(
+                """
+                        SELECT data_type FROM information_schema.columns
+                        WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?
+                        """,
+                String.class,
+                table,
+                column);
+        assertThat(dataType).isEqualToIgnoringCase("timestamp without time zone");
     }
 }

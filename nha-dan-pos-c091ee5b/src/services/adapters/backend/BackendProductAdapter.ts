@@ -33,9 +33,10 @@ function mapVariant(v: Record<string, unknown>): ProductVariant {
     stock: Number(v.stockQty ?? 0),
     minStock: Number(v.minStockQty ?? 0),
     expiryDays: Number(v.expiryDays ?? 0),
+    active: v.active !== false,
     isDefault: Boolean(v.isDefault),
     isSellable: withDefaultSellable(v.isSellable as boolean | undefined),
-    image: (v.imageUrl as string) | undefined,
+    image: (v.imageUrl as string) ?? undefined,
   };
 }
 
@@ -97,6 +98,7 @@ export class BackendProductAdapter implements ProductService {
     if (params?.query) q.set("search", params.query);
     if (params?.categoryId) q.set("categoryId", params.categoryId);
     if (params?.active === false) q.set("includeInactive", "true");
+    if (params?.forSaleOnly === true) q.set("forSaleOnly", "true");
     const page0 = Math.max(0, (params?.page ?? 1) - 1);
     q.set("page", String(page0));
     q.set("size", String(params?.pageSize ?? 50));

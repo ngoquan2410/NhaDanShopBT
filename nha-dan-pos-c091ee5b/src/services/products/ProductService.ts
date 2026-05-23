@@ -12,6 +12,7 @@ import type { Product, ProductVariant } from "@/lib/catalog-types";
 export interface ProductListParams extends ListQuery {
   categoryId?: string;
   active?: boolean;
+  forSaleOnly?: boolean;
   /** Inventory threshold filter, e.g. `{ to: 5 }` for low-stock. */
   stockRange?: { from?: number; to?: number };
 }

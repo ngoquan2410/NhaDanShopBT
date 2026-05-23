@@ -12,6 +12,7 @@ export interface ProductVariant {
   stock: number;
   minStock: number;
   expiryDays: number;
+  active?: boolean;
   isDefault: boolean;
   isSellable?: boolean;
   expiryDate?: string;

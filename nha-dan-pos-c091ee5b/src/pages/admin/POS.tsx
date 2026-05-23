@@ -32,6 +32,22 @@ import {
   type VariantTransactionSearchHit,
 } from "@/services/catalog/variantTransactionSearch";
 
+type PosCatalogProduct = { active?: boolean; variants: PosCatalogVariant[] };
+type PosCatalogVariant = { active?: boolean; isSellable?: boolean; isDefault?: boolean };
+
+export function isPosSellableVariant(v: PosCatalogVariant): boolean {
+  return v.active !== false && v.isSellable !== false;
+}
+
+export function pickPosSellableVariant<T extends PosCatalogVariant>(p: { variants: T[] }): T | null {
+  const variants = p.variants.filter(isPosSellableVariant);
+  return variants.find((v) => v.isDefault) || variants[0] || null;
+}
+
+export function isPosRenderableProduct(p: PosCatalogProduct): boolean {
+  return p.active === true && pickPosSellableVariant(p) != null;
+}
+
 type BackendSalesInvoiceResponse = {
   id: number;
   invoiceNo: string;
@@ -43,7 +59,7 @@ type BackendSalesInvoiceResponse = {
 type ScanMode = "hid" | "camera" | "manual";
 
 export default function AdminPOS() {
-  const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 200 }), []);
+  const { data: productData } = useService(() => productService.list({ page: 1, pageSize: 200, forSaleOnly: true }), []);
   const { data: customerData, reload: reloadCustomers } = useService(
       () => adminCustomers.list({ pageSize: 100 }),
       [],
@@ -140,7 +156,7 @@ export default function AdminPOS() {
       void searchVariantsForTransaction({ search: q, context: "pos", page: 0, size: 40, signal: ac.signal })
           .then((res) => {
             if (seq !== posSearchSeqRef.current) return;
-            setPosVariantHits(res.items);
+            setPosVariantHits(res.items.filter((hit) => hit.active !== false && hit.isSellable !== false));
           })
           .catch((e: unknown) => {
             if (e instanceof Error && e.name === "AbortError") return;
@@ -156,6 +172,10 @@ export default function AdminPOS() {
   }, [search]);
 
   const addProductByVariantSearchHit = (hit: VariantTransactionSearchHit) => {
+    if (hit.active === false || hit.isSellable === false) {
+      toast.error("Variant không bán tại POS/storefront (isSellable=false)");
+      return;
+    }
     const variant = {
       id: hit.variantId,
       code: hit.variantCode,
@@ -344,6 +364,10 @@ export default function AdminPOS() {
   };
 
   const addProductByVariant = (productId: string, productName: string, variant: typeof storeProducts[number]["variants"][number]) => {
+    if (variant.active === false || variant.isSellable === false) {
+      toast.error(`${productName} — ${variant.name} không bán tại POS/storefront (isSellable=false)`);
+      return;
+    }
     if (variant.stock === 0) {
       toast.error(`${productName} đã hết hàng`);
       return;
@@ -855,7 +879,8 @@ export default function AdminPOS() {
           : [pos58Empty];
 
   const filteredProducts = storeProducts.filter((p) =>
-      p.active && (!search || p.name.toLowerCase().includes(search.toLowerCase()) || p.code.toLowerCase().includes(search.toLowerCase()))
+      isPosRenderableProduct(p) &&
+      (!search || p.name.toLowerCase().includes(search.toLowerCase()) || p.code.toLowerCase().includes(search.toLowerCase()))
   );
 
   // Build promotion options from backend promotion rows + backend stateless evaluation.
@@ -1044,17 +1069,20 @@ export default function AdminPOS() {
                     <div className="grid grid-cols-2 gap-1.5" data-testid="pos-variant-search-hits">
                       {posVariantHits.map((hit) => {
                         const isOutOfStock = hit.stockQty === 0;
+                        const isNotSellable = hit.isSellable === false;
+                        const isDisabled = isOutOfStock || isNotSellable;
                         return (
                             <button
                                 key={hit.variantId}
                                 type="button"
                                 data-testid={`pos-variant-hit-${hit.variantCode}`}
                                 data-variant-id={hit.variantId}
-                                disabled={isOutOfStock}
+                                disabled={isDisabled}
+                                title={isNotSellable ? "Variant không bán lẻ" : undefined}
                                 onClick={() => addProductByVariantSearchHit(hit)}
                                 className={cn(
                                     "text-left p-2 rounded-md border text-xs transition-all",
-                                    isOutOfStock
+                                    isDisabled
                                         ? "opacity-50 cursor-not-allowed bg-muted"
                                         : "hover:border-primary hover:shadow-sm bg-background active:scale-[0.98]",
                                 )}
@@ -1064,7 +1092,11 @@ export default function AdminPOS() {
                               <p className="text-muted-foreground truncate">{hit.variantName}</p>
                               <div className="flex items-center justify-between mt-1">
                                 <span className="font-bold text-primary">{formatVND(hit.sellPrice)}</span>
-                                {isOutOfStock ? (
+                                {isNotSellable ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted text-muted-foreground whitespace-nowrap">
+                                      Không bán lẻ
+                                    </span>
+                                ) : isOutOfStock ? (
                                     <StatusBadge status="out-of-stock" size="sm" />
                                 ) : hit.stockQty <= hit.minStockQty ? (
                                     <StatusBadge status="low-stock" label={`${hit.stockQty}`} size="sm" />
@@ -1081,7 +1113,8 @@ export default function AdminPOS() {
               ) : (
                   <div className="grid grid-cols-2 gap-1.5">
                     {filteredProducts.map((product) => {
-                      const dv = product.variants.find((v) => v.isDefault) || product.variants[0];
+                      const dv = pickPosSellableVariant(product);
+                      if (!dv) return null;
                       const isOutOfStock = dv.stock === 0;
                       return (
                           <button key={product.id} disabled={isOutOfStock} onClick={() => addProductByVariant(product.id, product.name, dv)}

@@ -50,6 +50,7 @@ import static org.mockito.Mockito.when;
         InvoiceService.class,
         ProductBatchService.class,
         StockMutationService.class,
+        StockedCatalogGuardService.class,
         ProductVariantService.class,
         ProductComboService.class,
         CustomerService.class,
@@ -102,6 +103,19 @@ class Slice6bPosTraceabilityIntegrationTest {
         assertEquals("batch", scan.kind());
         assertEquals(later.getId(), scan.batchId());
         assertTrue(scan.sellable());
+    }
+
+    @Test
+    void scan_batch_payload_rejects_non_sellable_variant() {
+        ProductVariant v = variantSkuNs("SCAN-NS");
+        ProductBatch b = mkBatch(v, "NS", plusDays(30), 10, new BigDecimal("9000"));
+
+        PosScanResponse scan = posScanService.scan("BATCH:" + b.getId());
+
+        assertEquals("batch", scan.kind());
+        assertEquals(b.getId(), scan.batchId());
+        assertTrue(!scan.sellable());
+        assertTrue(scan.blockReason().contains("isSellable=false"));
     }
 
     @Test

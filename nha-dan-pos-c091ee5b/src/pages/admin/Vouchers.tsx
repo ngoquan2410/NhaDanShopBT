@@ -13,7 +13,7 @@ import { formatVND } from "@/lib/format";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { toast } from "sonner";
-import type { AdminVoucherRow } from "@/services/admin/adminVouchersApi";
+import type { AdminVoucherRow, VoucherEffectiveStatus } from "@/services/admin/adminVouchersApi";
 import {
   buildVoucherUpsertBody,
   createAdminVoucher,
@@ -59,6 +59,34 @@ const emptyDraft: Draft = {
 function isCodeTakenBackend(code: string, rows: AdminVoucherRow[], editingId?: number): boolean {
   const c = code.trim().toUpperCase();
   return rows.some((r) => r.id !== editingId && r.code.toUpperCase() === c);
+}
+
+/**
+ * UI-only derivation. Does NOT change `active` semantics (admin enable/disable flag)
+ * and does NOT call any new API. Maps the row to a visual lifecycle badge:
+ *   inactive  → "Tạm tắt"        (active=false always wins)
+ *   expired   → "Hết hạn"        (now > endAt)
+ *   scheduled → "Sắp áp dụng"    (now < startAt)
+ *   running   → "Đang hiệu lực"  (otherwise)
+ * If the backend later provides an explicit `effectiveStatus`, prefer it.
+ */
+export function getVoucherEffectiveStatus(v: AdminVoucherRow): VoucherEffectiveStatus {
+  if (v.effectiveStatus) return v.effectiveStatus;
+  if (v.active === false) return "inactive";
+  const now = Date.now();
+  const start = v.startAt ? Date.parse(v.startAt) : NaN;
+  const end = v.endAt ? Date.parse(v.endAt) : NaN;
+  if (!Number.isNaN(end) && now > end) return "expired";
+  if (!Number.isNaN(start) && now < start) return "scheduled";
+  return "running";
+}
+
+function VoucherEffectiveBadge({ row }: { row: AdminVoucherRow }) {
+  const s = getVoucherEffectiveStatus(row);
+  if (s === "running") return <StatusBadge status="active" label="Đang hiệu lực" />;
+  if (s === "scheduled") return <StatusBadge status="pending" label="Sắp áp dụng" />;
+  if (s === "expired") return <StatusBadge status="expired" label="Hết hạn" />;
+  return <StatusBadge status="inactive" label="Tạm tắt" />;
 }
 
 /**
@@ -140,7 +168,7 @@ export default function VouchersPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const debouncedSearch = useDebouncedValue(searchInput, 350);
-  const [status, setStatus] = useState<"all" | "active" | "inactive">("all");
+  const [status, setStatus] = useState<"all" | VoucherEffectiveStatus>("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
@@ -310,7 +338,7 @@ export default function VouchersPage() {
                     value={status}
                     onValueChange={(next) => {
                       setPage(1);
-                      setStatus(next as "all" | "active" | "inactive");
+                      setStatus(next as "all" | VoucherEffectiveStatus);
                     }}
                 >
                   <SelectTrigger className="w-[160px] h-9 text-xs">
@@ -318,7 +346,9 @@ export default function VouchersPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Tất cả</SelectItem>
-                    <SelectItem value="active">Đang dùng</SelectItem>
+                    <SelectItem value="running">Đang hiệu lực</SelectItem>
+                    <SelectItem value="scheduled">Sắp áp dụng</SelectItem>
+                    <SelectItem value="expired">Hết hạn</SelectItem>
                     <SelectItem value="inactive">Tạm tắt</SelectItem>
                   </SelectContent>
                 </Select>
@@ -369,7 +399,7 @@ export default function VouchersPage() {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-mono font-semibold text-primary text-sm">{v.code}</span>
-                            <StatusBadge status={v.active ? "active" : "inactive"} label={v.active ? "Đang dùng" : "Tắt"} />
+                            <VoucherEffectiveBadge row={v} />
                           </div>
                           {v.ruleSummary && <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{v.ruleSummary}</p>}
                           <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -457,7 +487,7 @@ export default function VouchersPage() {
                               : "Không giới hạn"}
                         </td>
                         <td className="px-3 py-2 text-center">
-                          <StatusBadge status={v.active ? "active" : "inactive"} label={v.active ? "Đang dùng" : "Tắt"} />
+                          <VoucherEffectiveBadge row={v} />
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex items-center justify-end gap-1">

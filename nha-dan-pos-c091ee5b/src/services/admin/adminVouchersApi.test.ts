@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as adminApi from "@/services/auth/adminApi";
-import { buildVoucherUpsertBody, fetchAdminVoucherPage, parseAdminVoucherRow, toLocalDateInput } from "./adminVouchersApi";
+import {
+  buildVoucherUpsertBody,
+  dateInputToEndAt,
+  dateInputToStartAt,
+  fetchAdminVoucherPage,
+  parseAdminVoucherRow,
+  toLocalDateInput,
+} from "./adminVouchersApi";
 
 vi.mock("@/services/auth/adminApi", () => ({
   adminFetchJson: vi.fn(),
@@ -23,6 +30,8 @@ describe("adminVouchersApi", () => {
       freeShipping: true,
       startAt: "2026-01-01T00:00:00",
       endAt: null,
+      effectiveStatus: "expired",
+      currentlyActive: false,
       createdAt: "2026-01-01T00:00:00",
       updatedAt: "2026-01-02T00:00:00",
     });
@@ -36,6 +45,8 @@ describe("adminVouchersApi", () => {
     expect(row.freeShipping).toBe(true);
     expect(row.startAt).toContain("2026-01-01");
     expect(row.endAt).toBeNull();
+    expect(row.effectiveStatus).toBe("expired");
+    expect(row.currentlyActive).toBe(false);
   });
 
   it("buildVoucherUpsertBody clears percent/fixed when freeShipping (backend conflict rule)", () => {
@@ -59,6 +70,13 @@ describe("adminVouchersApi", () => {
 
   it("toLocalDateInput strips time from ISO", () => {
     expect(toLocalDateInput("2026-04-01T15:30:00")).toBe("2026-04-01");
+  });
+
+  it("serializes date input as local LocalDateTime strings without offset", () => {
+    expect(dateInputToStartAt("2026-05-12")).toBe("2026-05-12T00:00:00");
+    expect(dateInputToEndAt("2026-05-12")).toBe("2026-05-12T23:59:59");
+    expect(dateInputToStartAt("2026-05-12")).not.toMatch(/Z|\+07:00/);
+    expect(dateInputToEndAt("2026-05-12")).not.toMatch(/Z|\+07:00/);
   });
 
   it("sends server-side list query params for voucher page", async () => {

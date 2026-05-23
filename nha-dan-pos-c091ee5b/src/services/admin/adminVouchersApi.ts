@@ -6,6 +6,8 @@
 import { adminFetchJson } from "@/services/auth/adminApi";
 import type { MultiSortRule } from "@/services/types";
 
+export type VoucherEffectiveStatus = "running" | "scheduled" | "expired" | "inactive";
+
 /** Row as returned by Spring `VoucherResponse` (camelCase JSON). */
 export type AdminVoucherRow = {
   id: number;
@@ -19,6 +21,8 @@ export type AdminVoucherRow = {
   freeShipping: boolean;
   startAt: string | null;
   endAt: string | null;
+  effectiveStatus?: VoucherEffectiveStatus;
+  currentlyActive?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -39,6 +43,10 @@ function num(v: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function effectiveStatus(v: unknown): VoucherEffectiveStatus | undefined {
+  return v === "running" || v === "scheduled" || v === "expired" || v === "inactive" ? v : undefined;
+}
+
 function bool(v: unknown, fallback = false): boolean {
   return typeof v === "boolean" ? v : fallback;
 }
@@ -56,6 +64,8 @@ export function parseAdminVoucherRow(raw: Record<string, unknown>): AdminVoucher
     freeShipping: bool(raw.freeShipping, false),
     startAt: raw.startAt != null ? String(raw.startAt) : null,
     endAt: raw.endAt != null ? String(raw.endAt) : null,
+    effectiveStatus: effectiveStatus(raw.effectiveStatus),
+    currentlyActive: typeof raw.currentlyActive === "boolean" ? raw.currentlyActive : undefined,
     createdAt: String(raw.createdAt ?? ""),
     updatedAt: String(raw.updatedAt ?? ""),
   };
@@ -120,7 +130,7 @@ export async function fetchAdminVoucherPage(params?: {
   page?: number;
   size?: number;
   search?: string;
-  status?: "all" | "active" | "inactive";
+  status?: "all" | "active" | VoucherEffectiveStatus;
   sort?: MultiSortRule[] | { field: string; direction: "asc" | "desc" };
 }): Promise<{ items: AdminVoucherRow[]; total: number; totalPages: number; page: number; size: number }> {
   const page = Math.max(0, params?.page ?? 0);

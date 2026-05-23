@@ -16,6 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.persistence.criteria.Predicate;
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -27,6 +29,7 @@ import java.util.Set;
 public class VoucherService {
 
     private final VoucherRepository voucherRepository;
+    private final Clock businessClock;
     private static final Set<String> VOUCHER_SORT_WHITELIST = Set.of(
             "createdAt", "updatedAt", "code", "startAt", "endAt", "active", "minSubtotal", "percent", "fixedAmount");
 
@@ -73,7 +76,8 @@ public class VoucherService {
     }
 
     public List<VoucherResponse> listActive() {
-        return voucherRepository.findByActiveTrueOrderByCodeAsc().stream()
+        LocalDateTime now = LocalDateTime.now(businessClock);
+        return voucherRepository.findAll(buildCurrentlyActiveSpec(now), Sort.by(Sort.Order.asc("code"))).stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -85,7 +89,7 @@ public class VoucherService {
     public void delete(Long id) {
         Voucher v = voucherRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy voucher ID: " + id));
-        if (voucherRepository.isVoucherCodeUsedInAnySnapshot(v.getCode())) {
+        if (voucherRepository.isVoucherCodeUsedInAnySnapshot(v.getCode()) || "expired".equals(effectiveStatus(v))) {
             v.setActive(false);
             voucherRepository.save(v);
             return;
@@ -155,9 +159,29 @@ public class VoucherService {
                 Boolean.TRUE.equals(v.getFreeShipping()),
                 v.getStartAt(),
                 v.getEndAt(),
+                effectiveStatus(v),
+                currentlyActive(v),
                 v.getCreatedAt(),
                 v.getUpdatedAt()
         );
+    }
+
+    public String effectiveStatus(Voucher v) {
+        if (!Boolean.TRUE.equals(v.getActive())) {
+            return "inactive";
+        }
+        LocalDateTime now = LocalDateTime.now(businessClock);
+        if (v.getStartAt() != null && now.isBefore(v.getStartAt())) {
+            return "scheduled";
+        }
+        if (v.getEndAt() != null && now.isAfter(v.getEndAt())) {
+            return "expired";
+        }
+        return "running";
+    }
+
+    private boolean currentlyActive(Voucher v) {
+        return "running".equals(effectiveStatus(v));
     }
 
     private static BigDecimal nvl(BigDecimal b) {
@@ -194,7 +218,7 @@ public class VoucherService {
         }
         String lower = normalized.toLowerCase(Locale.ROOT);
         return switch (lower) {
-            case "active", "inactive", "archived" -> lower;
+            case "all", "active", "running", "scheduled", "expired", "inactive", "archived" -> lower;
             default -> throw new IllegalArgumentException("status không hợp lệ: " + input);
         };
     }
@@ -202,11 +226,24 @@ public class VoucherService {
     private Specification<Voucher> buildAdminListSpec(String search, String status) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
-            if (status != null) {
+            if (status != null && !"all".equals(status)) {
+                LocalDateTime now = LocalDateTime.now(businessClock);
                 if ("active".equals(status)) {
                     predicates.add(cb.isTrue(root.get("active")));
-                } else {
+                } else if ("inactive".equals(status) || "archived".equals(status)) {
                     predicates.add(cb.isFalse(root.get("active")));
+                } else if ("running".equals(status)) {
+                    predicates.add(cb.isTrue(root.get("active")));
+                    predicates.add(cb.or(root.get("startAt").isNull(), cb.lessThanOrEqualTo(root.<LocalDateTime>get("startAt"), now)));
+                    predicates.add(cb.or(root.get("endAt").isNull(), cb.greaterThanOrEqualTo(root.<LocalDateTime>get("endAt"), now)));
+                } else if ("scheduled".equals(status)) {
+                    predicates.add(cb.isTrue(root.get("active")));
+                    predicates.add(cb.isNotNull(root.get("startAt")));
+                    predicates.add(cb.greaterThan(root.<LocalDateTime>get("startAt"), now));
+                } else if ("expired".equals(status)) {
+                    predicates.add(cb.isTrue(root.get("active")));
+                    predicates.add(cb.isNotNull(root.get("endAt")));
+                    predicates.add(cb.lessThan(root.<LocalDateTime>get("endAt"), now));
                 }
             }
             if (search != null) {
@@ -218,5 +255,13 @@ public class VoucherService {
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
+    }
+
+    private Specification<Voucher> buildCurrentlyActiveSpec(LocalDateTime now) {
+        return (root, query, cb) -> cb.and(
+                cb.isTrue(root.get("active")),
+                cb.or(root.get("startAt").isNull(), cb.lessThanOrEqualTo(root.<LocalDateTime>get("startAt"), now)),
+                cb.or(root.get("endAt").isNull(), cb.greaterThanOrEqualTo(root.<LocalDateTime>get("endAt"), now))
+        );
     }
 }

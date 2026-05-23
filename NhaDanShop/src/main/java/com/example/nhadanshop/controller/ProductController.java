@@ -42,6 +42,7 @@ public class ProductController {
             @RequestParam(required = false) String search,
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false, defaultValue = "false") boolean includeInactive,
+            @RequestParam(required = false, defaultValue = "false") boolean forSaleOnly,
             @RequestParam(required = false) String productType,
             @PageableDefault(size = 50, sort = "name") Pageable pageable) {
         if (includeInactive && !isRoleAdmin()) {
@@ -51,7 +52,7 @@ public class ProductController {
             return productService.searchPublic(search, categoryId, productType, pageable);
         }
         return productService.search(
-                search, categoryId, includeInactive, productType, false, pageable);
+                search, categoryId, includeInactive, productType, forSaleOnly, pageable);
     }
 
     private boolean isRoleAdmin() {

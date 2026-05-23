@@ -15,6 +15,8 @@ public record VoucherResponse(
         boolean freeShipping,
         LocalDateTime startAt,
         LocalDateTime endAt,
+        String effectiveStatus,
+        boolean currentlyActive,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {}

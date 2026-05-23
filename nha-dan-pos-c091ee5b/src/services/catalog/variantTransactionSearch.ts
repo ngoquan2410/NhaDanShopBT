@@ -47,7 +47,7 @@ function mapHit(r: Record<string, unknown>): VariantTransactionSearchHit {
     productName: String(r.productName ?? ""),
     productType: String(r.productType ?? ""),
     active: Boolean(r.active),
-    isSellable: Boolean(r.isSellable),
+    isSellable: r.isSellable !== false,
     sellUnit: String(r.sellUnit ?? ""),
     importUnit: String(r.importUnit ?? ""),
     categoryId: r.categoryId != null ? String(r.categoryId) : "",
