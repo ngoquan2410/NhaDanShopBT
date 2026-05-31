@@ -1,0 +1,33 @@
+<svg id="nha-dan-logo-compact" width="350" height="110" viewBox="0 0 350 110" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="goldCompact" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFE259" />
+      <stop offset="100%" stop-color="#FFA751" />
+    </linearGradient>
+    <linearGradient id="redCompact" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#E53E3E" />
+      <stop offset="100%" stop-color="#9B2C2C" />
+    </linearGradient>
+    <filter id="shadowCompact" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="2" dy="3" stdDeviation="2" flood-color="#000000" flood-opacity="0.25" />
+    </filter>
+  </defs>
+  <path d="M0 10C0 10 120 0 240 10C350 20 350 90 240 100C120 110 0 100 0 100Z" fill="#D35400" opacity="0.08" />
+  <g transform="translate(10 10)" filter="url(#shadowCompact)">
+    <path d="M30 15C20 28 18 32 12 45C4 60 4 75 20 85C36 90 48 80 52 70C56 50 48 30 38 15Z" fill="#FFFFFF" fill-opacity="0.8" stroke="#E53E3E" stroke-width="2" />
+    <path d="M24 20C30 20 32 16 32 16" stroke="#22C55E" stroke-width="2.5" fill="none" />
+    <circle cx="20" cy="55" r="2" fill="#EF4444" />
+    <circle cx="35" cy="62" r="2" fill="#22C55E" />
+    <circle cx="28" cy="70" r="1.5" fill="#FFE066" />
+    <g transform="translate(32 35)">
+      <rect x="5" y="10" width="30" height="40" rx="8" fill="#FFFFFF" stroke="#FFA751" stroke-width="2" />
+      <rect x="8" y="2" width="24" height="8" rx="2" fill="#FFA751" />
+      <rect x="9" y="22" width="22" height="10" fill="#900C3F" />
+      <circle cx="15" cy="40" r="1" fill="#E65100" />
+      <circle cx="25" cy="42" r="1" fill="#E65100" />
+    </g>
+  </g>
+  <text x="135" y="42" font-family="Montserrat, Arial, sans-serif" font-weight="800" font-size="20" fill="#FFA751" letter-spacing="1">BÁNH TRÁNG</text>
+  <text x="135" y="85" font-family="Playball, 'Segoe Script', cursive" font-size="44" font-weight="700" fill="url(#redCompact)" stroke="#FFE259" stroke-width="1.2" filter="url(#shadowCompact)">Nhã Đan</text>
+  <text x="137" y="102" font-family="Montserrat, Arial, sans-serif" font-weight="700" font-size="8" fill="#64748B" letter-spacing="0.5">BÁNH TRÁNG • MUỐI • ĐỒ ĂN VẶT</text>
+</svg>

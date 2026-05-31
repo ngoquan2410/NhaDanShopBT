@@ -8,9 +8,10 @@ import {
   LayoutDashboard, FolderTree, Package, Layers, Factory, FileInput, Receipt,
   ShoppingCart, Clock, Tags, Users, Truck, ClipboardCheck,
   BarChart3, TrendingUp, DollarSign, UserCog, Shield,
-  ChevronLeft, ChevronRight, Menu, X, Store, Settings, MapPin,
+  ChevronLeft, ChevronRight, Menu, X, Settings, MapPin,
   AlertCircle,
 } from "lucide-react";
+import { BrandLogo } from "@/components/branding/BrandLogo";
 
 const navGroups = [
   {
@@ -139,7 +140,7 @@ export function AdminSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }:
     return location.pathname.startsWith(path);
   };
 
-  const badgeFor = (item: any): number | undefined => {
+  const badgeFor = (item: { badgeKey?: "unmatched" | "pending_orders"; badge?: number }): number | undefined => {
     if (item.badgeKey === "unmatched") return unmatchedCount > 0 ? unmatchedCount : undefined;
     if (item.badgeKey === "pending_orders") return pendingCount > 0 ? pendingCount : undefined;
     return item.badge;
@@ -149,8 +150,18 @@ export function AdminSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }:
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className={cn("flex items-center gap-2 px-4 h-14 border-b border-sidebar-border shrink-0", collapsed && "justify-center px-2")}>
-        <Store className="h-6 w-6 text-sidebar-primary shrink-0" />
-        {!collapsed && <span className="font-bold text-sidebar-foreground text-sm tracking-tight">Nhã Đan Shop</span>}
+        <Link
+          to="/admin"
+          onClick={onMobileClose}
+          className={cn("flex min-w-0 items-center", collapsed ? "justify-center" : "w-full")}
+          aria-label="Nhã Đan Shop Admin"
+        >
+          {collapsed ? (
+            <BrandLogo variant="mark" className="h-8 w-8 rounded-lg" />
+          ) : (
+            <BrandLogo variant="compact" className="h-10 max-w-[152px]" />
+          )}
+        </Link>
       </div>
 
       {/* Navigation */}

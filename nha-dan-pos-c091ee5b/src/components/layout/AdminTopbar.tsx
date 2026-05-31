@@ -20,6 +20,8 @@ type SearchHit =
   | { kind: "customer"; id: string; title: string; sub: string; href: string };
 
 const EXPIRY_SOON_DAYS = 30;
+const PRODUCT_SEARCH_PAGE_SIZE = 20;
+const SECONDARY_SEARCH_LIMIT = 5;
 
 function parseYmdTopbar(iso: string | undefined): Date | null {
   if (!iso) return null;
@@ -98,26 +100,37 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
     window.addEventListener(ADMIN_BADGES_REFRESH_EVENT, onBadges);
     return () => window.removeEventListener(ADMIN_BADGES_REFRESH_EVENT, onBadges);
   }, [reloadTopbar]);
-  const topbar = topbarData ?? { invoices: [], customers: [], pendingOrdersCount: 0, lowStockVariants: [], nearExpiryLots: [] };
+  const topbar = useMemo(
+    () => topbarData ?? { invoices: [], customers: [], pendingOrdersCount: 0, lowStockVariants: [], nearExpiryLots: [] },
+    [topbarData],
+  );
 
   const debouncedSearchQ = useDebouncedValue(searchQ, 250);
   const [productSearchHits, setProductSearchHits] = useState<
     { id: string; name: string; code: string; categoryName?: string | null; variants: { code: string; name: string }[] }[]
   >([]);
+  const [productSearchTotal, setProductSearchTotal] = useState(0);
 
   useEffect(() => {
     const t = debouncedSearchQ.trim();
     if (t.length < 2) {
       setProductSearchHits([]);
+      setProductSearchTotal(0);
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
-        const page = await products.list({ page: 1, pageSize: 8, query: t });
-        if (!cancelled) setProductSearchHits(page.items);
+        const page = await products.list({ page: 1, pageSize: PRODUCT_SEARCH_PAGE_SIZE, query: t });
+        if (!cancelled) {
+          setProductSearchHits(page.items);
+          setProductSearchTotal(page.total ?? page.items.length);
+        }
       } catch {
-        if (!cancelled) setProductSearchHits([]);
+        if (!cancelled) {
+          setProductSearchHits([]);
+          setProductSearchTotal(0);
+        }
       }
     })();
     return () => {
@@ -191,7 +204,7 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
   const hits: SearchHit[] = useMemo(() => {
     const q = searchQ.trim().toLowerCase();
     if (!q) return [];
-    const productHits: SearchHit[] = productSearchHits.slice(0, 5).map((p) => ({
+    const productHits: SearchHit[] = productSearchHits.map((p) => ({
       kind: "product",
       id: p.id,
       title: p.name,
@@ -200,7 +213,7 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
     }));
     const invoiceHits: SearchHit[] = topbar.invoices
       .filter(i => i.number.toLowerCase().includes(q) || i.customerName.toLowerCase().includes(q))
-      .slice(0, 5)
+      .slice(0, SECONDARY_SEARCH_LIMIT)
       .map(i => ({
         kind: "invoice",
         id: i.id,
@@ -210,7 +223,7 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
       }));
     const customerHits: SearchHit[] = topbar.customers
       .filter(c => c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.code.toLowerCase().includes(q))
-      .slice(0, 5)
+      .slice(0, SECONDARY_SEARCH_LIMIT)
       .map(c => ({
         kind: "customer",
         id: c.id,
@@ -250,6 +263,7 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
     invoices: hits.filter(h => h.kind === "invoice"),
     customers: hits.filter(h => h.kind === "customer"),
   };
+  const productOverflowCount = grouped.products.length > 0 ? Math.max(0, productSearchTotal - grouped.products.length) : 0;
 
   return (
     <header className="flex items-center h-14 px-4 border-b bg-card shrink-0 gap-3">
@@ -274,39 +288,44 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
         </div>
 
         {searchOpen && searchQ.trim() && (
-          <div className="absolute left-0 right-0 top-full mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-[60vh] overflow-y-auto animate-fade-in">
+          <div className="absolute left-0 right-0 top-full mt-1 z-50 flex max-h-[60vh] flex-col overflow-hidden rounded-md border bg-popover shadow-lg animate-fade-in">
             {hits.length === 0 ? (
               <div className="p-6 text-center text-xs text-muted-foreground">
                 Không tìm thấy kết quả cho "{searchQ}"
               </div>
             ) : (
               <>
-                {grouped.products.length > 0 && (
-                  <SearchGroup label="Sản phẩm" icon={Package}>
-                    {grouped.products.map((h, idx) => {
-                      const i = hits.indexOf(h);
-                      return <SearchItem key={h.id} hit={h} active={i === activeIdx} onClick={() => goToHit(h)} />;
-                    })}
-                  </SearchGroup>
-                )}
-                {grouped.invoices.length > 0 && (
-                  <SearchGroup label="Hóa đơn" icon={ReceiptIcon}>
-                    {grouped.invoices.map(h => {
-                      const i = hits.indexOf(h);
-                      return <SearchItem key={h.id} hit={h} active={i === activeIdx} onClick={() => goToHit(h)} />;
-                    })}
-                  </SearchGroup>
-                )}
-                {grouped.customers.length > 0 && (
-                  <SearchGroup label="Khách hàng" icon={UsersIcon}>
-                    {grouped.customers.map(h => {
-                      const i = hits.indexOf(h);
-                      return <SearchItem key={h.id} hit={h} active={i === activeIdx} onClick={() => goToHit(h)} />;
-                    })}
-                  </SearchGroup>
-                )}
-                <div className="px-3 py-1.5 border-t bg-muted/30 flex items-center justify-between text-[10px] text-muted-foreground">
-                  <span>{hits.length} kết quả</span>
+                <div className="min-h-0 overflow-y-auto scrollbar-thin">
+                  {grouped.products.length > 0 && (
+                    <SearchGroup label="Sản phẩm" icon={Package}>
+                      {grouped.products.map((h, idx) => {
+                        const i = hits.indexOf(h);
+                        return <SearchItem key={h.id} hit={h} active={i === activeIdx} onClick={() => goToHit(h)} />;
+                      })}
+                    </SearchGroup>
+                  )}
+                  {grouped.invoices.length > 0 && (
+                    <SearchGroup label="Hóa đơn" icon={ReceiptIcon}>
+                      {grouped.invoices.map(h => {
+                        const i = hits.indexOf(h);
+                        return <SearchItem key={h.id} hit={h} active={i === activeIdx} onClick={() => goToHit(h)} />;
+                      })}
+                    </SearchGroup>
+                  )}
+                  {grouped.customers.length > 0 && (
+                    <SearchGroup label="Khách hàng" icon={UsersIcon}>
+                      {grouped.customers.map(h => {
+                        const i = hits.indexOf(h);
+                        return <SearchItem key={h.id} hit={h} active={i === activeIdx} onClick={() => goToHit(h)} />;
+                      })}
+                    </SearchGroup>
+                  )}
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t bg-muted/30 px-3 py-1.5 text-[10px] text-muted-foreground">
+                  <span>
+                    {hits.length} kết quả
+                    {productOverflowCount > 0 ? ` · ${grouped.products.length}/${productSearchTotal} sản phẩm` : ""}
+                  </span>
                   <span className="flex items-center gap-1">↑↓ chọn · <CornerDownLeft className="h-3 w-3" /> mở</span>
                 </div>
               </>
