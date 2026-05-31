@@ -49,7 +49,7 @@ jobs:
               - 'NhaDanShop/**'
               - '.github/workflows/**'
             frontend:
-              - 'nha-dan-os-c091e5b/**'
+              - 'nha-dan-pos-c091ee5b/**'
               - '.github/workflows/**'
 
   # ─────────────────────────────────────────────
@@ -353,6 +353,17 @@ jobs:
             http://${{ secrets.EC2_HOST }}/ || echo "000")
           echo "HTTP Status: $HTTP_FE"
           [ "$HTTP_FE" = "200" ] && echo "✅ Frontend OK" || echo "⚠️ Frontend: $HTTP_FE"
+
+          echo "=== Frontend brand asset check ==="
+          ASSET_HTTP=$(curl -sf -o /tmp/nha-dan-logo-compact.svg -w "%{http_code}" \
+            http://${{ secrets.EC2_HOST }}/brand/nha-dan-logo-compact.svg || echo "000")
+          echo "Brand asset HTTP Status: $ASSET_HTTP"
+          if [ "$ASSET_HTTP" != "200" ] || ! grep -q "nha-dan-logo-compact" /tmp/nha-dan-logo-compact.svg; then
+            echo "❌ Frontend brand asset missing or served by SPA fallback"
+            head -c 200 /tmp/nha-dan-logo-compact.svg || true
+            exit 1
+          fi
+          echo "✅ Frontend brand asset OK"
 
       - name: 📋 Xem logs sau deploy
         if: always()
