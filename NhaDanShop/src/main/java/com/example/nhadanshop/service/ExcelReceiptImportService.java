@@ -162,7 +162,7 @@ public class ExcelReceiptImportService {
             String newCategoryName,
             String newUnit,
             String newCode,
-            int qty,
+            BigDecimal qty,
             BigDecimal cost,
             BigDecimal sellPrice,
             BigDecimal discountPct,
@@ -184,7 +184,7 @@ public class ExcelReceiptImportService {
         ValidatedRow(VariantAction action, Product product, ProductVariant resolvedVariant,
                      boolean isLegacyVariant, String excelVariantCode,
                      String newProductName, String newCategoryName, String newUnit, String newCode,
-                     int qty, BigDecimal cost, BigDecimal sellPrice, BigDecimal discountPct,
+                     BigDecimal qty, BigDecimal cost, BigDecimal sellPrice, BigDecimal discountPct,
                      boolean isCombo, int lineNum, String lineNote,
                      String importUnit, String sellUnit, Integer piecesPerImportUnit) {
             this(action, product, resolvedVariant, isLegacyVariant, excelVariantCode,
@@ -197,7 +197,7 @@ public class ExcelReceiptImportService {
         ValidatedRow(VariantAction action, Product product, ProductVariant resolvedVariant,
                      boolean isLegacyVariant, String excelVariantCode,
                      String newProductName, String newCategoryName, String newUnit, String newCode,
-                     int qty, BigDecimal cost, BigDecimal sellPrice, BigDecimal discountPct,
+                     BigDecimal qty, BigDecimal cost, BigDecimal sellPrice, BigDecimal discountPct,
                      boolean isCombo, int lineNum, String lineNote,
                      String importUnit, String sellUnit, Integer piecesPerImportUnit,
                      java.time.LocalDate expiryDateOverride) {
@@ -241,7 +241,7 @@ public class ExcelReceiptImportService {
                 java.math.BigDecimal afterDisc = r.unitCost()
                         .multiply(java.math.BigDecimal.ONE.subtract(
                                 disc.divide(java.math.BigDecimal.valueOf(100), 10, java.math.RoundingMode.HALF_UP)))
-                        .multiply(java.math.BigDecimal.valueOf(r.quantity()))
+                        .multiply(r.quantity())
                         .setScale(0, java.math.RoundingMode.HALF_UP);
                 totalAfterDiscount = totalAfterDiscount.add(afterDisc);
             }
@@ -373,7 +373,7 @@ public class ExcelReceiptImportService {
             String productCode = getCellString(row, COL_PRODUCT_CODE);
             String variantCode = isNewFormat ? getCellString(row, COL_VARIANT_CODE) : null;
             String name        = isNewFormat ? getCellString(row, COL_NAME) : getCellString(row, OLD_COL_NAME);
-            Integer qty        = isNewFormat ? getCellInt(row, COL_QUANTITY) : getCellInt(row, OLD_COL_QUANTITY);
+            BigDecimal qty     = isNewFormat ? getCellDecimal(row, COL_QUANTITY) : getCellDecimal(row, OLD_COL_QUANTITY);
             java.math.BigDecimal cost      = isNewFormat ? getCellDecimal(row, COL_COST)     : getCellDecimal(row, OLD_COL_COST);
             java.math.BigDecimal sellPrice = isNewFormat ? getCellDecimal(row, COL_SELL)     : getCellDecimal(row, OLD_COL_SELL);
             java.math.BigDecimal discPct   = isNewFormat ? getCellDecimal(row, COL_DISCOUNT) : getCellDecimal(row, OLD_COL_DISCOUNT);
@@ -395,7 +395,7 @@ public class ExcelReceiptImportService {
 
             if (productCode == null || productCode.isBlank()) {
                 errorMsg = "Cột A (Mã SP) bắt buộc";
-            } else if (qty == null || qty <= 0) {
+            } else if (qty == null || qty.compareTo(BigDecimal.ZERO) <= 0) {
                 errorMsg = "Số lượng phải > 0";
             } else if (cost == null || cost.compareTo(java.math.BigDecimal.ZERO) <= 0) {
                 errorMsg = "Giá nhập phải > 0";
@@ -523,7 +523,7 @@ public class ExcelReceiptImportService {
             }
 
             java.math.BigDecimal lineTotal = (cost != null && qty != null)
-                ? cost.multiply(java.math.BigDecimal.valueOf(qty))
+                ? cost.multiply(qty)
                 : java.math.BigDecimal.ZERO;
 
             Boolean previewSellable = sellableCell.invalid()
@@ -600,7 +600,7 @@ public class ExcelReceiptImportService {
             previewRows.add(new ExcelPreviewResponse.PreviewRow(
                 lineNum, "COMBO",
                 comboCode.trim().toUpperCase(), "", "",
-                qty, cost, null, discPct, lineTotal,
+                qty != null ? BigDecimal.valueOf(qty) : null, cost, null, discPct, lineTotal,
                 null, null, null, note,
                 Boolean.TRUE,
                 errorMsg == null, true, false, status,
@@ -667,7 +667,7 @@ public class ExcelReceiptImportService {
                     String productCode;
                     String variantCode;
                     String name;
-                    Integer qty;
+                    BigDecimal qty;
                     BigDecimal cost;
                     BigDecimal sellPrice;
                     BigDecimal discountPct;
@@ -682,7 +682,7 @@ public class ExcelReceiptImportService {
                         productCode     = getCellString(row, COL_PRODUCT_CODE);
                         variantCode     = getCellString(row, COL_VARIANT_CODE);
                         name            = getCellString(row, COL_NAME);
-                        qty             = getCellInt(row, COL_QUANTITY);
+                        qty             = getCellDecimal(row, COL_QUANTITY);
                         cost            = getCellDecimal(row, COL_COST);
                         sellPrice       = getCellDecimal(row, COL_SELL);
                         discountPct     = getCellDecimal(row, COL_DISCOUNT);
@@ -696,7 +696,7 @@ public class ExcelReceiptImportService {
                         productCode     = getCellString(row, COL_PRODUCT_CODE);
                         variantCode     = null;
                         name            = getCellString(row, OLD_COL_NAME);
-                        qty             = getCellInt(row, OLD_COL_QUANTITY);
+                        qty             = getCellDecimal(row, OLD_COL_QUANTITY);
                         cost            = getCellDecimal(row, OLD_COL_COST);
                         sellPrice       = getCellDecimal(row, OLD_COL_SELL);
                         discountPct     = getCellDecimal(row, OLD_COL_DISCOUNT);
@@ -719,7 +719,7 @@ public class ExcelReceiptImportService {
                     if (!hasProductCode) {
                         errors.add("❌ Dòng " + lineNum + " [SP Don]: Cột A (Mã SP) bắt buộc."); continue;
                     }
-                    if (qty == null || qty <= 0) {
+                    if (qty == null || qty.compareTo(BigDecimal.ZERO) <= 0) {
                         errors.add("❌ Dòng " + lineNum + " [SP Don]: Số lượng phải > 0"); continue;
                     }
                     if (cost == null || cost.compareTo(BigDecimal.ZERO) <= 0) {
@@ -835,7 +835,7 @@ public class ExcelReceiptImportService {
                             errors.add("❌ Dòng " + lineNum + " [SP Don]: Combo '" + product.getCode() + "' chưa có thành phần."); continue;
                         }
                         int totalComponentQty = comboItems.stream().mapToInt(ProductComboItem::getQuantity).sum();
-                        BigDecimal totalComboCost = cost.multiply(BigDecimal.valueOf(qty));
+                        BigDecimal totalComboCost = cost.multiply(qty);
                         warnings.add("ℹ️ Dòng " + lineNum + ": Combo '" + product.getCode() + "' × " + qty + " → expand.");
                         for (ProductComboItem ci : comboItems) {
                             Product comp = ci.getProduct();
@@ -844,7 +844,7 @@ public class ExcelReceiptImportService {
                                     ? BigDecimal.valueOf(ci.getQuantity()).divide(BigDecimal.valueOf(totalComponentQty), 10, RoundingMode.HALF_UP)
                                     : BigDecimal.ZERO;
                             BigDecimal componentUnitCost = totalComboCost.multiply(ratio)
-                                    .divide(BigDecimal.valueOf((long) ci.getQuantity() * qty), 2, RoundingMode.HALF_UP);
+                                    .divide(BigDecimal.valueOf(ci.getQuantity()).multiply(qty), 2, RoundingMode.HALF_UP);
                             List<ProductVariant> compVars = catMaps.variantsByProductId().getOrDefault(comp.getId(), List.of());
                             Optional<ProductVariant> compVarOpt = compVars.stream()
                                     .filter(v -> Boolean.TRUE.equals(v.getIsDefault()))
@@ -855,7 +855,8 @@ public class ExcelReceiptImportService {
                             validatedRows.add(new ValidatedRow(
                                     VariantAction.EXISTING_EXACT, comp, compVarOpt.orElse(null), compVarOpt.isEmpty(),
                                     null, null, null, null, null,
-                                    ci.getQuantity() * qty, componentUnitCost, null, discountPct, false,
+                                    BigDecimal.valueOf(ci.getQuantity()).multiply(qty),
+                                    componentUnitCost, null, discountPct, false,
                                     lineNum, "Expand từ combo " + product.getCode(),
                                     null, null, null, null));
                         }
@@ -1287,7 +1288,7 @@ public class ExcelReceiptImportService {
             // dùng để phân bổ shipping/vat
             BigDecimal discountedLineTotal = vr.cost()
                     .multiply(discountFactor)
-                    .multiply(BigDecimal.valueOf(vr.qty()))
+                    .multiply(vr.qty())
                     .setScale(4, RoundingMode.HALF_UP);
             // weightedSum = discountedCostPerUnit * addedRetailQty (dùng tính weighted avg)
             BigDecimal weightedSum = discountedCostPerUnit.multiply(BigDecimal.valueOf(addedRetailQty));
@@ -1302,8 +1303,12 @@ public class ExcelReceiptImportService {
             if (itemMap.containsKey(itemKey)) {
                 // Cùng variant trong phiếu → gộp số lượng, tính lại weighted avg discountedCost
                 InventoryReceiptItem existing = itemMap.get(itemKey);
-                int prevRetailQty = existing.getRetailQtyAdded() != null ? existing.getRetailQtyAdded() : existing.getQuantity();
-                existing.setQuantity(existing.getQuantity() + vr.qty());
+                int prevRetailQty = existing.getRetailQtyAdded() != null
+                        ? existing.getRetailQtyAdded()
+                        : UnitConverter.toRetailQty(
+                                existing.getPiecesUsed() != null ? existing.getPiecesUsed() : 1,
+                                existing.getQuantity());
+                existing.setQuantity(existing.getQuantity().add(vr.qty()));
                 existing.setRetailQtyAdded(prevRetailQty + addedRetailQty);
                 discountedLineTotals.merge(itemKey, discountedLineTotal, BigDecimal::add);
                 weightedDiscountedCostSum.merge(itemKey, weightedSum, BigDecimal::add);
@@ -1390,7 +1395,10 @@ public class ExcelReceiptImportService {
             InventoryReceiptItem item = entry.getValue();
             BigDecimal lineTotal = discountedLineTotals.getOrDefault(itemKey, BigDecimal.ZERO);
             int retailQty = item.getRetailQtyAdded() != null && item.getRetailQtyAdded() > 0
-                    ? item.getRetailQtyAdded() : item.getQuantity();
+                    ? item.getRetailQtyAdded()
+                    : UnitConverter.toRetailQty(
+                            item.getPiecesUsed() != null ? item.getPiecesUsed() : 1,
+                            item.getQuantity());
 
             BigDecimal shippingForLine = BigDecimal.ZERO, vatForLine = BigDecimal.ZERO;
             if (totalDiscountedValue.compareTo(BigDecimal.ZERO) > 0) {
@@ -1523,8 +1531,12 @@ public class ExcelReceiptImportService {
         String itemKey = "vid:" + variant.getId();
         if (itemMap.containsKey(itemKey)) {
             InventoryReceiptItem existing = itemMap.get(itemKey);
-            int prevRetailQty = existing.getRetailQtyAdded() != null ? existing.getRetailQtyAdded() : existing.getQuantity();
-            existing.setQuantity(existing.getQuantity() + qty);
+            int prevRetailQty = existing.getRetailQtyAdded() != null
+                    ? existing.getRetailQtyAdded()
+                    : UnitConverter.toRetailQty(
+                            existing.getPiecesUsed() != null ? existing.getPiecesUsed() : 1,
+                            existing.getQuantity());
+            existing.setQuantity(existing.getQuantity().add(BigDecimal.valueOf(qty)));
             existing.setRetailQtyAdded(prevRetailQty + addedRetailQty);
             discountedLineTotals.merge(itemKey, discountedLineTotal, BigDecimal::add);
             weightedDiscountedCostSum.merge(itemKey, weightedSum, BigDecimal::add);

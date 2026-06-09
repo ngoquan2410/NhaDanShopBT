@@ -36,8 +36,16 @@ public class InventoryReceiptItem {
     @JoinColumn(name = "variant_id")
     private ProductVariant variant;
 
-    @Column(name = "quantity", nullable = false)
-    private Integer quantity;
+    @Column(name = "quantity", nullable = false, precision = 18, scale = 6)
+    private BigDecimal quantity;
+
+    public void setQuantity(BigDecimal quantity) {
+        this.quantity = quantity;
+    }
+
+    public void setQuantity(Integer quantity) {
+        this.quantity = quantity != null ? BigDecimal.valueOf(quantity) : null;
+    }
 
     /** Giá nhập gốc (chưa chiết khấu) */
     @Column(name = "unit_cost", nullable = false, precision = 18, scale = 2)

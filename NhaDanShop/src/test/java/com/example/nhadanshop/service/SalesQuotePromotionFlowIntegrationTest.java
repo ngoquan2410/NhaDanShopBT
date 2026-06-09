@@ -42,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
         ShippingSettingsService.class,
         ShippingQuoteService.class,
         PromotionEvaluationService.class,
+        SellableStockService.class,
         GhnShippingService.class,
         ProductVariantService.class,
         ProductComboService.class,

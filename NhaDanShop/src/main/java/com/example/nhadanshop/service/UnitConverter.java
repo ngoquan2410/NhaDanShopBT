@@ -48,6 +48,28 @@ public final class UnitConverter {
     }
 
     /**
+     * Decimal import quantities are allowed only when they convert exactly to a whole
+     * retail quantity, because retail stock and batches remain integer source-of-truth.
+     */
+    public static int toRetailQty(int pieces, BigDecimal importQty) {
+        if (importQty == null || importQty.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Số lượng nhập phải > 0");
+        }
+        int effectivePieces = Math.max(1, pieces);
+        BigDecimal retailQty = importQty.multiply(BigDecimal.valueOf(effectivePieces));
+        try {
+            return retailQty.intValueExact();
+        } catch (ArithmeticException ex) {
+            throw new IllegalArgumentException(
+                    "Số lượng " + importQty.stripTrailingZeros().toPlainString()
+                            + " × quy đổi " + effectivePieces
+                            + " phải ra số nguyên đơn vị bán lẻ",
+                    ex
+            );
+        }
+    }
+
+    /**
      * [MỚI - Bước 1] Tính giá vốn / 1 ĐV bán lẻ từ giá nhập.
      * ATOMIC: costPerRetail = unitCost (không chia)
      * GOP:    costPerRetail = unitCost / pieces

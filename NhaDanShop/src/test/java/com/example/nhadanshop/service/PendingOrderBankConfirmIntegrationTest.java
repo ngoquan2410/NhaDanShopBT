@@ -46,7 +46,7 @@ import static org.mockito.Mockito.when;
 /**
  * Bank-transfer confirm guard + aggregate-linked payment matrix.
  *
- * <p>Mirrors the test names listed in the implementation plan (Tier 1 — Backend JUnit).
+ * <p>Mirrors the test names listed in the implementation plan (Tier 1 â€” Backend JUnit).
  * Non-bank confirm paths and Casso under/over-pay paths are also asserted here so the matrix
  * can be reported under one class name.
  */
@@ -60,6 +60,7 @@ import static org.mockito.Mockito.when;
         PendingOrderService.class,
         InvoiceService.class,
         SalesQuoteService.class,
+        SellableStockService.class,
         ShippingSettingsService.class,
         ShippingQuoteService.class,
         GhnShippingService.class,
@@ -115,7 +116,7 @@ class PendingOrderBankConfirmIntegrationTest {
         SecurityContextHolder.clearContext();
     }
 
-    // ── Bank guard: confirmOrder semantics ────────────────────────────────────
+    // â”€â”€ Bank guard: confirmOrder semantics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Test
     void bank_no_link_confirm_rejected() {
@@ -125,7 +126,7 @@ class PendingOrderBankConfirmIntegrationTest {
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> pendingOrderService.confirmOrder(Long.parseLong(po.id()), null, "admin"));
-        assertTrue(ex.getMessage().contains("chưa có giao dịch") || ex.getMessage().contains("giao dịch"));
+        assertTrue(ex.getMessage().contains(po.code()));
         assertEquals(invBefore, salesInvoiceRepository.count());
         PendingOrder refreshed = pendingOrderRepository.findById(Long.parseLong(po.id())).orElseThrow();
         assertNull(refreshed.getInvoice());
@@ -167,7 +168,7 @@ class PendingOrderBankConfirmIntegrationTest {
 
         var resp = pendingOrderService.confirmOrder(Long.parseLong(po.id()), null, "admin");
         assertNotNull(resp.invoice());
-        // Invoice keeps pending total — overpay aggregate must not become invoice revenue.
+        // Invoice keeps pending total â€” overpay aggregate must not become invoice revenue.
         assertEquals(0, resp.invoice().totalAmount().compareTo(total));
     }
 
@@ -219,7 +220,7 @@ class PendingOrderBankConfirmIntegrationTest {
         assertEquals("OVERPAID_LINKED", resp.pendingOrder().paymentLinkStatus());
     }
 
-    // ── Aggregate visibility in PendingOrderResponse ──────────────────────────
+    // â”€â”€ Aggregate visibility in PendingOrderResponse â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Test
     void pending_response_aggregates_linked_payment_total_count_delta() throws Exception {
@@ -278,7 +279,7 @@ class PendingOrderBankConfirmIntegrationTest {
         assertEquals(invBefore, salesInvoiceRepository.count());
     }
 
-    // ── Non-bank confirm paths are never blocked by link guard ────────────────
+    // â”€â”€ Non-bank confirm paths are never blocked by link guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Test
     void cod_confirm_not_blocked_by_payment_link_guard() {
@@ -304,7 +305,7 @@ class PendingOrderBankConfirmIntegrationTest {
         assertNotNull(resp.invoice());
     }
 
-    // ── Casso webhook paths through the new attach+save+flush+confirm order ──
+    // â”€â”€ Casso webhook paths through the new attach+save+flush+confirm order â”€â”€
 
     @Test
     void casso_exact_webhook_still_auto_confirms() throws Exception {
@@ -335,7 +336,7 @@ class PendingOrderBankConfirmIntegrationTest {
 
         // Then a manual link with the remainder unlocks confirm.
         manualLink(po.code(), new BigDecimal("1000"), "PE_CUND_TOP");
-        // Still under because the Casso row stayed MATCHED (no LINKED) — guard sees only the manual top-up.
+        // Still under because the Casso row stayed MATCHED (no LINKED) â€” guard sees only the manual top-up.
         // Top up to exact by linking one more event for the rest.
         manualLink(po.code(), total.subtract(new BigDecimal("1000")), "PE_CUND_REM");
         var resp = pendingOrderService.confirmOrder(Long.parseLong(po.id()), null, "admin");
@@ -353,14 +354,14 @@ class PendingOrderBankConfirmIntegrationTest {
         assertEquals(PendingOrder.Status.PENDING_PAYMENT, refreshed.getStatus());
         assertNull(refreshed.getInvoice());
 
-        // Admin manual-links the same matched event → aggregate >= total → confirm allowed.
+        // Admin manual-links the same matched event â†’ aggregate >= total â†’ confirm allowed.
         var event = paymentEventRepository.findByProviderAndProviderTxId("casso", "TID_COVR").orElseThrow();
         paymentEventService.linkToOrder(event.getId(), po.code(), "admin");
         var resp = pendingOrderService.confirmOrder(Long.parseLong(po.id()), null, "admin");
         assertEquals(0, resp.invoice().totalAmount().compareTo(total));
     }
 
-    // ── Invoice list: pendingOrderCode + batch lookup contract ────────────────
+    // â”€â”€ Invoice list: pendingOrderCode + batch lookup contract â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Test
     void invoice_response_includes_pending_order_code() {
@@ -416,7 +417,7 @@ class PendingOrderBankConfirmIntegrationTest {
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private PendingOrderResponse newBankPending(String tag) {
         return newPending(tag, "bank_transfer");

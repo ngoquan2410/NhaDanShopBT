@@ -101,7 +101,7 @@ export function readReceiptExcelTemplate(file: File): Promise<ReceiptExcelRow[]>
         productCode: productCode.toUpperCase(),
         variantCode: vCode,
         productName: cellStr(row, 2) ?? "",
-        quantity: toNum(row[3]) != null ? Math.trunc(toNum(row[3])!) : null,
+        quantity: toNum(row[3]),
         unitCost: toNum(row[4]),
         sellPrice: toNum(row[5]),
         discountPercent: toNum(row[6]),

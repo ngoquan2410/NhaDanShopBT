@@ -37,7 +37,7 @@ public record ExcelPreviewResponse(
             String productCode,
             String variantCode,
             String productName,
-            Integer quantity,
+            BigDecimal quantity,
             BigDecimal unitCost,
             BigDecimal sellPrice,
             BigDecimal discountPercent,

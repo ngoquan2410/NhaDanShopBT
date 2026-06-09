@@ -274,6 +274,21 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             """)
     List<Object[]> avgCostPriceByVariant(@Param("asOf") LocalDate asOf);
 
+    /**
+     * Valuation quantity grouped by variant using the same predicate as avgCostPriceByVariant.
+     * Rows: [variantId, SUM(remainingQty)].
+     */
+    @Query("""
+            SELECT b.variant.id, COALESCE(SUM(b.remainingQty), 0)
+            FROM ProductBatch b
+            WHERE b.variant IS NOT NULL
+              AND b.remainingQty > 0
+              AND b.status IN ('active', 'blocked')
+              AND b.expiryDate >= :asOf
+            GROUP BY b.variant.id
+            """)
+    List<Object[]> sumValuationRemainingQtyByVariant(@Param("asOf") LocalDate asOf);
+
     // ══ Slice 2: explicit predicates for future use only — do not wire callers here ═════════════
 
     /**

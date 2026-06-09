@@ -50,6 +50,7 @@ import static org.mockito.Mockito.when;
 })
 @Import({
         InvoiceService.class,
+        SellableStockService.class,
         ProductBatchService.class,
         StockMutationService.class,
         ProductVariantService.class,
@@ -156,6 +157,46 @@ class InvoiceBatchAllocationIntegrationTest {
         assertEquals(20, batchRepository.findById(batch.getId()).orElseThrow().getRemainingQty());
         assertEquals(20, variantRepository.findById(variant.getId()).orElseThrow().getStockQty());
         assertTrue(salesInvoiceRepository.findById(created.id()).orElseThrow().isCancelled());
+    }
+
+    @Test
+    void cancel_invoice_without_allocations_is_blocked_without_stock_mutation() {
+        ProductVariant variant = createVariantWithStock("SKU-LEGACY-NO-ALLOC");
+        ProductBatch batch = createBatch(variant, "B-LEGACY", LocalDate.now().plusDays(20), 10, 10, new BigDecimal("9000"));
+        stockMutationService.syncVariantStockWithBatches(variant.getId());
+
+        SalesInvoice invoice = new SalesInvoice();
+        invoice.setInvoiceNo("INV-LEGACY-NO-ALLOC");
+        invoice.setStatus(SalesInvoice.Status.COMPLETED);
+        invoice.setInvoiceDate(java.time.LocalDateTime.now());
+        invoice.setTotalAmount(new BigDecimal("30000"));
+
+        SalesInvoiceItem line = new SalesInvoiceItem();
+        line.setInvoice(invoice);
+        line.setProduct(variant.getProduct());
+        line.setVariant(variant);
+        line.setQuantity(3);
+        line.setOriginalUnitPrice(new BigDecimal("10000"));
+        line.setLineDiscountPercent(BigDecimal.ZERO);
+        line.setUnitPrice(new BigDecimal("10000"));
+        line.setUnitCostSnapshot(new BigDecimal("9000"));
+        line.captureCategorySnapshotFromProduct(variant.getProduct());
+        invoice.getItems().add(line);
+
+        invoice = salesInvoiceRepository.saveAndFlush(invoice);
+        Long invoiceId = invoice.getId();
+
+        int batchBefore = batchRepository.findById(batch.getId()).orElseThrow().getRemainingQty();
+        int stockBefore = variantRepository.findById(variant.getId()).orElseThrow().getStockQty();
+
+        IllegalStateException ex = assertThrows(
+                IllegalStateException.class,
+                () -> invoiceService.cancelInvoice(invoiceId, "legacy cancel", "tester"));
+
+        assertTrue(ex.getMessage().contains("Invoice reversal requires batch allocation trace"));
+        assertEquals(batchBefore, batchRepository.findById(batch.getId()).orElseThrow().getRemainingQty());
+        assertEquals(stockBefore, variantRepository.findById(variant.getId()).orElseThrow().getStockQty());
+        assertTrue(!salesInvoiceRepository.findById(invoiceId).orElseThrow().isCancelled());
     }
 
     private ProductVariant createVariantWithStock(String sku) {

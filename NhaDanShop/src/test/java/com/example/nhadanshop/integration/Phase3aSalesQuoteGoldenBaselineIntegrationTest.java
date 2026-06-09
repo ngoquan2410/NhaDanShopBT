@@ -33,6 +33,7 @@ import com.example.nhadanshop.service.CustomerLoyaltyService;
 import com.example.nhadanshop.service.GhnShippingService;
 import com.example.nhadanshop.service.PromotionEvaluationService;
 import com.example.nhadanshop.service.SalesQuoteService;
+import com.example.nhadanshop.service.SellableStockService;
 import com.example.nhadanshop.service.ShippingQuoteService;
 import com.example.nhadanshop.service.ShippingSettingsService;
 import com.example.nhadanshop.service.StockMutationService;
@@ -94,6 +95,7 @@ import static org.mockito.Mockito.when;
         ShippingQuoteService.class,
         PromotionEvaluationService.class,
         GhnShippingService.class,
+        SellableStockService.class,
         ProductVariantService.class,
         StockMutationService.class,
         Phase3aSalesQuoteGoldenBaselineIntegrationTest.TestCfg.class

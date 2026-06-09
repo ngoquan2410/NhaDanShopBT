@@ -382,9 +382,9 @@ public final class DtoMapper {
 
     // ── InventoryReceiptItem ──────────────────────────────────────────────────
     public static InventoryReceiptItemResponse toResponse(InventoryReceiptItem item) {
-        int qty = item.getQuantity() != null ? item.getQuantity() : 0;
+        BigDecimal qty = item.getQuantity() != null ? item.getQuantity() : BigDecimal.ZERO;
         BigDecimal unitCost = nz(item.getUnitCost());
-        BigDecimal lineTotal = unitCost.multiply(BigDecimal.valueOf(qty));
+        BigDecimal lineTotal = unitCost.multiply(qty);
         BigDecimal vat   = item.getVatPercent()      != null ? item.getVatPercent()      : BigDecimal.ZERO;
         BigDecimal vatAl = item.getVatAllocated()     != null ? item.getVatAllocated()     : BigDecimal.ZERO;
         BigDecimal fcVat = item.getFinalCostWithVat() != null ? item.getFinalCostWithVat() : item.getFinalCost();
@@ -405,7 +405,7 @@ public final class DtoMapper {
                 lineTotal,
                 item.getImportUnitUsed(),
                 item.getPiecesUsed()     != null ? item.getPiecesUsed()     : 1,
-                item.getRetailQtyAdded() != null ? item.getRetailQtyAdded() : qty,
+                item.getRetailQtyAdded() != null ? item.getRetailQtyAdded() : qty.intValue(),
                 v != null ? v.getId()          : null,
                 v != null ? v.getVariantCode() : p != null ? p.getCode() : null,
                 v != null ? v.getVariantName() : p != null ? p.getName() : null,

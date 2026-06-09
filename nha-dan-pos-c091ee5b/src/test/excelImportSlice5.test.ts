@@ -44,6 +44,7 @@ function productWorkbook(colN: string | undefined): File {
 function receiptWorkbook(opts: {
   variantCode: string;
   colP: string | undefined;
+  quantity?: number;
 }): File {
   const pad = (): unknown[] => {
     const r = Array(16).fill(null);
@@ -54,7 +55,7 @@ function receiptWorkbook(opts: {
   r[0] = "BT-RAW";
   r[1] = opts.variantCode;
   r[2] = "Bánh tráng nguyên liệu";
-  r[3] = 1;
+  r[3] = opts.quantity ?? 1;
   r[4] = 50000;
   r[5] = 0;
   r[6] = 0;
@@ -183,6 +184,18 @@ describe("Slice 5 excel-parser facade (real .xlsx in memory)", () => {
     const row = rows.find((r) => r.productCode === "BT-RAW");
     expect(row!.isSellableInvalid).toBe(true);
     expect(row!.status).toBe("error");
+  });
+
+  it("parseReceiptExcel: preserves fractional receipt quantities", async () => {
+    const half = await parseReceiptExcel(
+      receiptWorkbook({ variantCode: "BT-RAW-G", colP: "raw", quantity: 0.5 }),
+    );
+    const twoAndHalf = await parseReceiptExcel(
+      receiptWorkbook({ variantCode: "BT-RAW-G", colP: "raw", quantity: 2.5 }),
+    );
+
+    expect(half.find((r) => r.productCode === "BT-RAW")?.quantity).toBe(0.5);
+    expect(twoAndHalf.find((r) => r.productCode === "BT-RAW")?.quantity).toBe(2.5);
   });
 
   it("parseReceiptExcel: blank variant + NVL → warning / status warning", async () => {

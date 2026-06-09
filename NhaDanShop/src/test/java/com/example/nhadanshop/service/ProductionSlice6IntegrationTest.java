@@ -53,6 +53,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
         InventoryProjectionService.class,
         InventoryStockService.class,
         InvoiceService.class,
+        SellableStockService.class,
         ProductBatchService.class,
         ProductVariantService.class,
         ProductComboService.class,

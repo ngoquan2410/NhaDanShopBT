@@ -46,6 +46,7 @@ public class SalesQuoteService {
     private final AccountService accountService;
     private final CustomerLoyaltyService loyaltyService;
     private final ProductComboRepository comboItemRepo;
+    private final SellableStockService sellableStockService;
 
     public SalesQuoteResponse quote(SalesQuoteRequest req) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -117,15 +118,11 @@ public class SalesQuoteService {
                     throw new IllegalStateException("Combo '" + product.getName() + "' chua co thanh phan");
                 }
                 int comboQty = line.quantity();
-                for (ProductComboItem ci : comboItems) {
-                    ProductVariant compVariant = resolveVariantForQuote(quoteCtx, null, ci.getProduct().getId(), false);
-                    int required = ci.getQuantity() * comboQty;
-                    if (compVariant.getStockQty() < required) {
-                        throw new IllegalArgumentException(
-                                        "Combo '" + product.getName() + "': thanh phan '" + ci.getProduct().getName()
-                                        + "' khong du hang. Can: " + required + ", ton: " + compVariant.getStockQty());
-                    }
-                }
+                sellableStockService.assertComboSalesSellable(
+                        product,
+                        comboQty,
+                        LocalDate.now(businessClock),
+                        "Combo '" + product.getName() + "'");
                 BigDecimal lineDisc = line.discountPercent() != null ? line.discountPercent() : BigDecimal.ZERO;
                 if ("storefront".equals(src) && lineDisc.compareTo(BigDecimal.ZERO) > 0) {
                     throw new IllegalArgumentException("Cua hang web khong duoc giam gia theo dong tren quote");
@@ -721,9 +718,17 @@ public class SalesQuoteService {
             List<SalesQuoteCapturedLineDto> rewardLines) {
         Map<Long, Integer> demandByVariant = new HashMap<>();
         for (SalesQuoteCapturedLineDto line : billableLines) {
+            Product product = requireProduct(quoteCtx, line.productId());
+            if (product.isCombo()) {
+                continue;
+            }
             demandByVariant.merge(line.variantId(), line.quantity(), Integer::sum);
         }
         for (SalesQuoteCapturedLineDto line : rewardLines) {
+            Product product = requireProduct(quoteCtx, line.productId());
+            if (product.isCombo()) {
+                continue;
+            }
             demandByVariant.merge(line.variantId(), line.quantity(), Integer::sum);
         }
         if (demandByVariant.isEmpty()) {
@@ -731,10 +736,7 @@ public class SalesQuoteService {
         }
         LocalDate today = LocalDate.now(businessClock);
         List<Long> variantIds = new ArrayList<>(demandByVariant.keySet());
-        Map<Long, Integer> sellableByVariant = new HashMap<>();
-        for (Object[] row : batchRepo.sumSellableRemainingQtyByVariantIds(variantIds, today)) {
-            sellableByVariant.put((Long) row[0], ((Number) row[1]).intValue());
-        }
+        Map<Long, Integer> sellableByVariant = sellableStockService.salesSellableQtyByVariantIds(variantIds, today);
         for (Map.Entry<Long, Integer> entry : demandByVariant.entrySet()) {
             ProductVariant variant = quoteCtx.variantById().get(entry.getKey());
             if (variant == null) {

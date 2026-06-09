@@ -203,6 +203,10 @@ function validateImportedLine(line: ReceiptLineDraft): LineIssue {
   if (!line.productCode.trim()) errors.push("Thiếu mã SP.");
   if (!line.productName.trim()) warnings.push("Thiếu tên SP hiển thị.");
   if (line.quantity <= 0) errors.push("Số lượng phải > 0.");
+  const retailQty = line.quantity * line.piecesPerUnit;
+  if (line.quantity > 0 && line.piecesPerUnit > 0 && !Number.isInteger(Number(retailQty.toFixed(8)))) {
+    errors.push("Số lượng × quy đổi phải ra số nguyên đơn vị bán lẻ.");
+  }
   if (line.unitCost <= 0) errors.push("Giá nhập phải > 0.");
   if (!line.importUnit.trim()) errors.push("Thiếu ĐV nhập.");
   if (!line.sellUnit.trim()) errors.push("Thiếu ĐV bán.");
@@ -537,7 +541,7 @@ function LineEditor({
           <div>
             <label className="text-[10px] font-medium uppercase text-muted-foreground">Số lượng *</label>
             <input
-                type="number" min={0}
+                type="number" min={0} step="any"
                 value={line.quantity}
                 onChange={(e) => onPatch(line.id, { quantity: Math.max(0, Number(e.target.value)) })}
                 className={cn("mt-0.5 h-8 w-full rounded-md border bg-background px-2 text-right text-xs font-mono tabular-nums", line.quantity <= 0 && "border-danger")}
@@ -1250,7 +1254,7 @@ export default function AdminGoodsReceiptCreate() {
       }
       out.push({
         productId: pid,
-        quantity: Math.max(1, line.quantity),
+        quantity: line.quantity,
         unitCost: Math.max(0, line.unitCost),
         discountPercent: Math.max(0, Math.min(100, line.discountPercent)),
         sellPrice: Number.isFinite(line.sellPrice) ? Math.max(0, line.sellPrice) : null,

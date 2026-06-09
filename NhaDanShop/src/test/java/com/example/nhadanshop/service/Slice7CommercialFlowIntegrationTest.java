@@ -72,6 +72,7 @@ import static org.mockito.Mockito.when;
         InvoiceService.class,
         SalesQuoteService.class,
         PromotionEvaluationService.class,
+        SellableStockService.class,
         ShippingSettingsService.class,
         ShippingQuoteService.class,
         GhnShippingService.class,
@@ -256,7 +257,7 @@ class Slice7CommercialFlowIntegrationTest {
         assertTrue(quote.lines().stream().anyMatch(l -> l.commercialSnapshot().allocatedMerchandiseDiscount().compareTo(BigDecimal.ZERO) > 0));
 
         var pending = pendingOrderService.createOrder(new PendingOrderRequest(
-                null, "S7", "090", null, null, "bank_transfer",
+                null, "S7", "090", null, null, "cod",
                 null, null, null, null, null, null, quote.quoteId()));
 
         first.setSellPrice(new BigDecimal("999999"));
@@ -414,7 +415,7 @@ class Slice7CommercialFlowIntegrationTest {
                 .allMatch(l -> l.discountedAmount() != null && l.discountedAmount().compareTo(BigDecimal.ZERO) > 0));
 
         var pending = pendingOrderService.createOrder(new PendingOrderRequest(
-                null, "S7", "091", null, null, "bank_transfer",
+                null, "S7", "091", null, null, "cod",
                 null, null, null, null, null, null, quote.quoteId()));
         var confirmed = pendingOrderService.confirmOrder(Long.parseLong(pending.id()), "confirm", "admin:s7");
         SalesInvoiceResponse invoice = confirmed.invoice();

@@ -7,7 +7,7 @@ public record InventoryReceiptItemResponse(
         Long productId,
         String productCode,
         String productName,
-        Integer quantity,
+        BigDecimal quantity,
         BigDecimal unitCost,
         BigDecimal discountPercent,
         BigDecimal discountedCost,

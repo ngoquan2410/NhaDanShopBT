@@ -31,6 +31,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Locale;
 import java.util.HashMap;
@@ -68,6 +69,7 @@ public class InvoiceService {
     private final ObjectMapper objectMapper;
     private final SalesQuoteRepository salesQuoteRepository;
     private final CustomerLoyaltyService loyaltyService;
+    private final SellableStockService sellableStockService;
 
     @Transactional
     public SalesInvoiceResponse createInvoice(SalesInvoiceRequest req) {
@@ -94,7 +96,7 @@ public class InvoiceService {
                 invoice.setCustomerName(customer.getName()); // snapshot
             });
         }
-        // Fallback: nhập tay tên KH (khách vãng lai)
+        // Fallback: nhÃ¡ÂºÂ­p tay tÃƒÂªn KH (khÃƒÂ¡ch vÃƒÂ£ng lai)
         if (invoice.getCustomerName() == null && req.customerName() != null) {
             invoice.setCustomerName(req.customerName());
         }
@@ -102,7 +104,7 @@ public class InvoiceService {
         Promotion promo = null;
         if (req.promotionId() != null) {
             promo = promotionRepo.findById(req.promotionId()).orElse(null);
-            if (promo == null || !promo.isCurrentlyActive()) {
+            if (promo == null || !isPromotionActiveAtBusinessTime(promo)) {
                 throw new IllegalArgumentException("Chuong trinh khuyen mai khong ton tai hoac da het han");
             }
         }
@@ -110,12 +112,12 @@ public class InvoiceService {
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<SalesInvoiceItem> items = new ArrayList<>();
 
-        // Tập hợp product_id bị ảnh hưởng để refresh combo virtual stock sau khi lưu
+        // TÃ¡ÂºÂ­p hÃ¡Â»Â£p product_id bÃ¡Â»â€¹ Ã¡ÂºÂ£nh hÃ†Â°Ã¡Â»Å¸ng Ã„â€˜Ã¡Â»Æ’ refresh combo virtual stock sau khi lÃ†Â°u
         Set<Long> affectedProductIds = new java.util.HashSet<>();
 
         for (InvoiceItemRequest itemReq : req.items()) {
 
-            // ── Combo KiotViet: expand combo → nhiều line items ──────────────
+            // Ã¢â€â‚¬Ã¢â€â‚¬ Combo KiotViet: expand combo Ã¢â€ â€™ nhiÃ¡Â»Âu line items Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
             if (itemReq.comboId() != null) {
                 totalAmount = totalAmount.add(
                     expandComboToItems(itemReq.comboId(), itemReq.quantity(),
@@ -123,7 +125,7 @@ public class InvoiceService {
                 continue;
             }
 
-            // ── Sản phẩm đơn (SINGLE) ────────────────────────────────────────
+            // Ã¢â€â‚¬Ã¢â€â‚¬ SÃ¡ÂºÂ£n phÃ¡ÂºÂ©m Ã„â€˜Ã†Â¡n (SINGLE) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
             Product product = productRepo.findById(itemReq.productId())
                     .orElseThrow(() -> new EntityNotFoundException(
                             "Khong tim thay san pham ID: " + itemReq.productId()));
@@ -136,18 +138,19 @@ public class InvoiceService {
                     "San pham '" + product.getName() + "' la combo. " +
                     "Vui long dung comboId de ban combo theo mo hinh KiotViet.");
 
-            // [Sprint 0] Resolve variant — null variantId → dùng default variant
+            // [Sprint 0] Resolve variant Ã¢â‚¬â€ null variantId Ã¢â€ â€™ dÃƒÂ¹ng default variant
             ProductVariant variant = variantService.resolveVariant(itemReq.variantId(), product.getId(), true);
             Long variantId = variant.getId();
             variant = variantRepo.findByIdForUpdate(variantId)
-                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy variant ID: " + variantId));
+                    .orElseThrow(() -> new EntityNotFoundException("KhÃƒÂ´ng tÃƒÂ¬m thÃ¡ÂºÂ¥y variant ID: " + variantId));
 
             if (itemReq.batchId() == null) {
-                // Kiểm tra tồn kho theo variant (projection) — Slice 6B exact-batch path validates the batch row instead
-                if (variant.getStockQty() < itemReq.quantity()) {
+                // KiÃ¡Â»Æ’m tra tÃ¡Â»â€œn kho theo variant (projection) Ã¢â‚¬â€ Slice 6B exact-batch path validates the batch row instead
+                int sellableQty = sellableStockService.salesSellableQtyByVariantId(variant.getId(), LocalDate.now(clock));
+                if (sellableQty < itemReq.quantity()) {
                     throw new IllegalArgumentException(
                             "San pham '" + product.getName() + "' [" + variant.getVariantCode() + "] " +
-                            "khong du hang. Ton kho: " + variant.getStockQty() +
+                            "khong du hang. Ton ban duoc: " + sellableQty +
                             ", yeu cau: " + itemReq.quantity());
                 }
             }
@@ -187,7 +190,7 @@ public class InvoiceService {
             }
             item.setUnitCostSnapshot(costSnap);
             appendBatchAllocations(item, deductionResult.batchDeductions());
-            // comboSourceId = null (bán lẻ thường)
+            // comboSourceId = null (bÃƒÂ¡n lÃ¡ÂºÂ» thÃ†Â°Ã¡Â»Âng)
 
             totalAmount = totalAmount.add(actualUnitPrice.multiply(BigDecimal.valueOf(itemReq.quantity())));
             items.add(item);
@@ -223,10 +226,10 @@ public class InvoiceService {
         SalesInvoice saved = invoiceRepo.save(invoice);
         appendInvoiceDeductionMovements(saved);
 
-        // ── Refresh virtual stock của tất cả combo chứa SP bị ảnh hưởng ──────
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Refresh virtual stock cÃ¡Â»Â§a tÃ¡ÂºÂ¥t cÃ¡ÂºÂ£ combo chÃ¡Â»Â©a SP bÃ¡Â»â€¹ Ã¡ÂºÂ£nh hÃ†Â°Ã¡Â»Å¸ng Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         affectedProductIds.forEach(comboService::refreshCombosContaining);
 
-        // Sprint 2: cộng total_spend cho KH nếu có
+        // Sprint 2: cÃ¡Â»â„¢ng total_spend cho KH nÃ¡ÂºÂ¿u cÃƒÂ³
         if (saved.getCustomer() != null) {
             customerService.addSpend(saved.getCustomer().getId(),
                     saved.getTotalAmount().subtract(saved.getDiscountAmount()));
@@ -293,7 +296,7 @@ public class InvoiceService {
         SalesQuote quote = salesQuoteRepository.findByPublicIdForUpdate(req.quotePublicId())
                 .orElseThrow(() -> new EntityNotFoundException("Khong tim thay quote: " + req.quotePublicId()));
         if (quote.getConsumedPendingOrder() != null) {
-            throw new IllegalStateException("Quote da gan don hang cho — khong tao hoa don truc tiep");
+            throw new IllegalStateException("Quote da gan don hang cho Ã¢â‚¬â€ khong tao hoa don truc tiep");
         }
         if (quote.getConsumedInvoice() != null) {
             throw new IllegalStateException("Quote da duoc su dung");
@@ -408,12 +411,13 @@ public class InvoiceService {
                 .orElseThrow(() -> new EntityNotFoundException("Khong tim thay variant ID: " + resolved.getId()));
 
         if (!cap.rewardLine()) {
-            if (cap.batchId() == null && variant.getStockQty() < cap.quantity()) {
+            int sellableQty = sellableStockService.salesSellableQtyByVariantId(variant.getId(), LocalDate.now(clock));
+            if (cap.batchId() == null && sellableQty < cap.quantity()) {
                 throw new IllegalArgumentException(
                         "Khong du hang variant " + variant.getVariantCode()
-                                + ". Ton: " + variant.getStockQty() + ", can: " + cap.quantity());
+                                + ". Ton ban duoc: " + sellableQty + ", can: " + cap.quantity());
             }
-        } else if (variant.getStockQty() < cap.quantity()) {
+        } else if (sellableStockService.salesSellableQtyByVariantId(variant.getId(), LocalDate.now(clock)) < cap.quantity()) {
             throw new IllegalArgumentException(
                     "Khong du hang reward variant " + variant.getVariantCode());
         }
@@ -458,7 +462,7 @@ public class InvoiceService {
         try {
             return objectMapper.writeValueAsString(value);
         } catch (Exception e) {
-            throw new IllegalStateException("Không serialize snapshot", e);
+            throw new IllegalStateException("KhÃƒÂ´ng serialize snapshot", e);
         }
     }
 
@@ -488,15 +492,16 @@ public class InvoiceService {
 
         Long batchDbId = orderItem.getBatch() != null ? orderItem.getBatch().getId() : null;
         boolean reward = orderItem.isRewardLine();
-        if (!reward && batchDbId == null && variant.getStockQty() < orderItem.getQuantity()) {
+        int sellableQty = sellableStockService.salesSellableQtyByVariantId(variant.getId(), LocalDate.now(clock));
+        if (!reward && batchDbId == null && sellableQty < orderItem.getQuantity()) {
             throw new IllegalArgumentException(
                     "San pham '" + product.getName() + "' [" + variant.getVariantCode() + "] " +
-                            "khong du hang. Ton kho: " + variant.getStockQty() +
+                            "khong du hang. Ton ban duoc: " + sellableQty +
                             ", yeu cau: " + orderItem.getQuantity());
         }
-        if (reward && variant.getStockQty() < orderItem.getQuantity()) {
+        if (reward && sellableQty < orderItem.getQuantity()) {
             throw new IllegalArgumentException(
-                    "San pham '" + product.getName() + "' [reward] khong du hang. Ton kho: " + variant.getStockQty() +
+                    "San pham '" + product.getName() + "' [reward] khong du hang. Ton ban duoc: " + sellableQty +
                             ", yeu cau: " + orderItem.getQuantity());
         }
 
@@ -569,7 +574,7 @@ public class InvoiceService {
 
     /**
      * Finalizes quote consumption when confirming a {@link PendingOrder} that referenced the quote.
-     * Reserved quotes (pending order preview) skip quote expiry re-validation — the order snapshot is authoritative (Slice 6C).
+     * Reserved quotes (pending order preview) skip quote expiry re-validation Ã¢â‚¬â€ the order snapshot is authoritative (Slice 6C).
      */
     private void finalizeQuoteLinkedToPendingOrder(String quotePublicId, SalesInvoice saved, long pendingOrderId) {
         if (quotePublicId == null || quotePublicId.isBlank()) {
@@ -660,7 +665,7 @@ public class InvoiceService {
 
         PricingBreakdownSnapshotDto pricing = readJson(order.getPricingBreakdownSnapshotJson(), new TypeReference<>() {});
         if (pricing == null) {
-            throw new IllegalStateException("Pending order thiếu pricingBreakdownSnapshot để tạo hóa đơn");
+            throw new IllegalStateException("Pending order thiÃ¡ÂºÂ¿u pricingBreakdownSnapshot Ã„â€˜Ã¡Â»Æ’ tÃ¡ÂºÂ¡o hÃƒÂ³a Ã„â€˜Ã†Â¡n");
         }
 
         invoice.setVatPercent(nvl(pricing.vatPercent()));
@@ -703,19 +708,19 @@ public class InvoiceService {
         return saved;
     }
 
-    // ── Combo KiotViet: Expand combo → nhiều line items ───────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Combo KiotViet: Expand combo Ã¢â€ â€™ nhiÃ¡Â»Âu line items Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     /**
-     * Expand 1 combo (comboQty lần) thành nhiều SalesInvoiceItem.
-     * Mỗi thành phần → 1 invoice item riêng.
-     * Tất cả item đều có combo_source_id = comboId để trace.
-     * Giá bán từng item = 0 (combo được tính tổng ở combo level)
-     * → Hóa đơn chỉ tính tiền theo giá combo: combQty × combo.sellPrice
+     * Expand 1 combo (comboQty lÃ¡ÂºÂ§n) thÃƒÂ nh nhiÃ¡Â»Âu SalesInvoiceItem.
+     * MÃ¡Â»â€”i thÃƒÂ nh phÃ¡ÂºÂ§n Ã¢â€ â€™ 1 invoice item riÃƒÂªng.
+     * TÃ¡ÂºÂ¥t cÃ¡ÂºÂ£ item Ã„â€˜Ã¡Â»Âu cÃƒÂ³ combo_source_id = comboId Ã„â€˜Ã¡Â»Æ’ trace.
+     * GiÃƒÂ¡ bÃƒÂ¡n tÃ¡Â»Â«ng item = 0 (combo Ã„â€˜Ã†Â°Ã¡Â»Â£c tÃƒÂ­nh tÃ¡Â»â€¢ng Ã¡Â»Å¸ combo level)
+     * Ã¢â€ â€™ HÃƒÂ³a Ã„â€˜Ã†Â¡n chÃ¡Â»â€° tÃƒÂ­nh tiÃ¡Â»Ân theo giÃƒÂ¡ combo: combQty Ãƒâ€” combo.sellPrice
      *
      * KiotViet model:
-     *   - Ghi nhận kho: trừ từng thành phần × qty
-     *   - Ghi nhận doanh thu: theo giá combo (không phải tổng thành phần)
-     *   - Hiển thị HĐ: gom lại theo comboSourceId để show 1 dòng "Combo X × N"
+     *   - Ghi nhÃ¡ÂºÂ­n kho: trÃ¡Â»Â« tÃ¡Â»Â«ng thÃƒÂ nh phÃ¡ÂºÂ§n Ãƒâ€” qty
+     *   - Ghi nhÃ¡ÂºÂ­n doanh thu: theo giÃƒÂ¡ combo (khÃƒÂ´ng phÃ¡ÂºÂ£i tÃ¡Â»â€¢ng thÃƒÂ nh phÃ¡ÂºÂ§n)
+     *   - HiÃ¡Â»Æ’n thÃ¡Â»â€¹ HÃ„Â: gom lÃ¡ÂºÂ¡i theo comboSourceId Ã„â€˜Ã¡Â»Æ’ show 1 dÃƒÂ²ng "Combo X Ãƒâ€” N"
      */
     private BigDecimal expandComboToItems(Long comboId, int comboQty,
                                            SalesInvoice invoice,
@@ -809,10 +814,11 @@ public class InvoiceService {
             Product component = ci.getProduct();
             ProductVariant compVariant = variantService.resolveVariant(null, component.getId(), false);
             int required = ci.getQuantity() * comboQty;
-            if (compVariant.getStockQty() < required) {
+            int sellableQty = sellableStockService.salesSellableQtyByVariantId(compVariant.getId(), LocalDate.now(clock));
+            if (sellableQty < required) {
                 throw new IllegalArgumentException(
                         "Combo '" + combo.getName() + "': Thanh phan '" + component.getName() +
-                                "' khong du hang. Can: " + required + ", ton kho: " + compVariant.getStockQty());
+                                "' khong du hang. Can: " + required + ", ton ban duoc: " + sellableQty);
             }
         }
 
@@ -835,7 +841,7 @@ public class InvoiceService {
             ProductVariant compVariant = variantService.resolveVariant(null, component.getId(), false);
             Long compVariantId = compVariant.getId();
             compVariant = variantRepo.findByIdForUpdate(compVariantId)
-                    .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy variant ID: " + compVariantId));
+                    .orElseThrow(() -> new EntityNotFoundException("KhÃƒÂ´ng tÃƒÂ¬m thÃ¡ÂºÂ¥y variant ID: " + compVariantId));
             int requiredQty = ci.getQuantity() * comboQty;
 
             ProductBatchService.DeductionResult deductionResult = batchService.deductStockFEFOWithTrace(
@@ -913,7 +919,7 @@ public class InvoiceService {
         try {
             return objectMapper.readValue(value, typeReference);
         } catch (Exception e) {
-            throw new IllegalStateException("Không thể deserialize pending-order snapshot", e);
+            throw new IllegalStateException("KhÃƒÂ´ng thÃ¡Â»Æ’ deserialize pending-order snapshot", e);
         }
     }
 
@@ -988,7 +994,7 @@ public class InvoiceService {
                 .sorted(java.util.Comparator.comparingInt(inv -> orderIndex.getOrDefault(inv.getId(), Integer.MAX_VALUE)))
                 .collect(Collectors.toMap(SalesInvoice::getId, inv -> inv, (left, right) -> left, LinkedHashMap::new));
 
-        // Batch-resolve pending order codes for ONLINE_PENDING invoices with one query — never N+1 by row.
+        // Batch-resolve pending order codes for ONLINE_PENDING invoices with one query Ã¢â‚¬â€ never N+1 by row.
         Set<Long> pendingOrderIds = invoiceById.values().stream()
                 .map(SalesInvoice::getPendingOrderId)
                 .filter(Objects::nonNull)
@@ -1043,7 +1049,7 @@ public class InvoiceService {
         return listInvoicesAdmin(pageable, null, null, from, to);
     }
 
-    /** Sprint 2: lịch sử HĐ theo khách hàng */
+    /** Sprint 2: lÃ¡Â»â€¹ch sÃ¡Â»Â­ HÃ„Â theo khÃƒÂ¡ch hÃƒÂ ng */
     public Page<SalesInvoiceResponse> listInvoicesByCustomer(Long customerId, Pageable pageable) {
         Page<SalesInvoice> page = invoiceRepo.findByCustomerIdOrderByInvoiceDateDesc(customerId, pageable);
         if (page.getContent().isEmpty()) {
@@ -1078,50 +1084,45 @@ public class InvoiceService {
     @Transactional
     public void deleteInvoice(Long id) {
         SalesInvoice inv = invoiceRepo.findByIdForUpdate(id)
-                .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy hóa đơn ID: " + id));
+                .orElseThrow(() -> new EntityNotFoundException("KhÃƒÂ´ng tÃƒÂ¬m thÃ¡ÂºÂ¥y hÃƒÂ³a Ã„â€˜Ã†Â¡n ID: " + id));
 
         if (inv.isCancelled()) {
             throw new IllegalStateException(
-                    "Hóa đơn " + inv.getInvoiceNo() + " đã bị hủy; không thể xóa vật lý. Hóa đơn đã hủy vẫn giữ lại cho đối soát.");
+                    "HÃƒÂ³a Ã„â€˜Ã†Â¡n " + inv.getInvoiceNo() + " Ã„â€˜ÃƒÂ£ bÃ¡Â»â€¹ hÃ¡Â»Â§y; khÃƒÂ´ng thÃ¡Â»Æ’ xÃƒÂ³a vÃ¡ÂºÂ­t lÃƒÂ½. HÃƒÂ³a Ã„â€˜Ã†Â¡n Ã„â€˜ÃƒÂ£ hÃ¡Â»Â§y vÃ¡ÂºÂ«n giÃ¡Â»Â¯ lÃ¡ÂºÂ¡i cho Ã„â€˜Ã¡Â»â€˜i soÃƒÂ¡t.");
         }
 
         if (inv.getStatus() == SalesInvoice.Status.COMPLETED) {
             throw new IllegalStateException(
-                    "Không thể xóa vật lý hóa đơn đã hoàn tất. Dùng PATCH /api/invoices/" + id
-                            + "/cancel để hủy hóa đơn và hoàn tồn kho (giữ bản ghi lịch sử).");
+                    "KhÃƒÂ´ng thÃ¡Â»Æ’ xÃƒÂ³a vÃ¡ÂºÂ­t lÃƒÂ½ hÃƒÂ³a Ã„â€˜Ã†Â¡n Ã„â€˜ÃƒÂ£ hoÃƒÂ n tÃ¡ÂºÂ¥t. DÃƒÂ¹ng PATCH /api/invoices/" + id
+                            + "/cancel Ã„â€˜Ã¡Â»Æ’ hÃ¡Â»Â§y hÃƒÂ³a Ã„â€˜Ã†Â¡n vÃƒÂ  hoÃƒÂ n tÃ¡Â»â€œn kho (giÃ¡Â»Â¯ bÃ¡ÂºÂ£n ghi lÃ¡Â»â€¹ch sÃ¡Â»Â­).");
         }
 
-        throw new IllegalStateException("Không thể xóa hóa đơn ở trạng thái: " + inv.getStatus());
+        throw new IllegalStateException("KhÃƒÂ´ng thÃ¡Â»Æ’ xÃƒÂ³a hÃƒÂ³a Ã„â€˜Ã†Â¡n Ã¡Â»Å¸ trÃ¡ÂºÂ¡ng thÃƒÂ¡i: " + inv.getStatus());
     }
 
     /**
-     * Issue 14: Soft Cancel hóa đơn — không xóa vật lý.
-     * - Đánh trạng thái CANCELLED + ghi audit
-     * - Hoàn tồn kho (variant.stockQty + batch.remainingQty)
-     * - Không giới hạn ngày (admin có thể hủy HĐ cũ)
+     * Issue 14: Soft Cancel hÃƒÂ³a Ã„â€˜Ã†Â¡n Ã¢â‚¬â€ khÃƒÂ´ng xÃƒÂ³a vÃ¡ÂºÂ­t lÃƒÂ½.
+     * - Ã„ÂÃƒÂ¡nh trÃ¡ÂºÂ¡ng thÃƒÂ¡i CANCELLED + ghi audit
+     * - HoÃƒÂ n tÃ¡Â»â€œn kho (variant.stockQty + batch.remainingQty)
+     * - KhÃƒÂ´ng giÃ¡Â»â€ºi hÃ¡ÂºÂ¡n ngÃƒÂ y (admin cÃƒÂ³ thÃ¡Â»Æ’ hÃ¡Â»Â§y HÃ„Â cÃ…Â©)
      */
     @Transactional
     public SalesInvoiceResponse cancelInvoice(Long id, String reason, String actor) {
         SalesInvoice inv = invoiceRepo.findByIdForUpdate(id)
-                .orElseThrow(() -> new EntityNotFoundException("Không tìm thấy hóa đơn ID: " + id));
+                .orElseThrow(() -> new EntityNotFoundException("KhÃƒÂ´ng tÃƒÂ¬m thÃ¡ÂºÂ¥y hÃƒÂ³a Ã„â€˜Ã†Â¡n ID: " + id));
 
         if (inv.isCancelled()) {
-            throw new IllegalStateException("Hóa đơn " + inv.getInvoiceNo() + " đã bị hủy trước đó (lúc "
+            throw new IllegalStateException("HÃƒÂ³a Ã„â€˜Ã†Â¡n " + inv.getInvoiceNo() + " Ã„â€˜ÃƒÂ£ bÃ¡Â»â€¹ hÃ¡Â»Â§y trÃ†Â°Ã¡Â»â€ºc Ã„â€˜ÃƒÂ³ (lÃƒÂºc "
                 + (inv.getCancelledAt() != null ? inv.getCancelledAt().toLocalDate() : "?") + ").");
         }
 
-        log.warn("[AUDIT-CANCEL] Hóa đơn={} | user={} | lý do={} | tổng={} ₫ | khách={}",
+        log.warn("[AUDIT-CANCEL] HÃƒÂ³a Ã„â€˜Ã†Â¡n={} | user={} | lÃƒÂ½ do={} | tÃ¡Â»â€¢ng={} Ã¢â€šÂ« | khÃƒÂ¡ch={}",
                 inv.getInvoiceNo(), actor, reason,
                 inv.getTotalAmount().subtract(inv.getDiscountAmount() != null ? inv.getDiscountAmount() : BigDecimal.ZERO),
-                inv.getCustomerName() != null ? inv.getCustomerName() : "khách lẻ");
+                inv.getCustomerName() != null ? inv.getCustomerName() : "khÃƒÂ¡ch lÃ¡ÂºÂ»");
 
-        // Đánh dấu CANCELLED
-        inv.setStatus(SalesInvoice.Status.CANCELLED);
-        inv.setCancelledAt(java.time.LocalDateTime.now(clock));
-        inv.setCancelledBy(actor);
-        inv.setCancelReason(reason != null && !reason.isBlank() ? reason.trim() : null);
+        // Restore stock first. If allocation trace is missing, fail before mutating invoice status.
 
-        // Hoàn tồn kho
         Set<Long> affectedProductIds = new java.util.HashSet<>();
         for (SalesInvoiceItem item : inv.getItems()) {
             restoreStockFromAllocations(item);
@@ -1131,10 +1132,23 @@ public class InvoiceService {
             affectedProductIds.add(item.getProduct().getId());
         }
 
+        // Mark cancelled only after exact stock reversal succeeds.
+        inv.setStatus(SalesInvoice.Status.CANCELLED);
+        inv.setCancelledAt(java.time.LocalDateTime.now(clock));
+        inv.setCancelledBy(actor);
+        inv.setCancelReason(reason != null && !reason.isBlank() ? reason.trim() : null);
+
         invoiceRepo.save(inv);
         loyaltyService.reverseForInvoice(inv, reason);
         affectedProductIds.forEach(comboService::refreshCombosContaining);
         return DtoMapper.toResponse(inv, resolvePendingOrderCode(inv.getPendingOrderId()));
+    }
+
+    private boolean isPromotionActiveAtBusinessTime(Promotion promo) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        return Boolean.TRUE.equals(promo.getActive())
+                && !now.isBefore(promo.getStartDate())
+                && !now.isAfter(promo.getEndDate());
     }
 
     private void appendBatchAllocations(SalesInvoiceItem item, List<ProductBatchService.BatchDeduction> deductions) {
@@ -1162,7 +1176,7 @@ public class InvoiceService {
                 continue;
             }
             if (item.getVariant() == null || item.getVariant().getId() == null) {
-                throw new IllegalStateException("Invoice item thiếu variant để ghi inventory movement");
+                throw new IllegalStateException("Invoice item thieu variant de ghi inventory movement");
             }
             String sourceId = item.getId() != null
                     ? invoiceTrace + ":item:" + item.getId()
@@ -1170,10 +1184,10 @@ public class InvoiceService {
             String note = "invoiceNo=" + invoice.getInvoiceNo();
             for (SalesInvoiceItemBatchAllocation allocation : item.getBatchAllocations()) {
                 if (allocation.getBatch() == null || allocation.getBatch().getId() == null) {
-                    throw new IllegalStateException("Allocation thiếu batch để ghi inventory movement");
+                    throw new IllegalStateException("Allocation thieu batch de ghi inventory movement");
                 }
                 if (allocation.getDeductedQty() == null || allocation.getDeductedQty() <= 0) {
-                    throw new IllegalStateException("Allocation có deducted_qty không hợp lệ để ghi inventory movement");
+                    throw new IllegalStateException("Allocation co deducted_qty khong hop le de ghi inventory movement");
                 }
                 stockMutationService.appendMovement(
                         item.getVariant().getId(),
@@ -1192,17 +1206,17 @@ public class InvoiceService {
             Map<Long, Integer> restoreQtyByBatchId = new HashMap<>();
             for (SalesInvoiceItemBatchAllocation allocation : allocations) {
                 if (allocation.getBatch() == null || allocation.getBatch().getId() == null) {
-                    throw new IllegalStateException("Allocation thiếu batch_id cho invoiceItem=" + item.getId());
+                    throw new IllegalStateException("Allocation thieu batch_id cho invoiceItem=" + item.getId());
                 }
                 if (allocation.getDeductedQty() == null || allocation.getDeductedQty() <= 0) {
-                    throw new IllegalStateException("Allocation có deducted_qty không hợp lệ cho invoiceItem=" + item.getId());
+                    throw new IllegalStateException("Allocation co deducted_qty khong hop le cho invoiceItem=" + item.getId());
                 }
                 restoreQtyByBatchId.merge(allocation.getBatch().getId(), allocation.getDeductedQty(), Integer::sum);
             }
 
             List<ProductBatch> lockedBatches = batchRepo.findAllByIdInForUpdate(new ArrayList<>(restoreQtyByBatchId.keySet()));
             if (lockedBatches.size() != restoreQtyByBatchId.size()) {
-                throw new IllegalStateException("Không tìm đủ batch để hoàn tồn cho invoiceItem=" + item.getId());
+                throw new IllegalStateException("Khong tim du batch de hoan ton cho invoiceItem=" + item.getId());
             }
 
             for (ProductBatch batch : lockedBatches) {
@@ -1218,41 +1232,23 @@ public class InvoiceService {
             return;
         }
 
-        // Legacy invoice (before ledger rollout): fallback heuristic restore.
         Long productId = item.getProduct().getId();
         Long variantId = item.getVariant() != null ? item.getVariant().getId() : null;
         int qty = item.getQuantity();
-        BigDecimal costSnapshot = item.getUnitCostSnapshot();
-
-        List<com.example.nhadanshop.entity.ProductBatch> batches = variantId != null
-                ? batchRepo.findByVariantIdAndRemainingQtyGreaterThanOrderByExpiryDateAsc(variantId, -1)
-                : batchRepo.findByProductIdOrderByExpiryDateAsc(productId);
-
-        if (batches.isEmpty()) {
-            log.warn("[FEFO-RESTORE] Không tìm thấy batch: productId={} variantId={}", productId, variantId);
-            return;
-        }
-
-        // Ưu tiên batch có costPrice khớp snapshot (đây là batch đã bị deduct)
-        com.example.nhadanshop.entity.ProductBatch target = batches.stream()
-                .filter(b -> costSnapshot != null && b.getCostPrice() != null
-                        && b.getCostPrice().compareTo(costSnapshot) == 0)
-                .findFirst()
-                // Fallback: batch không expired gần nhất (LIFO để hoàn về lô mới nhất)
-                .orElseGet(() -> batches.stream()
-                        .filter(b -> !b.isExpired())
-                        .reduce((a, b) -> b)  // lấy phần tử cuối = mới nhất
-                        .orElse(batches.get(batches.size() - 1)));
-
-        target.setRemainingQty(target.getRemainingQty() + qty);
-        batchRepo.save(target);
-        log.debug("[FEFO-RESTORE] batch={} variantId={} +{} → remaining={}",
-                target.getBatchCode(), variantId, qty, target.getRemainingQty());
+        Long invoiceId = item.getInvoice() != null ? item.getInvoice().getId() : null;
+        log.warn(
+                "[INVOICE-REVERSAL-BLOCKED] missing_batch_allocation_trace invoiceId={} invoiceItemId={} productId={} variantId={} restoreQty={}",
+                invoiceId,
+                item.getId(),
+                productId,
+                variantId,
+                qty);
+        throw new IllegalStateException("Invoice reversal requires batch allocation trace");
     }
 
     private void appendInvoiceCancelMovement(SalesInvoiceItem item, ProductBatch batch, int restoreQty) {
         if (item.getVariant() == null || item.getVariant().getId() == null) {
-            throw new IllegalStateException("Invoice item thiếu variant để ghi cancel inventory movement");
+            throw new IllegalStateException("Invoice item thiÃ¡ÂºÂ¿u variant Ã„â€˜Ã¡Â»Æ’ ghi cancel inventory movement");
         }
         SalesInvoice invoice = item.getInvoice();
         String invoiceTrace = invoice != null && invoice.getId() != null
@@ -1273,5 +1269,3 @@ public class InvoiceService {
                 note);
     }
 }
-
-

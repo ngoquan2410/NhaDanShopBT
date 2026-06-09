@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -41,6 +42,7 @@ public class PromotionEvaluationService {
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
     private final Clock clock;
+    private final SellableStockService sellableStockService;
 
     public List<PromotionEvaluationResponse> evaluate(PromotionEvaluationRequest request) {
         LocalDateTime now = LocalDateTime.now(clock);
@@ -287,7 +289,7 @@ public class PromotionEvaluationService {
         if (!Boolean.TRUE.equals(variant.getActive()) || !Boolean.TRUE.equals(variant.getIsSellable())) {
             return GiftValidation.invalid("Variant quà tặng không bán được");
         }
-        int stockQty = variant.getStockQty() != null ? variant.getStockQty() : 0;
+        int stockQty = sellableStockService.salesSellableQtyByVariantId(variant.getId(), LocalDate.now(clock));
         int paidSameVariant = paidLines.stream()
                 .filter(l -> l.variant() != null && variant.getId().equals(l.variant().getId()))
                 .mapToInt(CartLine::qty)

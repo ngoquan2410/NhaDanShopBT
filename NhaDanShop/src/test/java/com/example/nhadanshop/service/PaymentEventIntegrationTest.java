@@ -56,6 +56,7 @@ import static org.mockito.Mockito.when;
         PendingOrderService.class,
         InvoiceService.class,
         SalesQuoteService.class,
+        SellableStockService.class,
         ShippingSettingsService.class,
         ShippingQuoteService.class,
         GhnShippingService.class,

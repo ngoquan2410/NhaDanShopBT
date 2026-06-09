@@ -187,7 +187,7 @@ public class InventoryReceiptService {
                     disc.divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_UP));
             BigDecimal discountedLine = itemReq.unitCost()
                     .multiply(discountFactor)
-                    .multiply(BigDecimal.valueOf(itemReq.quantity()))
+                    .multiply(itemReq.quantity())
                     .setScale(4, RoundingMode.HALF_UP);
             discountedLineTotals.add(discountedLine);
             totalDiscountedValue = totalDiscountedValue.add(discountedLine);
@@ -674,7 +674,7 @@ public class InventoryReceiptService {
                         .divide(BigDecimal.valueOf(cr.quantity()), 2, RoundingMode.HALF_UP);
                 allItems.add(new ReceiptItemRequest(
                         ci.getProduct().getId(),
-                        ci.getQuantity() * cr.quantity(),
+                        BigDecimal.valueOf((long) ci.getQuantity() * cr.quantity()),
                         componentCost,
                         safe(cr.discountPercent()),
                         null, null, null,

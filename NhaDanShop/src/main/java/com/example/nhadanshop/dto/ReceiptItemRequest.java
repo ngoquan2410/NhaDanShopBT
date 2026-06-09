@@ -10,7 +10,7 @@ import java.time.LocalDate;
 
 public record ReceiptItemRequest(
         @NotNull Long productId,
-        @NotNull @Min(1) Integer quantity,
+        @NotNull @DecimalMin(value = "0.0", inclusive = false) BigDecimal quantity,
         @NotNull @DecimalMin("0.00") BigDecimal unitCost,
         @DecimalMin("0.00") @DecimalMax("100.00") BigDecimal discountPercent,
         /**
@@ -38,4 +38,32 @@ public record ReceiptItemRequest(
          * Nếu có → dùng ngày này cho productBatch.expiry_date (FEFO đúng).
          */
         LocalDate expiryDateOverride
-) {}
+) {
+    public ReceiptItemRequest(
+            Long productId,
+            Integer quantity,
+            BigDecimal unitCost,
+            BigDecimal discountPercent,
+            BigDecimal sellPrice,
+            Boolean isSellable,
+            Boolean isSellableExplicit,
+            String importUnit,
+            Integer piecesOverride,
+            Long variantId,
+            LocalDate expiryDateOverride
+    ) {
+        this(
+                productId,
+                quantity != null ? BigDecimal.valueOf(quantity) : null,
+                unitCost,
+                discountPercent,
+                sellPrice,
+                isSellable,
+                isSellableExplicit,
+                importUnit,
+                piecesOverride,
+                variantId,
+                expiryDateOverride
+        );
+    }
+}

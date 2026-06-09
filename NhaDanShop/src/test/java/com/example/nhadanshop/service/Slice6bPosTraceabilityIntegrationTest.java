@@ -48,6 +48,7 @@ import static org.mockito.Mockito.when;
 })
 @Import({
         InvoiceService.class,
+        SellableStockService.class,
         ProductBatchService.class,
         StockMutationService.class,
         StockedCatalogGuardService.class,

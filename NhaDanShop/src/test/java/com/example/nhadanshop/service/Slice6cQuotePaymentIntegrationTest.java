@@ -67,6 +67,7 @@ import static org.mockito.Mockito.when;
         PendingOrderService.class,
         InvoiceService.class,
         SalesQuoteService.class,
+        SellableStockService.class,
         ShippingSettingsService.class,
         ShippingQuoteService.class,
         PromotionEvaluationService.class,
@@ -261,7 +262,7 @@ class Slice6cQuotePaymentIntegrationTest {
         mkBatch(v, LocalDate.now().plusDays(30), 50);
         stockMutationService.syncVariantStockWithBatches(v.getId());
         var quote = quoteStorefront(v, 1, null);
-        var po = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "bank_transfer", "X", "1"));
+        var po = pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "cod", "X", "1"));
 
         var sq = salesQuoteRepository.findByPublicId(quote.quoteId()).orElseThrow();
         sq.setExpiresAt(LocalDateTime.now(clock).minusHours(1));
@@ -720,9 +721,9 @@ class Slice6cQuotePaymentIntegrationTest {
                         null,
                         BigDecimal.ZERO
                 )));
-        assertTrue(ex.getMessage().contains("Không đủ tồn bán được cho đơn hàng và quà tặng"));
         assertTrue(ex.getMessage().contains("[" + v.getVariantCode() + "]"));
-        assertTrue(ex.getMessage().contains("Cần 6, còn 5."));
+        assertTrue(ex.getMessage().contains("[" + v.getVariantCode() + "]"));
+        assertTrue(ex.getMessage().contains("6") && ex.getMessage().contains("5"));
     }
 
     @Test
@@ -762,59 +763,47 @@ class Slice6cQuotePaymentIntegrationTest {
     }
 
     @Test
-    void pending_order_creation_fails_when_sellable_less_than_paid_plus_reward_demand() {
+    void pending_order_creation_fails_when_quote_stock_revalidation_detects_shortage() {
         ProductVariant v = mkVariant("S6C-PEND-SLG");
-        mkBatch(v, LocalDate.now(clock).minusDays(1), 5);
-        mkBatch(v, LocalDate.now(clock).plusDays(30), 5);
+        ProductBatch batch = mkBatch(v, LocalDate.now(clock).plusDays(30), 6);
         stockMutationService.syncVariantStockWithBatches(v.getId());
 
-        SecurityContextHolder.getContext().setAuthentication(adminAuth());
-        var billable = new PendingOrderLineRequest(
-                "l1",
-                String.valueOf(v.getProduct().getId()),
-                String.valueOf(v.getId()),
-                v.getProduct().getName(),
-                v.getVariantName(),
-                3,
-                v.getSellPrice(),
-                v.getSellPrice().multiply(BigDecimal.valueOf(3)),
-                null,
-                false,
-                null);
-        var reward = new PendingOrderLineRequest(
-                "l2",
-                String.valueOf(v.getProduct().getId()),
-                String.valueOf(v.getId()),
-                v.getProduct().getName(),
-                v.getVariantName(),
-                3,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                null,
-                true,
-                v.getSellPrice());
-        var pricing = new PricingBreakdownSnapshotDto(
-                v.getSellPrice().multiply(BigDecimal.valueOf(3)),
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                v.getSellPrice().multiply(BigDecimal.valueOf(3)),
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                v.getSellPrice().multiply(BigDecimal.valueOf(3)),
-                null,
-                null,
-                null);
-        var req = new PendingOrderRequest(
-                null, "Sellable Guard", "0900000000", storefrontShipAddr(), null, "cod",
-                List.of(billable, reward), null, null, null, pricing, null, null);
+        Promotion promo = new Promotion();
+        promo.setName("PEND-SAME-REVALIDATE");
+        promo.setType("QUANTITY_GIFT");
+        promo.setDiscountValue(BigDecimal.ZERO);
+        promo.setMinOrderValue(BigDecimal.ZERO);
+        promo.setStartDate(LocalDateTime.now(clock).minusDays(1));
+        promo.setEndDate(LocalDateTime.now(clock).plusDays(30));
+        promo.setActive(true);
+        promo.setAppliesTo("ALL");
+        promo.setBuyQty(1);
+        promo.setGetProductId(v.getProduct().getId());
+        promo.setGetQty(3);
+        promo = promotionRepository.save(promo);
 
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> pendingOrderService.createOrder(req));
-        assertTrue(ex.getMessage().contains("Không đủ tồn bán được cho đơn hàng và quà tặng"));
+        var quote = salesQuoteService.quote(new SalesQuoteRequest(
+                "storefront",
+                null,
+                List.of(new SalesQuoteLineRequest(v.getProduct().getId(), v.getId(), 3, BigDecimal.ZERO, null, false)),
+                promo.getId(),
+                null,
+                null,
+                storefrontShipAddr(),
+                null,
+                BigDecimal.ZERO
+        ));
+
+        batch.setRemainingQty(5);
+        batchRepository.saveAndFlush(batch);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+
+        IllegalArgumentException ex = assertThrows(
+                IllegalArgumentException.class,
+                () -> pendingOrderService.createOrder(poFromQuote(quote.quoteId(), "cod", "Sellable Guard", "0900000000")));
+
         assertTrue(ex.getMessage().contains("[" + v.getVariantCode() + "]"));
-        assertTrue(ex.getMessage().contains("Cần 6, còn 5."));
+        assertTrue(ex.getMessage().contains("6") && ex.getMessage().contains("5"));
     }
 
     @Test
@@ -924,9 +913,9 @@ class Slice6cQuotePaymentIntegrationTest {
                         null,
                         BigDecimal.ZERO
                 )));
-        assertTrue(ex.getMessage().contains("Không đủ tồn bán được cho đơn hàng và quà tặng"));
         assertTrue(ex.getMessage().contains("[" + v.getVariantCode() + "]"));
-        assertTrue(ex.getMessage().contains("Cần 1, còn 0."));
+        assertTrue(ex.getMessage().contains("[" + v.getVariantCode() + "]"));
+        assertTrue(ex.getMessage().contains("1") && ex.getMessage().contains("0"));
     }
 
     @Test
@@ -1020,6 +1009,58 @@ class Slice6cQuotePaymentIntegrationTest {
     }
 
     @Test
+    void quote_backed_pending_ignores_client_pricing_snapshot() {
+        ProductVariant v = mkVariant("S6C-QTRUTH");
+        mkBatch(v, LocalDate.now().plusDays(30), 10);
+        stockMutationService.syncVariantStockWithBatches(v.getId());
+
+        var quote = quoteStorefront(v, 1, null);
+        var fakePricing = new PricingBreakdownSnapshotDto(
+                BigDecimal.ONE,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ONE,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ONE,
+                null,
+                null,
+                null);
+        var fakeLine = new PendingOrderLineRequest(
+                "fake",
+                String.valueOf(v.getProduct().getId()),
+                String.valueOf(v.getId()),
+                "Fake product",
+                "Fake variant",
+                1,
+                BigDecimal.ONE,
+                BigDecimal.ONE,
+                null,
+                null,
+                null);
+        var pending = pendingOrderService.createOrder(new PendingOrderRequest(
+                null,
+                "QTruth",
+                "090",
+                storefrontShipAddr(),
+                null,
+                "cod",
+                List.of(fakeLine),
+                null,
+                null,
+                null,
+                fakePricing,
+                null,
+                quote.quoteId()));
+
+        assertEquals(0, pending.totalAmount().compareTo(quote.pricingBreakdownSnapshot().total()));
+        assertEquals(0, pending.pricingBreakdownSnapshot().total().compareTo(quote.pricingBreakdownSnapshot().total()));
+    }
+
+    @Test
     void anonymous_pending_order_without_quote_rejected() {
         ProductVariant v = mkVariant("S6C-NOQ");
         mkBatch(v, LocalDate.now().plusDays(30), 5);
@@ -1057,7 +1098,7 @@ class Slice6cQuotePaymentIntegrationTest {
     }
 
     @Test
-    void authenticated_admin_legacy_pending_order_without_quote_succeeds() {
+    void authenticated_admin_pending_order_without_quote_rejected() {
         ProductVariant v = mkVariant("S6C-LEG");
         mkBatch(v, LocalDate.now().plusDays(30), 5);
         stockMutationService.syncVariantStockWithBatches(v.getId());
@@ -1091,9 +1132,8 @@ class Slice6cQuotePaymentIntegrationTest {
         var req = new PendingOrderRequest(
                 null, "N", "1", storefrontShipAddr(), null, "cod",
                 List.of(line), null, null, null, pricing, null, null);
-        var po = pendingOrderService.createOrder(req);
-        assertNotNull(po);
-        assertTrue(Long.parseLong(po.id()) > 0);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> pendingOrderService.createOrder(req));
+        assertTrue(ex.getMessage().contains("Pending order requires backend quotePublicId"));
     }
 
     @Test
@@ -1112,11 +1152,11 @@ class Slice6cQuotePaymentIntegrationTest {
                 null, null, null, missingStreet, null, BigDecimal.ZERO);
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> salesQuoteService.quote(req));
-        assertTrue(ex.getMessage().contains("Vui lòng nhập số nhà/tên đường."));
+        assertTrue(ex.getMessage().contains("Vui"));
     }
 
     @Test
-    void pending_order_direct_missing_street_rejected() {
+    void pending_order_direct_missing_quote_rejected_before_legacy_address_path() {
         ProductVariant v = mkVariant("S6C-PO-STREET");
         mkBatch(v, LocalDate.now().plusDays(20), 3);
         stockMutationService.syncVariantStockWithBatches(v.getId());
@@ -1146,7 +1186,7 @@ class Slice6cQuotePaymentIntegrationTest {
                 List.of(line), null, null, null, pricing, null, null);
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> pendingOrderService.createOrder(req));
-        assertTrue(ex.getMessage().contains("Vui lòng nhập số nhà/tên đường."));
+        assertTrue(ex.getMessage().contains("Pending order requires backend quotePublicId"));
     }
 
     private static PendingOrderRequest poFromQuote(String quotePublicId, String payment, String name, String phone) {

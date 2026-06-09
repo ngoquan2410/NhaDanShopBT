@@ -27,6 +27,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.when;
 
 @DataJpaTest(properties = {
         "spring.flyway.enabled=false",
@@ -55,6 +58,8 @@ class Slice8CustomerBindingIntegrationTest {
     @MockBean PromotionRepository promotionRepository;
     @MockBean VoucherRepository voucherRepository;
     @MockBean ProductBatchRepository productBatchRepository;
+    @MockBean SellableStockService sellableStockService;
+    @MockBean StockedCatalogGuardService stockedCatalogGuardService;
 
     Product product;
     ProductVariant variant;
@@ -75,6 +80,7 @@ class Slice8CustomerBindingIntegrationTest {
         user.setActive(true);
         user.setCustomer(own);
         userRepository.save(user);
+        when(sellableStockService.salesSellableQtyByVariantId(anyLong(), any())).thenReturn(100);
     }
 
     @Test

@@ -2,10 +2,12 @@ package com.example.nhadanshop.service;
 
 import com.example.nhadanshop.dto.ExcelPreviewResponse;
 import com.example.nhadanshop.entity.Category;
+import com.example.nhadanshop.entity.InventoryReceiptItem;
 import com.example.nhadanshop.entity.Product;
 import com.example.nhadanshop.entity.ProductBatch;
 import com.example.nhadanshop.entity.ProductVariant;
 import com.example.nhadanshop.repository.CategoryRepository;
+import com.example.nhadanshop.repository.InventoryReceiptItemRepository;
 import com.example.nhadanshop.repository.ProductBatchRepository;
 import com.example.nhadanshop.repository.ProductRepository;
 import com.example.nhadanshop.repository.ProductVariantRepository;
@@ -70,6 +72,8 @@ class ExcelReceiptImportServiceSlice5IntegrationTest {
     private ProductVariantRepository productVariantRepository;
     @Autowired
     private ProductBatchRepository productBatchRepository;
+    @Autowired
+    private InventoryReceiptItemRepository inventoryReceiptItemRepository;
 
     @BeforeEach
     void securityAndMocks() {
@@ -111,6 +115,40 @@ class ExcelReceiptImportServiceSlice5IntegrationTest {
                 .findFirst()
                 .orElseThrow();
         assertNotNull(row.errorMessage());
+    }
+
+    @Test
+    void fractionalKgQuantity_isPreserved_andConvertedToIntegerRetailStock() throws Exception {
+        String pcode = "S5-RP-FRAC-1";
+        String vcode = "S5-RP-FRAC-1-G";
+        MockMultipartFile file = newProductRowWorkbook(pcode, vcode, "raw", 0.5);
+
+        ExcelPreviewResponse preview = excelReceiptImportService.previewExcel(file);
+        ExcelPreviewResponse.PreviewRow previewRow = preview.rows().stream()
+                .filter(r -> pcode.equals(r.productCode()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(0, new BigDecimal("0.5").compareTo(previewRow.quantity()));
+
+        var result = excelReceiptImportService.importReceiptFromExcel(
+                file, "NCC Fractional", null, "", BigDecimal.ZERO, BigDecimal.ZERO,
+                LocalDateTime.of(2025, 1, 10, 12, 0)
+        );
+
+        assertTrue(result.errors().isEmpty());
+        ProductVariant variant = productVariantRepository.findByVariantCodeIgnoreCase(vcode).orElseThrow();
+        ProductBatch batch = productBatchRepository.findAll().stream()
+                .filter(b -> b.getVariant() != null && b.getVariant().getId().equals(variant.getId()))
+                .findFirst()
+                .orElseThrow();
+        InventoryReceiptItem item = inventoryReceiptItemRepository.findAll().stream()
+                .filter(i -> i.getVariant() != null && i.getVariant().getId().equals(variant.getId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(500, batch.getRemainingQty());
+        assertEquals(500, item.getRetailQtyAdded());
+        assertEquals(0, new BigDecimal("0.5").compareTo(item.getQuantity()));
     }
 
     @Test
@@ -266,6 +304,15 @@ class ExcelReceiptImportServiceSlice5IntegrationTest {
      * NEW product row: SP chưa tồn tại — sheet SP Don, đủ cột A–O, P = sellable token.
      */
     private static MockMultipartFile newProductRowWorkbook(String productCode, String variantCode, String colP) throws Exception {
+        return newProductRowWorkbook(productCode, variantCode, colP, 1);
+    }
+
+    private static MockMultipartFile newProductRowWorkbook(
+            String productCode,
+            String variantCode,
+            String colP,
+            double quantity
+    ) throws Exception {
         XSSFWorkbook wb = new XSSFWorkbook();
         Sheet sh = wb.createSheet("SP Don");
         for (int i = 0; i < 3; i++) {
@@ -275,7 +322,7 @@ class ExcelReceiptImportServiceSlice5IntegrationTest {
         r.createCell(0).setCellValue(productCode);
         r.createCell(1).setCellValue(variantCode);
         r.createCell(2).setCellValue("Bánh tráng nguyên liệu");
-        r.createCell(3).setCellValue(1);
+        r.createCell(3).setCellValue(quantity);
         r.createCell(4).setCellValue(50_000);
         r.createCell(5).setCellValue(0);
         r.createCell(6).setCellValue(0);
