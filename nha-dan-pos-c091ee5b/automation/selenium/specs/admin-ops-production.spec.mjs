@@ -30,7 +30,7 @@ export default {
     await driver.get(`${origin}/admin/production/recipes/new`);
     await waitForH1Containing(driver, "Tạo quy trình sản xuất", 25000);
     await driver.wait(
-      until.elementLocated(By.xpath("//a[contains(.,'Tạo sản phẩm mới')]")),
+      until.elementLocated(By.css('[data-testid="production-recipe-create-output-product"]')),
       15000,
     );
 

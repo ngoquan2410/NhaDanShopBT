@@ -291,7 +291,7 @@ public class InventoryStockService {
      */
     private Map<Long, BigDecimal> buildAvgCostPriceByVariantMap() {
         Map<Long, BigDecimal> map = new HashMap<>();
-        batchRepository.avgCostPriceByVariant(LocalDate.now(businessClock)).forEach(row -> {
+        batchRepository.avgCostPriceByVariant().forEach(row -> {
             Long vid = ((Number) row[0]).longValue();
             BigDecimal avg = row[1] != null ? new BigDecimal(row[1].toString()) : BigDecimal.ZERO;
             map.put(vid, avg);
@@ -301,7 +301,7 @@ public class InventoryStockService {
 
     private Map<Long, Integer> buildValuationQtyByVariantMap() {
         Map<Long, Integer> map = new HashMap<>();
-        batchRepository.sumValuationRemainingQtyByVariant(LocalDate.now(businessClock)).forEach(row -> {
+        batchRepository.sumValuationRemainingQtyByVariant().forEach(row -> {
             Long vid = ((Number) row[0]).longValue();
             int qty = row[1] != null ? ((Number) row[1]).intValue() : 0;
             map.put(vid, qty);

@@ -23,6 +23,20 @@ export default {
     await driver.get(`${origin}/`);
     await driver.executeScript("try { localStorage.removeItem('nhadan.cart.v1'); } catch (e) {}");
 
+    const catalogRes = await fetch(
+      `${config.apiBaseUrl.replace(/\/$/, "")}/api/products?page=0&size=100&sort=name,asc`,
+    );
+    const catalog = catalogRes.ok ? await catalogRes.json() : {};
+    const stockedProduct = (Array.isArray(catalog.content) ? catalog.content : []).find((product) => {
+      const variants = Array.isArray(product?.variants) ? product.variants : [];
+      const selected = variants.find((variant) => variant?.isDefault) || variants[0];
+      return Number(selected?.availableQty ?? 0) >= 2;
+    });
+    if (!stockedProduct?.id) {
+      caseResults.push(cr(CASE_ID, "fail", { error: "No public product with availableQty >= 2" }));
+      return { outcome: "fail", reason: "No stocked product fixture", caseResults };
+    }
+
     await driver.get(`${origin}/products`);
     await assert.waitForH1Containing(driver, "Tất cả sản phẩm", 35000);
 
@@ -34,7 +48,7 @@ export default {
       caseResults.push(cr(CASE_ID, "fail", { error: "No storefront-product-card on /products" }));
       return { outcome: "fail", reason: "No product cards", caseResults };
     }
-    await cards[0].click();
+    await driver.get(`${origin}/products/${stockedProduct.id}`);
     await assert.waitForUrlContains(driver, "/products/", 25000);
 
     await driver.wait(until.elementLocated(By.css('[data-testid="storefront-product-quantity-section"]')), 25000);

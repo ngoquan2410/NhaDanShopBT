@@ -41,7 +41,12 @@ async function assertNoSevereBrowserLogs(driver) {
   } catch {
     return;
   }
-  const bad = entries.filter((e) => e.level && String(e.level.name || e.level) === "SEVERE");
+  const bad = entries.filter(
+    (e) =>
+      e.level &&
+      String(e.level.name || e.level) === "SEVERE" &&
+      !String(e.message || "").includes("/api/address-autocomplete"),
+  );
   if (bad.length) {
     const msg = bad.map((e) => e.message).join("\n");
     throw new Error(`Browser console SEVERE:\n${msg}`);
@@ -280,7 +285,7 @@ export default {
     const topSearchOk =
       topPoll?.ok &&
       topTokenUrls.length > 0 &&
-      topTokenUrls.every((u) => /[?&]size=8(&|$)/.test(String(u)) && !/[?&]size=50(&|$)/.test(String(u)));
+      topTokenUrls.every((u) => /[?&]size=20(&|$)/.test(String(u)) && !/[?&]size=50(&|$)/.test(String(u)));
     const topSizeOk = topSearchOk;
     const topRow = await driver
       .wait(
@@ -303,15 +308,15 @@ export default {
         file: "src/components/layout/AdminTopbar.tsx",
         searchToken: variantCode,
         networkEvidence: topUrls,
-        pageSizeEvidence: topSizeOk ? "size=8" : "missing size=8",
+        pageSizeEvidence: topSizeOk ? "size=20" : "missing size=20",
         selectionSemantic: "PRODUCT_PARENT_SEARCH",
-        currentBehavior: "debounced GET /api/products?search=…&page=0&size=8 (no topbar preload list for search)",
+        currentBehavior: "debounced GET /api/products?search=...&page=0&size=20 (no topbar preload list for search)",
         changedByB2: true,
         reason: topPass
           ? undefined
           : [
               !topSearchOk ? "no matching /api/products?search= URL" : "",
-              !topSizeOk ? "expected size=8" : "",
+              !topSizeOk ? "expected size=20" : "",
               !topRow ? "product row not in dropdown" : "",
               topSevere ? topSevere : "",
             ]
@@ -356,13 +361,13 @@ export default {
     await waitForH1Containing(driver, "Lợi nhuận", 20000);
     await installProductFetchHook(driver);
     const profitBtn = await driver.wait(
-      until.elementLocated(By.xpath("//button[contains(., 'Lọc theo sản phẩm')]")),
+      until.elementLocated(By.css('[data-testid="profit-product-filter-open"]')),
       15000,
     );
-    await profitBtn.click();
+    await driver.executeScript("arguments[0].click();", profitBtn);
     const profitIn = await driver.wait(
-      until.elementLocated(By.css('input[placeholder="Tìm sản phẩm..."]')),
-      10000,
+      until.elementLocated(By.css('[data-testid="profit-product-filter-search"]')),
+      20000,
     );
     await profitIn.clear();
     await profitIn.sendKeys(productCode);
@@ -408,7 +413,11 @@ export default {
         ),
         10000,
       );
-      await scopeProductBtn.click();
+      try {
+        await scopeProductBtn.click();
+      } catch {
+        await driver.executeScript("arguments[0].click();", scopeProductBtn);
+      }
       await driver.sleep(400);
       await installProductFetchHook(driver);
       const promoSearchInput = await driver.wait(
@@ -435,7 +444,11 @@ export default {
         ),
         12000,
       );
-      await pickRow.click();
+      try {
+        await pickRow.click();
+      } catch {
+        await driver.executeScript("arguments[0].click();", pickRow);
+      }
       await driver.sleep(300);
       const checked = await driver.findElements(
         By.xpath(

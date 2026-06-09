@@ -230,6 +230,7 @@ export default function AdminProfitReport() {
           <div className="relative ml-auto" ref={pickerRef}>
             <button
                 type="button"
+                data-testid="profit-product-filter-open"
                 onClick={() => setPickerOpen((o) => !o)}
                 className={cn(
                     "flex items-center gap-1.5 h-8 px-3 text-xs font-medium border rounded-md hover:bg-muted",
@@ -246,6 +247,7 @@ export default function AdminProfitReport() {
                       <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                       <input
                           autoFocus
+                          data-testid="profit-product-filter-search"
                           value={pickerSearch}
                           onChange={(e) => setPickerSearch(e.target.value)}
                           placeholder="Tìm sản phẩm..."

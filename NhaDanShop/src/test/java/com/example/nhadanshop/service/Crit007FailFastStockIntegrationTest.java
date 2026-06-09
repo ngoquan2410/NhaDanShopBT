@@ -84,7 +84,7 @@ class Crit007FailFastStockIntegrationTest {
     }
 
     @Test
-    void valuation_quantity_and_value_use_same_batch_predicate() {
+    void valuation_quantity_and_value_use_same_physical_batch_predicate() {
         ProductVariant v = createSingleVariant("CRIT007-VALUATION-PRED");
         LocalDate today = LocalDate.now(businessClock);
         persistBatch(v, "VALUABLE-A", today.plusDays(30), 10, new BigDecimal("100"), ProductBatch.STATUS_ACTIVE);
@@ -104,9 +104,10 @@ class Crit007FailFastStockIntegrationTest {
                 .findFirst()
                 .orElseThrow();
 
-        assertEquals(12, row.openingStock());
-        assertEquals(12, row.closingStock());
-        assertEquals(0, row.closingStockValue().setScale(0, RoundingMode.HALF_UP).compareTo(new BigDecimal("1160")));
+        // Expired stock is not sellable, but it remains physical inventory until adjusted or voided.
+        assertEquals(17, row.openingStock());
+        assertEquals(17, row.closingStock());
+        assertEquals(0, row.closingStockValue().setScale(0, RoundingMode.HALF_UP).compareTo(new BigDecimal("1210")));
     }
 
     /**

@@ -254,13 +254,13 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
     List<Object[]> sumBatchValueByVariant();
 
     /**
-     * Giá vốn bình quân theo variant từ batch CÒN HÀNG VÀ CÒN HẠN:
+     * Giá vốn bình quân theo variant từ tồn vật lý còn dương:
      * [variantId, avgCostPrice = SUM(remainingQty*costPrice)/SUM(remainingQty)]
      * Dùng để tính closingValue = closingStock * avgCostPrice (phụ thuộc kỳ báo cáo).
-     * ⚠️ Chỉ tính batch còn bán được theo policy (expiryDate >= :asOf).
+     * Lô hết hạn vẫn là tồn vật lý và phải xuất hiện trong báo cáo tồn kho.
      */
     /**
-     * Đồng nhất với predicate tồn thực đang theo dõi cho cost: lô active/blocked, còn hạn, không voided/archived.
+     * Đồng nhất số lượng và giá vốn trên cùng predicate: lô active/blocked, không voided/archived.
      */
     @Query("""
             SELECT b.variant.id,
@@ -269,10 +269,9 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             WHERE b.variant IS NOT NULL
               AND b.remainingQty > 0
               AND b.status IN ('active', 'blocked')
-              AND b.expiryDate >= :asOf
             GROUP BY b.variant.id
             """)
-    List<Object[]> avgCostPriceByVariant(@Param("asOf") LocalDate asOf);
+    List<Object[]> avgCostPriceByVariant();
 
     /**
      * Valuation quantity grouped by variant using the same predicate as avgCostPriceByVariant.
@@ -284,10 +283,9 @@ public interface ProductBatchRepository extends JpaRepository<ProductBatch, Long
             WHERE b.variant IS NOT NULL
               AND b.remainingQty > 0
               AND b.status IN ('active', 'blocked')
-              AND b.expiryDate >= :asOf
             GROUP BY b.variant.id
             """)
-    List<Object[]> sumValuationRemainingQtyByVariant(@Param("asOf") LocalDate asOf);
+    List<Object[]> sumValuationRemainingQtyByVariant();
 
     // ══ Slice 2: explicit predicates for future use only — do not wire callers here ═════════════
 

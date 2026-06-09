@@ -70,18 +70,21 @@ export default {
     await supOpt.click();
 
     const manualInp = await driver.wait(
-      until.elementLocated(By.xpath(`//input[contains(@placeholder,'Thêm dòng tay')]`)),
+      until.elementLocated(By.css('[data-testid="goods-receipt-variant-search"]')),
       15000,
     );
     await manualInp.clear();
     await manualInp.sendKeys(prodCode);
     await driver.wait(
-      until.elementLocated(By.xpath(`//ul[@role='listbox']//button[@role='option']`)),
+      until.elementLocated(By.css('[data-testid="goods-receipt-variant-search-hits"] button')),
       12000,
     );
-    await driver.findElement(By.xpath(`//ul[@role='listbox']//button[@role='option'][1]`)).click();
+    await driver.findElement(By.css('[data-testid="goods-receipt-variant-search-hits"] button')).click();
 
-    const qtyCell = await driver.wait(until.elementLocated(By.xpath(`//table//tbody//tr[1]//td[5]//input`)), 12000);
+    const qtyCell = await driver.wait(
+      until.elementLocated(By.css('[data-testid^="goods-receipt-line-quantity-"]')),
+      12000,
+    );
     await driver.executeScript(
       `
       const el = arguments[0];
@@ -96,7 +99,11 @@ export default {
       await driver.findElement(By.xpath(`//button[contains(.,'Revalidate')]`)).click();
     });
 
-    await driver.findElement(By.css('[data-testid="goods-receipt-save-submit"]')).click();
+    const saveReceipt = await driver.findElement(By.css('[data-testid="goods-receipt-save-submit"]'));
+    await driver.executeScript(
+      "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();",
+      saveReceipt,
+    );
 
     await driver.wait(until.elementLocated(By.xpath(`//*[contains(.,'Đã lưu phiếu nhập')]`)), 45000);
     await driver.wait(until.elementLocated(By.xpath(`//button[contains(.,'In mã vạch')]`) ), 45000);
@@ -168,6 +175,16 @@ export default {
     if (delVoided.ok || delVoided.status < 400) {
       throw new Error("DELETE voided receipt must fail");
     }
+
+    const drawerBackdrop = await driver.wait(
+      until.elementLocated(By.css('.fixed.inset-0.bg-foreground\\/30')),
+      10000,
+    );
+    await driver.executeScript("arguments[0].click();", drawerBackdrop);
+    await driver.wait(
+      async () => (await driver.findElements(By.css('[data-testid="goods-receipt-detail-number"]'))).length === 0,
+      10000,
+    );
 
     const soldRc = await ctx.api.fetchJson(`/api/receipts/${rSold.id}`);
     const soldNo = String(soldRc.receiptNo ?? "");

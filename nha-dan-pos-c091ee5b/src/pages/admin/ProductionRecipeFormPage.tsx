@@ -342,6 +342,7 @@ export default function ProductionRecipeFormPage() {
                   {!isEditMode && (
                     <button
                       type="button"
+                      data-testid="production-recipe-create-output-product"
                       onClick={() => setQuickCreate({ mode: "finished", rowIdx: "output" })}
                       className="text-[11px] font-medium text-primary hover:underline"
                     >

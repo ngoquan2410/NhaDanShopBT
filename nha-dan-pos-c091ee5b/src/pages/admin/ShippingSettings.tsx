@@ -209,7 +209,12 @@ export default function AdminShippingSettings() {
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
               <div>
                 <label className="text-[11px] font-semibold text-muted-foreground">Mã rule / zoneCode</label>
-                <input className={inputCls} value={r.zoneCode} onChange={(e) => updateLocalRule(idx, { zoneCode: e.target.value })} />
+                <input
+                  data-testid={`shipping-local-rule-zone-code-${idx}`}
+                  className={inputCls}
+                  value={r.zoneCode}
+                  onChange={(e) => updateLocalRule(idx, { zoneCode: e.target.value })}
+                />
               </div>
               <div className="lg:col-span-3">
                 <label className="text-[11px] font-semibold text-muted-foreground">Tên hiển thị</label>

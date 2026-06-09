@@ -1,4 +1,4 @@
-import { By, Key, until } from "selenium-webdriver";
+import { By, until } from "selenium-webdriver";
 import { waitForH1Containing } from "../helpers/assertions.mjs";
 import * as fx from "../helpers/e2eFixtures.mjs";
 
@@ -43,14 +43,49 @@ export default {
     await driver.wait(until.elementLocated(By.css('[data-testid="stock-adj-search-suggestions"] li button')), 15000);
     await driver.findElement(By.css('[data-testid="stock-adj-search-suggestions"] li button')).click();
 
-    const actualInp = await driver.wait(until.elementLocated(By.css('[data-testid="stock-adj-line-actual-qty"]')), 10000);
-    // Controlled React input — native value setter skips React state; use keyboard input.
-    await actualInp.click();
-    await actualInp.sendKeys(Key.chord(Key.CONTROL, "a"));
-    await actualInp.sendKeys(Key.DELETE);
-    await actualInp.sendKeys(String(sysUi + 2));
+    await driver.wait(async () => {
+      const selects = await driver.findElements(By.css('[data-testid^="stock-adj-batch-select-"]'));
+      if (selects.length === 0) return false;
+      try {
+        return (await selects[0].findElements(By.css("option"))).length > 1;
+      } catch {
+        return false;
+      }
+    }, 10000);
+    const batchSelect = await driver.findElement(By.css('[data-testid^="stock-adj-batch-select-"]'));
+    await driver.executeScript(
+      `
+      const el = arguments[0];
+      el.value = el.options[1].value;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      `,
+      batchSelect,
+    );
 
-    await driver.findElement(By.css('[data-testid="stock-adj-confirm-open"]')).click();
+    const actualInp = await driver.wait(until.elementLocated(By.css('[data-testid="stock-adj-line-actual-qty"]')), 10000);
+    await driver.executeScript(
+      `
+      const el = arguments[0];
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(el, String(arguments[1]));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      `,
+      actualInp,
+      sysUi + 2,
+    );
+    await driver.wait(async () => {
+      const inputs = await driver.findElements(By.css('[data-testid="stock-adj-line-actual-qty"]'));
+      if (inputs.length === 0) return false;
+      return Number(await inputs[0].getAttribute("value")) === sysUi + 2;
+    }, 10000);
+
+    const confirmOpen = await driver.findElement(By.css('[data-testid="stock-adj-confirm-open"]'));
+    await driver.executeScript("arguments[0].scrollIntoView({block:'center'});", confirmOpen);
+    try {
+      await confirmOpen.click();
+    } catch {
+      await driver.executeScript("arguments[0].click();", confirmOpen);
+    }
     const cbtn = await driver.wait(
       until.elementLocated(By.xpath("//button[contains(normalize-space(.),'Xác nhận điều chỉnh')]")),
       10000,
@@ -218,10 +253,21 @@ export default {
     await filterInp.clear();
     await filterInp.sendKeys(adjNoLeg);
     await driver.wait(
-      until.elementLocated(By.xpath(`//button[contains(normalize-space(.), "${adjNoLeg}")]`)),
+      async () => {
+        const rows = await driver.findElements(By.xpath(`//button[contains(normalize-space(.), "${adjNoLeg}")]`));
+        if (rows.length === 0) return false;
+        try {
+          await driver.executeScript(
+            "arguments[0].scrollIntoView({block:'center'}); arguments[0].click();",
+            rows[0],
+          );
+          return true;
+        } catch {
+          return false;
+        }
+      },
       35000,
     );
-    await driver.findElement(By.xpath(`//button[contains(normalize-space(.), "${adjNoLeg}")]`)).click();
 
     await driver.wait(until.elementLocated(By.css('[data-testid="stock-adj-reverse-submit"]')), 15000);
     await driver.findElement(By.css('[data-testid="stock-adj-reverse-submit"]')).click();

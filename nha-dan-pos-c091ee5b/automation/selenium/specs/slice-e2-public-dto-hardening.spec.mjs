@@ -100,9 +100,34 @@ export default {
         initialVariants: [mkVariant(hiddenToken, "Hidden", true, false)],
       },
     });
+    const visibleVariantId = Number(visible.variants?.[0]?.id);
+    const stockReceipt = await ctx.api.fetchJson("/api/receipts", {
+      method: "POST",
+      json: {
+        supplierName: `${prefix}_NCC`,
+        note: "slice-e2 storefront stock",
+        shippingFee: 0,
+        vatPercent: 0,
+        comboItems: [],
+        items: [{
+          productId: Number(visible.id),
+          variantId: visibleVariantId,
+          quantity: 5,
+          unitCost: 100,
+          discountPercent: 0,
+          importUnit: "cai",
+          piecesOverride: 1,
+          expiryDateOverride: "2035-12-31",
+        }],
+      },
+    });
 
     ctx.seed.registerCleanup(async () => {
       ctx.api.setAccessToken(adminToken);
+      await ctx.api.fetch(`/api/receipts/${stockReceipt.id}/void`, {
+        method: "PATCH",
+        json: { reason: "slice-e2 cleanup" },
+      });
       for (const id of [hidden.id, visible.id].map(String)) {
         const res = await ctx.api.fetch(`/api/products/${id}`, { method: "DELETE" });
         if (!res.ok && res.status !== 404) console.warn(`slice-e2 cleanup product ${id} -> ${res.status}`);

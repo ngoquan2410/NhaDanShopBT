@@ -123,24 +123,6 @@ async function seedB23Fixtures(api, tok, ts) {
     },
   });
 
-  const pricing = {
-    subtotal: "10000",
-    manualDiscount: "0",
-    promotionDiscount: "0",
-    voucherDiscount: "0",
-    shippingFee: "0",
-    shippingDiscount: "0",
-    vatBase: "10000",
-    vatPercent: "0",
-    vatAmount: "0",
-    total: "10000",
-    itemNetRevenue: "10000",
-    shippingNetRevenue: "0",
-    commercialAllocationVersion: 1,
-    loyaltyDiscount: "0",
-    loyaltyRedeemedPoints: 0,
-  };
-
   await api.fetchJson("/api/invoices", {
     method: "POST",
     json: {
@@ -151,30 +133,48 @@ async function seedB23Fixtures(api, tok, ts) {
     },
   });
 
+  const shippingAddress = {
+    street: `Duong ${tok} so 1`,
+    receiverName: "B23 RC",
+    phone: "0908111222",
+    provinceCode: "79",
+    provinceName: "Ho Chi Minh",
+    districtCode: "1442",
+    districtName: "Quan 1",
+    wardCode: "21211",
+    wardName: "Ben Nghe",
+  };
+  const quote = await api.fetchJson("/api/sales/quote", {
+    method: "POST",
+    json: {
+      source: "storefront",
+      customerId,
+      promotionId: null,
+      voucherCode: null,
+      shippingQuoteSnapshot: null,
+      manualDiscount: null,
+      requestedRedeemPoints: null,
+      vatPercent: 0,
+      lines: [{
+        productId,
+        variantId,
+        quantity: 1,
+        discountPercent: 0,
+        batchId: null,
+        rewardLine: false,
+      }],
+      shippingAddress,
+    },
+  });
+
   await api.fetchJson("/api/pending-orders", {
     method: "POST",
     json: {
       customerName: `Người mua ${tok}`,
       customerPhone: "0908111222",
       paymentMethod: "bank_transfer",
-      shippingAddress: {
-        street: `Đường ${tok} số 1`,
-        receiverName: "B23 RC",
-        phone: "0908111222",
-      },
-      lines: [
-        {
-          id: `ln_${ts}`,
-          productId: String(productId),
-          variantId: String(variantId),
-          productName: main.name,
-          variantName: "B23 variant",
-          qty: 1,
-          unitPrice: "10000",
-          lineSubtotal: "10000",
-        },
-      ],
-      pricingBreakdownSnapshot: pricing,
+      shippingAddress,
+      quotePublicId: String(quote.quoteId ?? quote.quotePublicId),
     },
   });
 

@@ -50,8 +50,11 @@ export default {
     }
 
     return {
-      skipped: true,
-      reason: `SKIPPED_WITH_REASON: hotfix Selenium fixture is preflight-only in this local run; backend API regression tests covered side effects, but browser assertions require seeded non-destructive fixtures for ${skippedTests.join(", ")}`,
+      caseResults: skippedTests.map((caseId) => ({
+        caseId,
+        outcome: "preflight-only",
+        reason: "Covered by the seeded hotfix-storefront-payment full-stack spec",
+      })),
     };
   },
 };

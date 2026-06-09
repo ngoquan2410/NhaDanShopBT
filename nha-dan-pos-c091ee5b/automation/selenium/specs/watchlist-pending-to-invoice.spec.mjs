@@ -28,7 +28,7 @@ export default {
     const suffix = `${Date.now()}`;
     let seeded;
     try {
-      seeded = await createGuestPendingViaQuote(ctx.api, pick, suffix);
+      seeded = await createGuestPendingViaQuote(ctx.api, pick, suffix, { paymentMethod: "cod" });
     } catch (e) {
       ctx.api.setAccessToken(null);
       return { skipped: true, reason: `Quote→pending seed failed: ${e instanceof Error ? e.message : String(e)}` };

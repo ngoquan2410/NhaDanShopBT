@@ -116,7 +116,7 @@ export default {
       supplierName: `E2E-NCC-${suf}`,
     });
 
-    // Quote may succeed without stock hard-stop; invoice materialization rejects oversell (see CriticalWatchlistGateMvcIntegrationTest).
+    // Quote is the first stock boundary: an impossible quantity must be rejected before materialization.
     const oosQuote = await ctx.api.fetch("/api/sales/quote", {
       method: "POST",
       json: {
@@ -132,23 +132,9 @@ export default {
         requestedRedeemPoints: null,
       },
     });
-    if (!oosQuote.ok) throw new Error(`OOS scenario: unexpected quote HTTP ${oosQuote.status}`);
-    const oosQuoted = await oosQuote.json();
-    const oosQid = oosQuoted.quoteId != null ? String(oosQuoted.quoteId) : "";
-    if (!oosQid) throw new Error("OOS scenario: quote missing quoteId");
-    const oosInv = await ctx.api.fetch("/api/invoices", {
-      method: "POST",
-      json: {
-        customerName: "Khách lẻ",
-        customerId: null,
-        note: "e2e oos guard",
-        promotionId: null,
-        items: [],
-        quotePublicId: oosQid,
-        paymentMethod: "cash",
-      },
-    });
-    if (oosInv.ok) throw new Error("OOS qty invoice must fail (stock guard on materialize)");
+    if (oosQuote.ok || ![400, 409].includes(oosQuote.status)) {
+      throw new Error(`OOS scenario: expected quote HTTP 400/409, got ${oosQuote.status}`);
+    }
 
     /** FEFO: earliest-expiry receipt batch consumes first when batchId null */
     const { productId: pf, variantId: vf } = await fx.ensureProduct(ctx.api, catId, `E2E-FEFO-${suf}`, `E2E-FVF-${suf}`);

@@ -86,7 +86,7 @@ export default {
         const dv = defaultVariant(heroProducts[i]);
         if (!dv) continue;
         const want = expectedAvailabilityText(dv);
-        const got = (await heroEls[i].getText()).trim();
+        const got = String(await heroEls[i].getAttribute("textContent")).trim();
         if (got !== want) {
           throw new Error(`Hero slide ${i}: want "${want}" got "${got}" (API vs UI)`);
         }

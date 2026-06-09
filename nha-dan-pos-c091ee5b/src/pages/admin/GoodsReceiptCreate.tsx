@@ -123,6 +123,9 @@ function convertImportedRow(row: ReceiptImportRow, _receiptDate: string, index: 
 }
 
 function inferOutcome(line: ReceiptLineDraft): { outcome: ReceiptImportOutcome; message?: string } {
+  if (Number.isFinite(Number(line.productId)) && Number.isFinite(Number(line.variantId))) {
+    return { outcome: "update-pricing", message: "Dùng sản phẩm/variant đã chọn từ backend." };
+  }
   const product = validationCatalog.find((p) => p.code.toUpperCase() === line.productCode.trim().toUpperCase());
   if (!product) return { outcome: "create-product-and-variant", message: `Tạo SP mới ${line.productCode || "(?)"}.` };
   if (!line.variantCode.trim()) {
@@ -216,10 +219,12 @@ function validateImportedLine(line: ReceiptLineDraft): LineIssue {
   if (line.expiryMode === "days" && line.expiryDays <= 0) errors.push("Số ngày HSD phải > 0.");
 
   const product = validationCatalog.find((p) => p.code.toUpperCase() === line.productCode.trim().toUpperCase());
-  if (!product) {
+  const hasBackendIdentity =
+      Number.isFinite(Number(line.productId)) && Number.isFinite(Number(line.variantId));
+  if (!product && !hasBackendIdentity) {
     if (!line.category.trim()) errors.push("SP mới phải có danh mục.");
     if (!line.productName.trim()) errors.push("SP mới phải có tên.");
-  } else if (line.variantCode.trim()) {
+  } else if (product && line.variantCode.trim()) {
     const v = product.variants.find((x) => x.code.toUpperCase() === line.variantCode.trim().toUpperCase());
     if (v && v.importUnit && v.importUnit.trim().toUpperCase() !== line.importUnit.trim().toUpperCase()) {
       errors.push(`Variant đang dùng ${v.importUnit}/${v.piecesPerImportUnit}, Excel: ${line.importUnit}/${line.piecesPerUnit}.`);
@@ -542,6 +547,7 @@ function LineEditor({
             <label className="text-[10px] font-medium uppercase text-muted-foreground">Số lượng *</label>
             <input
                 type="number" min={0} step="any"
+                data-testid={`goods-receipt-line-quantity-${line.id}`}
                 value={line.quantity}
                 onChange={(e) => onPatch(line.id, { quantity: Math.max(0, Number(e.target.value)) })}
                 className={cn("mt-0.5 h-8 w-full rounded-md border bg-background px-2 text-right text-xs font-mono tabular-nums", line.quantity <= 0 && "border-danger")}
@@ -1149,6 +1155,11 @@ export default function AdminGoodsReceiptCreate() {
   };
 
   useEffect(() => {
+    if (!isImportMode && !draftId) {
+      validationCatalog = [];
+      setBackendCatalog([]);
+      return;
+    }
     let cancel = false;
     void (async () => {
       if (!getAdminSession()?.accessToken) return;
@@ -1165,7 +1176,7 @@ export default function AdminGoodsReceiptCreate() {
     return () => {
       cancel = true;
     };
-  }, []);
+  }, [draftId, isImportMode]);
 
   // Re-hydrate lines whenever backend catalog or DB categories change.
   useEffect(() => {

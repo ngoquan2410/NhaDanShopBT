@@ -107,7 +107,14 @@ export default {
     await driver.get(`${origin}/admin/shipping-settings`);
     await waitForH1Containing(driver, "Cài đặt giao hàng", 25000);
     await driver.wait(until.elementLocated(By.xpath("//*[contains(., 'Local shipping rules')]")), 12000);
-    await driver.wait(until.elementLocated(By.xpath("//*[contains(., 'LOCAL_MO_CAY')]")), 12000);
+    const localZoneCode = await driver.wait(
+      until.elementLocated(By.css('[data-testid="shipping-local-rule-zone-code-0"]')),
+      12000,
+    );
+    await driver.wait(
+      async () => (await localZoneCode.getAttribute("value")) === "LOCAL_MO_CAY",
+      12000,
+    );
 
     await driver.get(`${origin}/admin/ghn-quote-logs`);
     await waitForH1Containing(driver, "Nhật ký báo giá GHN", 25000);

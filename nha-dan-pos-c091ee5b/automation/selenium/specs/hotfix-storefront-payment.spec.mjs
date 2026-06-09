@@ -132,9 +132,9 @@ export default {
       );
       await driver.wait(until.elementIsVisible(dropdown), 5000);
       const log = await getFetchLog(driver);
-      const hit = log.some((u) => String(u).includes("/api/products") && String(u).includes("search=") && String(u).includes("size=8"));
+      const hit = log.some((u) => String(u).includes("/api/products") && String(u).includes("search=") && String(u).includes("size=20"));
       if (!hit) {
-        throw new Error(`Expected typeahead /api/products?search=&size=8, got: ${JSON.stringify(log.slice(-15))}`);
+        throw new Error(`Expected typeahead /api/products?search=&size=20, got: ${JSON.stringify(log.slice(-15))}`);
       }
       const leak = log.find((u) => /costPrice|stockQty|minStockQty|batchId/i.test(String(u)));
       if (leak) {
@@ -182,6 +182,29 @@ export default {
       rewardLine: false,
     });
 
+    let freeShippingVoucherCode = process.env.HOTFIX_VOUCHER_CODE?.trim();
+    if (!freeShippingVoucherCode) {
+      const now = new Date();
+      const startAt = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 19);
+      const endAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19);
+      freeShippingVoucherCode = `FREESHIP${Date.now().toString(36).toUpperCase()}`;
+      await ctx.api.fetchJson("/api/vouchers", {
+        method: "POST",
+        json: {
+          code: freeShippingVoucherCode,
+          ruleSummary: "Selenium hotfix free-shipping fixture",
+          active: true,
+          minSubtotal: 0,
+          percent: 0,
+          cap: 20000,
+          fixedAmount: 0,
+          freeShipping: true,
+          startAt,
+          endAt,
+        },
+      });
+    }
+
     const quote = await ctx.api.fetchJson("/api/sales/quote", {
       method: "POST",
       json: {
@@ -189,7 +212,7 @@ export default {
         customerId: null,
         lines: [baseLine(1)],
         promotionId: null,
-        voucherCode: process.env.HOTFIX_VOUCHER_CODE?.trim() || "FREESHIP100",
+        voucherCode: freeShippingVoucherCode,
         shippingAddress: SHIPPING_ADDR,
         manualDiscount: 0,
         vatPercent: 0,
@@ -200,10 +223,10 @@ export default {
     if (quoteTotal < 0) throw new Error("Quote missing pricingBreakdownSnapshot.total");
     const pb = quote.pricingBreakdownSnapshot;
     if (Number(pb.voucherDiscount ?? 0) !== 0) {
-      throw new Error(`FREESHIP voucher must not reduce merchandise voucherDiscount, got ${pb.voucherDiscount}`);
+      throw new Error(`Free-shipping voucher must not reduce merchandise voucherDiscount, got ${pb.voucherDiscount}`);
     }
     if (Number(pb.shippingDiscount ?? 0) <= 0 || Number(pb.shippingDiscount ?? 0) > Number(pb.shippingFee ?? 0)) {
-      throw new Error(`FREESHIP shipping discount must be >0 and capped by shipping fee, got ${pb.shippingDiscount}/${pb.shippingFee}`);
+      throw new Error(`Free-shipping discount must be >0 and capped by shipping fee, got ${pb.shippingDiscount}/${pb.shippingFee}`);
     }
     results.push(cr("checkout_freeship_voucher_bucket_and_total", "pass"));
 
@@ -244,7 +267,14 @@ export default {
     }
     results.push(cr("goods_receipts_page_renders_all_content_rows", "pass"));
 
-    const comboPage = await ctx.api.fetchJson("/api/products?productType=COMBO&page=0&size=8&sort=name,asc");
+    const adminToken = ctx.api.getAccessToken();
+    ctx.api.setAccessToken(null);
+    let comboPage;
+    try {
+      comboPage = await ctx.api.fetchJson("/api/products?productType=COMBO&page=0&size=8&sort=name,asc");
+    } finally {
+      ctx.api.setAccessToken(adminToken);
+    }
     await driver.navigate().to(`${base}/`);
     await driver.sleep(1200);
     const comboSections = await driver.findElements(By.css('[data-testid="storefront-home-combo-section"]'));

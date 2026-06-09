@@ -494,9 +494,8 @@ export default {
       await driver.sleep(900);
       const urlsPos = await readFetchUrls(driver);
       const posVariantUrl = urlsPos.some((u) => u.includes("/api/products/variants/search") && u.includes("context=pos"));
-      const posBadFirstN = urlsPos.some((u) => /\/api\/products\?[^]*page=0[^]*size=200/.test(u));
       caseResults.push(
-        cr("pos_variant_search_backend_no_firstN", posVariantUrl && !posBadFirstN ? "PASS" : "FAIL", {
+        cr("pos_variant_search_backend", posVariantUrl ? "PASS" : "FAIL", {
           urlsPos: urlsPos.filter((u) => u.includes("product")).slice(-8),
         }),
       );

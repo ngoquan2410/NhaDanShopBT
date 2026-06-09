@@ -164,7 +164,12 @@ export async function posScanInManualMode(driver, variantCode) {
 }
 
 /** Guest storefront quote + COD/bank-transfer pending row (anonymous HTTP). */
-export async function createGuestPendingViaQuote(api, projectionPick, suffix) {
+export async function createGuestPendingViaQuote(
+  api,
+  projectionPick,
+  suffix,
+  { paymentMethod = "bank_transfer" } = {},
+) {
   const prevTok = api.getAccessToken();
   api.setAccessToken(null);
 
@@ -203,7 +208,7 @@ export async function createGuestPendingViaQuote(api, projectionPick, suffix) {
       customerPhone: "0977000999",
       shippingAddress: STD_ADDR,
       note: "admin-sales-suite automation",
-      paymentMethod: "bank_transfer",
+      paymentMethod,
       lines: null,
       promotionSnapshot: null,
       voucherSnapshot: null,
