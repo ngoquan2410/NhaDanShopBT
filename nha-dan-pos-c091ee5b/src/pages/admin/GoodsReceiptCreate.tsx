@@ -83,6 +83,52 @@ export function resolveReceiptLineIdentity(
   return fallback();
 }
 
+/** Compose a human-readable label for a receipt line (used in toasts/logs). */
+export function buildReceiptLineLabel(
+    line: Partial<Pick<ReceiptLineDraft, "productCode" | "variantCode" | "productName">>,
+    index: number,
+): string {
+  const parts = [line.productCode, line.variantCode]
+      .map((s) => (s ?? "").trim())
+      .filter((s) => s.length > 0);
+  const base = parts.length ? parts.join(" / ") : (line.productName?.trim() || `#${index + 1}`);
+  return `${base} (#${index + 1})`;
+}
+
+/** Build the toast message for "cannot resolve identity" — productId/variantId luôn nằm trong message chính. */
+export function buildReceiptIdentityMissingToast(
+    line: Partial<Pick<ReceiptLineDraft, "productCode" | "variantCode" | "productName" | "outcome">>,
+    index: number,
+    fallbackIdentity?: { productId: number; variantId: number } | null,
+): string {
+  const pid = fallbackIdentity && Number.isFinite(fallbackIdentity.productId)
+      ? String(fallbackIdentity.productId)
+      : "?";
+  const vid = fallbackIdentity && Number.isFinite(fallbackIdentity.variantId)
+      ? String(fallbackIdentity.variantId)
+      : "?";
+  const label = buildReceiptLineLabel(line, index);
+  const outcome = line.outcome;
+  let hint: string;
+  if (outcome === "create-product-and-variant") {
+    hint = "Đây là SP MỚI chưa có trong catalog backend. Hãy tạo sản phẩm trước (Quản trị → Sản phẩm) rồi import lại, hoặc xoá dòng.";
+  } else if (outcome === "create-variant") {
+    hint = "Đây là VARIANT MỚI cho SP đã có. Hãy tạo variant trong trang Sản phẩm rồi import lại, hoặc xoá dòng.";
+  } else {
+    hint = "Vui lòng chọn lại biến thể từ ô \"Thêm dòng từ kho\" để gán productId/variantId backend.";
+  }
+  return `Không xác định được sản phẩm/biến thể cho dòng ${label} — productId=${pid}, variantId=${vid}. ${hint}`;
+}
+
+/** Build the toast message for "identity is not a finite number". */
+export function buildReceiptIdentityInvalidToast(
+    line: Partial<Pick<ReceiptLineDraft, "productCode" | "variantCode" | "productName">>,
+    index: number,
+    identity: { productId: unknown; variantId: unknown },
+): string {
+  return `ID sản phẩm/variant không hợp lệ cho dòng ${buildReceiptLineLabel(line, index)} — productId=${String(identity.productId)}, variantId=${String(identity.variantId)}. Cần catalog backend (id số).`;
+}
+
 function createLineId(prefix = "line") {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
@@ -1248,19 +1294,28 @@ export default function AdminGoodsReceiptCreate() {
 
   function buildReceiptItems(): InventoryReceiptCreateItem[] | null {
     const out: InventoryReceiptCreateItem[] = [];
-    for (const line of lines) {
+    for (let idx = 0; idx < lines.length; idx++) {
+      const line = lines[idx];
       const identity = resolveReceiptLineIdentity(line, () => {
         const hit = findCatalogVariant(line);
         return hit ? { productId: Number(hit.product.id), variantId: Number(hit.variant.id) } : null;
       });
       if (!identity) {
-        toast.error("Không xác định được sản phẩm/biến thể cho dòng nhập kho. Vui lòng chọn lại biến thể từ danh sách.");
+        const hit = findCatalogVariant(line);
+        const fallback = hit
+            ? { productId: Number(hit.product.id), variantId: Number(hit.variant.id) }
+            : null;
+        const msg = buildReceiptIdentityMissingToast(line, idx, fallback);
+        console.error("[GoodsReceiptCreate] Không resolve được identity", { line, hit });
+        toast.error(msg);
         return null;
       }
       const pid = identity.productId;
       const oid = identity.variantId;
       if (!Number.isFinite(oid) || !Number.isFinite(pid)) {
-        toast.error("ID sản phẩm/variant không hợp lệ — cần catalog backend (id số).");
+        const msg = buildReceiptIdentityInvalidToast(line, idx, { productId: pid, variantId: oid });
+        console.error("[GoodsReceiptCreate] productId/variantId không hợp lệ", { line, identity });
+        toast.error(msg);
         return null;
       }
       out.push({
@@ -1314,7 +1369,6 @@ export default function AdminGoodsReceiptCreate() {
     void (async () => {
       const toastId = "goods-receipt-save";
       setIsSaving(true);
-      toast.loading("Đang lưu phiếu nhập...", { id: toastId });
       if (!getAdminSession()?.accessToken) {
         toast.error(
             "Không có phiên admin hợp lệ — không thể lưu phiếu nhập lên máy chủ (JWT hết hạn hoặc chưa đăng nhập).",
@@ -1329,12 +1383,18 @@ export default function AdminGoodsReceiptCreate() {
         setBarcodeItems([]);
 
         const items = buildReceiptItems();
-        if (!items) return;
+        if (!items) {
+          // buildReceiptItems đã toast.error chi tiết (productId/variantId) — đảm bảo không có spinner treo.
+          toast.dismiss(toastId);
+          return;
+        }
         const supplierIdNum = supplier ? Number(supplier) : NaN;
         if (!Number.isFinite(supplierIdNum)) {
           toast.error("supplierId không hợp lệ — cần NCC có id số từ backend.", { id: toastId });
           return;
         }
+        // Chỉ bật spinner sau khi đã qua tất cả validation đồng bộ — tránh treo loading nếu fail sớm.
+        toast.loading("Đang lưu phiếu nhập...", { id: toastId });
         const now = new Date();
         const t = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
         const receiptDateTime = `${receiptDate}T${t}`;
