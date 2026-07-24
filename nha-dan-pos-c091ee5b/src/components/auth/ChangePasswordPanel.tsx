@@ -13,6 +13,8 @@ type Props = {
 
 export function ChangePasswordPanel({ layout = "comfortable" }: Props) {
   const auth = useAuth();
+  
+  
   const navigate = useNavigate();
   const username = auth.session?.username ?? "";
 
