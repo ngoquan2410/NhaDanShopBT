@@ -153,7 +153,10 @@ echo "[7/8] Creating systemd service..."
 cat > /etc/systemd/system/nhadanshop.service << SERVICE
 [Unit]
 Description=NhaDanShop Spring Boot Application
-After=network.target postgresql.service
+Wants=network-online.target
+After=network-online.target postgresql.service
+StartLimitIntervalSec=300
+StartLimitBurst=10
 
 [Service]
 Type=simple
@@ -170,13 +173,16 @@ Environment="SERVER_PORT=8080"
 Environment="TZ=Asia/Ho_Chi_Minh"
 
 # JVM — tối ưu t3.micro 1GB RAM
+ExecStartPre=/bin/bash -c "until /usr/bin/pg_isready -h 127.0.0.1 -p 5432 -d ${DB_NAME} -U ${DB_USER}; do sleep 2; done"
 ExecStart=/usr/bin/java \\
   -Xmx512m -Xms256m \\
   -Duser.timezone=Asia/Ho_Chi_Minh \\
   -jar /app/nhadanshop/nhadanshop.jar
 
-Restart=on-failure
+Restart=always
 RestartSec=10
+TimeoutStartSec=180
+TimeoutStopSec=30
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=nhadanshop

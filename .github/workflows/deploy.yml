@@ -205,7 +205,10 @@ jobs:
           printf '%s\n' \
             '[Unit]' \
             'Description=NhaDanShop Spring Boot Application' \
-            'After=network.target postgresql.service' \
+            'Wants=network-online.target' \
+            'After=network-online.target postgresql.service' \
+            'StartLimitIntervalSec=300' \
+            'StartLimitBurst=10' \
             '' \
             '[Service]' \
             'Type=simple' \
@@ -217,6 +220,7 @@ jobs:
             'Environment="SPRING_JPA_HIBERNATE_DDL_AUTO=validate"' \
             'Environment="SPRING_FLYWAY_ENABLED=true"' \
             'Environment="TZ=Asia/Ho_Chi_Minh"' \
+            'ExecStartPre=/bin/bash -c "until /usr/bin/pg_isready -h 127.0.0.1 -p 5432 -d nhadanshop -U nhadanshop_user; do sleep 2; done"' \
             "Environment=\"R2_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }}\"" \
             "Environment=\"R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}\"" \
             "Environment=\"R2_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}\"" \
@@ -239,8 +243,10 @@ jobs:
             "Environment=\"GOONG_REST_API_KEY=${{ secrets.GOONG_REST_API_KEY }}\"" \
             "Environment=\"VIETQR_IMAGE_BASE_URL=${{ secrets.VIETQR_IMAGE_BASE_URL || 'https://img.vietqr.io/image' }}\"" \
             'ExecStart=/usr/bin/java -Xmx512m -Xms256m -Duser.timezone=Asia/Ho_Chi_Minh -jar /app/nhadanshop/nhadanshop.jar' \
-            'Restart=on-failure' \
+            'Restart=always' \
             'RestartSec=10' \
+            'TimeoutStartSec=180' \
+            'TimeoutStopSec=30' \
             'StandardOutput=journal' \
             'StandardError=journal' \
             'SyslogIdentifier=nhadanshop' \
